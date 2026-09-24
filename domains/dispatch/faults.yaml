@@ -25,7 +25,7 @@ P2:
     share_in_branch: 0.9
   expected: C지점 승주 작업이 자격자 부족으로 미할당
   answer:
-    dims: {branch: C}
+    dims: {branch: C, difficulty: pole}
     reason_codes: [NO_CERT]
 
 P3:
@@ -47,5 +47,6 @@ P4:
     share_of_orders: 0.15
   expected: 지역 범위 +1km 완화 시 할당성공률이 크게 오름
   answer:
+    dims: {area_zone: boundary}
     reason_codes: [OUT_OF_AREA]
     param_hint: matching.area_extension_km

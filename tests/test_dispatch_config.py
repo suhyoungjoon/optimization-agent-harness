@@ -26,3 +26,9 @@ def test_faults_p1_to_p4():
 def test_approval_stage_within_matching_stages():
     params = load("params.yaml")
     assert 1 <= params["approval_required"]["matching_stage_gte"] <= len(params["matching"]["time_window_min"])
+
+
+def test_difficulty_dimension_matches_weights():
+    dim_values = load("dimensions.yaml")["dimensions"]["difficulty"]["values"]
+    weight_keys = load("params.yaml")["weights"]["difficulty"]
+    assert set(dim_values) == set(weight_keys)

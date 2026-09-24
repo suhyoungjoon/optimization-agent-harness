@@ -109,8 +109,12 @@ def test_faults_reference_declared_codes(domain):
         answer = fault["answer"]
         for code in answer.get("reason_codes", []):
             assert code in dims["reason_codes"], f"{fid}: 선언되지 않은 사유 코드 {code}"
-        for dim in answer.get("dims", {}):
+        for dim, value in answer.get("dims", {}).items():
             assert dim in dims["dimensions"], f"{fid}: 선언되지 않은 차원 {dim}"
+            allowed = dims["dimensions"][dim].get("values")
+            if allowed is not None:
+                values = value if isinstance(value, list) else [value]
+                assert set(values) <= set(allowed), f"{fid}: {dim}에 선언되지 않은 값 {values}"
 
 
 # --- 동작 계약 (pack.py 구현 후 활성화) ------------------------------------

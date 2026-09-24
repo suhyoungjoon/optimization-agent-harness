@@ -8,6 +8,8 @@ dimensions:
   work_type:     {label: 작업유형, values: [install, repair]}          # 개통, 장애
   media:         {label: 매체,     values: [HFC, FTTx, CATV]}
   building_type: {label: 건물유형, values: [house, apartment]}         # 주택, 아파트
+  difficulty:    {label: 난이도,   values: [none, pole, outdoor, high_risk]}  # 일반, 승주, 옥외, 고위험
+  area_zone:     {label: 관할 경계 여부, values: [core, boundary], description: 고객 좌표가 관할 경계 근처(boundary)인지}
 
 reason_codes:                   # DecisionRecord.reason_code (status가 success가 아닐 때)
   NO_SKILL: 해당 매체 기술을 보유한 후보 없음
