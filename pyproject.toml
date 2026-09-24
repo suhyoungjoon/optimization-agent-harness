@@ -24,3 +24,4 @@ include = ["core*", "domains*", "api*", "scripts*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
