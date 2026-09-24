@@ -1,0 +1,17 @@
+# 하네스 레벨 정의. 러너는 이 플래그만 보고 동작한다 (코드 분기 금지).
+# 새 조합(예: 도구 없이 검증만)은 레벨을 추가해 실험한다.
+#
+# spec          : domain-spec.md를 시스템 프롬프트에 주입 (false면 한 줄 지시만)
+# tools         : tools()의 도구만 제공, 데이터는 도구로 조회 (false면 인스턴스 통째로 프롬프트)
+# validate_loop : validate() 위반 시 사유를 돌려주고 재시도 (최대 max_retries)
+# guardrail     : 위반 차단, 승인 조건은 pending_approval
+# trace         : minimal = 최종 결과만, full = 모든 LLM·도구·검증 단계
+#
+# L0~L4에서도 최종 결정에 대한 validate()는 사후 채점용으로 항상 실행하되 결과에 반영하지 않는다.
+
+L0: {spec: false, tools: false, validate_loop: false, guardrail: false, trace: minimal}
+L1: {spec: true,  tools: false, validate_loop: false, guardrail: false, trace: minimal}
+L2: {spec: true,  tools: true,  validate_loop: false, guardrail: false, trace: minimal}
+L3: {spec: true,  tools: true,  validate_loop: true,  guardrail: false, trace: minimal, max_retries: 2}
+L4: {spec: true,  tools: true,  validate_loop: true,  guardrail: true,  trace: minimal, max_retries: 2}
+L5: {spec: true,  tools: true,  validate_loop: true,  guardrail: true,  trace: full,    max_retries: 2}
