@@ -22,6 +22,7 @@ from core.evaluation.compare import compare
 from core.evaluation.runner import create_ai_run, run_ai_agent, run_rule_agent
 from core.harness.levels import load_levels
 from core.harness.runner import CORE_REASON_CODES
+from core.improvement.changes import spec_sections
 from core.llm.client import AnthropicClient, LLMClient, load_config
 from core.registry import list_domains, list_faults, load_pack, load_params
 from core.storage.store import Store, to_jsonable
@@ -111,6 +112,13 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
             raise HTTPException(404, f"unknown dataset: {dataset_id}")
         instance, _truth = pack.generate(dataset["seed"], dataset["faults"])  # 정답표는 노출하지 않는다
         return {**dataset, "instance": to_jsonable(instance), "item_ids": pack.items(instance)}
+
+    @app.get("/domains/{domain}/params")
+    def get_params(domain: str):
+        """현재 규칙 파라미터와 도메인 명세 섹션 (개선안 diff 표시용)."""
+        pack = pack_or_404(domain)
+        spec = Path(pack.spec_path()).read_text(encoding="utf-8")
+        return {"params": load_params(pack), "spec_sections": spec_sections(spec)}
 
     @app.post("/runs")
     def create_run(req: RunRequest):
