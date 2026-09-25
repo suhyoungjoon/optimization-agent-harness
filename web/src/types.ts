@@ -83,6 +83,7 @@ export interface Run {
   scope?: string[] | null;
   meta?: { items?: number; seconds?: number; usage?: Usage; error?: string; effort?: string } | null;
   progress?: RunProgress | null;
+  replayed?: boolean;   // 저장된 실행을 재생 중 (시연 모드)
 }
 
 export interface HarnessLevel {
@@ -98,6 +99,22 @@ export interface HarnessLevel {
 export interface HarnessInfo {
   levels: Record<string, HarnessLevel>;
   llm: { model: string; effort: string; cache: boolean; concurrency: number };
+  demo?: DemoManifest | null;   // 시연 모드일 때 번들 정보
+}
+
+export interface DemoManifest {
+  created_at: string;
+  git_ref: string | null;
+  git_commit: string | null;
+  note: string;
+  counts: Record<string, number>;
+}
+
+export interface DemoCatalogEntry {
+  dataset_id: string;
+  level: string;
+  items: number;
+  runs: number;
 }
 
 export interface CompareSummary {
@@ -184,6 +201,7 @@ export interface ProposalBody {
 
 export interface Simulation {
   kind?: "params" | "spec";
+  replayed?: boolean;
   before?: Record<string, number>;
   after?: Record<string, number>;
   violations_after?: number;
@@ -223,6 +241,7 @@ export interface SpecEstimate {
   estimate_usd: number | null;
   per_item_usd?: number;
   note?: string;
+  replayed?: boolean;
 }
 
 export interface HistoryRow {

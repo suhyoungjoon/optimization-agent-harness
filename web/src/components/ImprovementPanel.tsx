@@ -308,11 +308,12 @@ function ProposalCard({
         </ul>
       )}
 
-      {sim && !sim.error && sim.before && sim.after && (
+      {sim && !sim.error && sim.before && sim.after && p.status !== "proposed" && (
         <div className="sim">
           <div className="tile-label">
             시뮬레이션 결과 ({sim.kind === "spec" ? "AI agent 개선 전·후 명세로 실행" : "규칙 엔진 재실행"} · {fmtSeconds(sim.seconds)}
-            {sim.cost_usd != null && ` · ${fmtUsd(sim.cost_usd)}`})
+            {sim.cost_usd != null && ` · ${fmtUsd(sim.cost_usd)}`}
+            {sim.replayed && " · 저장된 결과 재생"})
           </div>
           <table className="sim-table">
             <thead><tr><th>지표</th><th className="num">전</th><th className="num">후</th><th className="num">변화</th></tr></thead>
@@ -350,7 +351,9 @@ function ProposalCard({
         <div className="confirm">
           <p>
             명세 개선안은 AI agent를 {estimate.level} 레벨로 개선 전·후 {estimate.runs}번 실행합니다 ({estimate.items}건씩).{" "}
-            {estimate.estimate_usd != null ? <>예상 비용 <strong>{fmtUsd(estimate.estimate_usd)}</strong> (이전 실행 기준).</> : estimate.note}
+            {estimate.replayed ? (
+              <>시연 모드: 저장된 결과를 재생하므로 비용이 들지 않습니다{estimate.estimate_usd != null && <> (원래 실행 비용 {fmtUsd(estimate.estimate_usd)})</>}.</>
+            ) : estimate.estimate_usd != null ? <>예상 비용 <strong>{fmtUsd(estimate.estimate_usd)}</strong> (이전 실행 기준).</> : estimate.note}
           </p>
           <button className="primary" onClick={confirmSpec} disabled={busy}>확인하고 실행</button>{" "}
           <button onClick={() => setEstimate(null)}>취소</button>

@@ -174,7 +174,8 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
             stored = store.done_runs(dataset["id"], "ai", req.level, req.scope)
             if not stored:
                 raise HTTPException(404, f"저장된 AI 실행이 없음: {dataset['id']} · {req.level} · "
-                                         f"{'전체' if req.scope is None else f'{len(req.scope)}건'} 범위")
+                                         f"{'전체' if req.scope is None else f'{len(req.scope)}건'} 범위"
+                                         + (" (시연 모드: 번들에 저장된 조건으로만 실행할 수 있음)" if demo else ""))
             runs = stored[:req.repeats]
             for run in runs:
                 replay.start(run["run_id"], (run.get("meta") or {}).get("items") or len(req.scope or []))
