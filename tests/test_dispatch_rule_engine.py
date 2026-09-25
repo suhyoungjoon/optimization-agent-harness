@@ -1,0 +1,118 @@
+"""dispatch 규칙 엔진: 손으로 만든 소규모 케이스와 전체 데이터 위반 0건."""
+
+from pathlib import Path
+
+import pytest
+import yaml
+
+from core.interfaces import DecisionRecord
+from domains.dispatch import rule_engine
+from domains.dispatch.generator import generate
+from domains.dispatch.models import Instance, Order, Worker, hhmm_to_min
+
+PARAMS = yaml.safe_load(
+    (Path(__file__).resolve().parent.parent / "domains" / "dispatch" / "params.yaml").read_text(encoding="utf-8"))
+DAY = (hhmm_to_min("09:00"), hhmm_to_min("18:00"))
+
+
+def order(oid, desired, x, y, media="FTTx", difficulty="none", work_type="install", building="house"):
+    return Order(id=oid, day=1, branch="A", work_type=work_type, media=media, difficulty=difficulty,
+                 building_type=building, desired=hhmm_to_min(desired), x=x, y=y)
+
+
+@pytest.fixture
+def small():
+    workers = [
+        Worker("W1", "A", ["FTTx"], [], 90, 2, 2, DAY),              # 명장
+        Worker("W2", "A", ["FTTx", "HFC"], ["pole"], 60, 8, 8, DAY),
+    ]
+    orders = [
+        order("O1", "09:00", 2, 3),                                  # W1, 1단계
+        order("O2", "09:00", 5, 5, media="HFC", work_type="repair"),  # HFC는 W2뿐
+        order("O3", "09:00", 3, 3, difficulty="pole"),               # 승주는 W2뿐, O2 뒤로 밀림
+        order("O4", "09:00", 4, 4, media="CATV"),                    # 기술 보유자 없음
+        order("O5", "09:00", 4, 4, difficulty="high_risk"),          # 자격 보유자 없음
+        order("O6", "09:00", 14, 4),                                 # 관할 밖 4km
+        order("O7", "07:00", 4, 4),                                  # 가능시간 전
+        order("O8", "09:00", 6, 6, media="HFC", work_type="repair"),  # W2 일정이 참
+        order("O9", "15:00", 8, 8),                                  # W2가 가깝지만 명장 W1 우선
+    ]
+    return Instance(branches={"A": (0, 10), "B": (10, 20)}, boundary_zone_km=1,
+                    workers=workers, orders=orders, days=1)
+
+
+def by_id(records):
+    return {r.item_id: r for r in records}
+
+
+def test_solve_small_case(small):
+    got = by_id(rule_engine.solve(small, PARAMS))
+    assert got["O1"].decision == {"worker_id": "W1", "start_time": "09:00", "matching_stage": 1}
+    assert got["O2"].decision == {"worker_id": "W2", "start_time": "09:00", "matching_stage": 1}
+    # O2(09:00~09:45) 종료 후 4km 이동 8분 → 09:53, ±60분 3단계에서만 가능
+    assert got["O3"].decision == {"worker_id": "W2", "start_time": "09:53", "matching_stage": 3}
+    assert got["O9"].decision == {"worker_id": "W1", "start_time": "15:00", "matching_stage": 1}
+    expected_fail = {"O4": "NO_SKILL", "O5": "NO_CERT", "O6": "OUT_OF_AREA",
+                     "O7": "NO_TIME_MATCH", "O8": "CAPACITY"}
+    for oid, code in expected_fail.items():
+        assert got[oid].status == "failed" and got[oid].reason_code == code, oid
+        assert got[oid].decision is None
+    assert all(r.status == "success" for oid, r in got.items() if oid not in expected_fail)
+
+
+def test_solve_records_evidence_and_dims(small):
+    got = by_id(rule_engine.solve(small, PARAMS))
+    assert "3단계" in got["O3"].evidence and "W2" in got["O3"].evidence
+    assert got["O6"].dims["area_zone"] == "boundary"
+    assert got["O1"].dims == {"branch": "A", "hour": "09", "work_type": "install", "media": "FTTx",
+                              "building_type": "house", "difficulty": "none", "area_zone": "core"}
+    assert got["O3"].metrics["duration_min"] == 90
+
+
+def test_solve_small_case_has_no_violations(small):
+    assert rule_engine.validate(small, rule_engine.solve(small, PARAMS), PARAMS) == []
+
+
+def decide(item_id, worker_id, start, status="success"):
+    return DecisionRecord(item_id=item_id, decision={"worker_id": worker_id, "start_time": start},
+                          status=status, reason_code=None, evidence="", dims={})
+
+
+@pytest.mark.parametrize("decisions, rule, item", [
+    ([decide("O4", "W1", "10:00")], "skill_required", "O4"),
+    ([decide("O5", "W1", "10:00")], "cert_required", "O5"),
+    ([decide("O1", "W1", "08:30")], "outside_availability", "O1"),
+    ([decide("O1", "W1", "17:30")], "outside_availability", "O1"),
+    ([decide("O1", "W1", "09:00"), decide("O9", "W1", "09:30")], "schedule_overlap", "O9"),
+    # O3(승주 90분) 10:00~11:30 직후 O2 시작: 작업은 안 겹치지만 이동 8분을 넣으면 겹침
+    ([decide("O3", "W2", "10:00"), decide("O2", "W2", "11:30")], "schedule_overlap", "O2"),
+    ([decide("O1", "WX", "09:00")], "invalid_decision", "O1"),
+    ([decide("O1", "W1", "9시")], "invalid_decision", "O1"),
+    ([decide("O1", "W1", "09:00"), decide("O1", "W1", "13:00")], "invalid_decision", "O1"),
+])
+def test_validate_catches_each_violation(small, decisions, rule, item):
+    violations = rule_engine.validate(small, decisions, PARAMS)
+    assert [(v.rule, v.item_id) for v in violations] == [(rule, item)]
+
+
+def test_validate_ignores_unplaced_statuses(small):
+    decisions = [decide("O4", "W1", "10:00", status="blocked"),
+                 DecisionRecord("O5", None, "failed", "NO_CERT", "", {})]
+    assert rule_engine.validate(small, decisions, PARAMS) == []
+
+
+def test_validate_counts_pending_approval(small):
+    assert rule_engine.validate(small, [decide("O4", "W1", "10:00", status="pending_approval")], PARAMS)
+
+
+@pytest.mark.parametrize("faults", [[], ["P1", "P2", "P3", "P4"]])
+def test_solve_full_dataset_has_no_violations(faults):
+    inst, _ = generate(42, faults)
+    records = rule_engine.solve(inst, PARAMS)
+    assert len(records) == len(inst.orders)
+    assert rule_engine.validate(inst, records, PARAMS) == []
+
+
+def test_solve_is_deterministic():
+    inst, _ = generate(7, ["P1"])
+    assert rule_engine.solve(inst, PARAMS) == rule_engine.solve(inst, PARAMS)

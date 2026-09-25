@@ -23,6 +23,7 @@ P2:
     cert: pole
     concentrate_in_branch: A
     share_in_branch: 0.9
+    starved_branch: C               # 나머지 자격자는 이 지점을 피해 배치 (C지점 자격자 0명)
   expected: C지점 승주 작업이 자격자 부족으로 미할당
   answer:
     dims: {branch: C, difficulty: pole}
@@ -33,7 +34,7 @@ P3:
   generation:
     description: 일부 작업자의 가능시간을 고객 희망시간 분포와 어긋나게 설정
     worker_share: 0.2
-    availability_shift: afternoon_only   # 수요는 오전에 몰리는데 오후만 가능
+    availability: ["13:00", "18:00"]     # 수요는 오전에 몰리는데 오후만 가능
   expected: 가용 인력이 있는데도 해당 작업자 활용률이 낮음
   answer:
     metric: worker_utilization
@@ -43,7 +44,7 @@ P4:
   name: 경계 지역 수요
   generation:
     description: 지점 관할 경계 근처에 고객 좌표를 몰리게 생성
-    boundary_distance_km: [0, 1]         # 관할 경계 밖 0~1km
+    boundary_distance_km: [3, 4]         # 관할 경계 밖 3~4km: 최대 완화(+3km)로도 닿지 않음
     share_of_orders: 0.15
   expected: 지역 범위 +1km 완화 시 할당성공률이 크게 오름
   answer:
