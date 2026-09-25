@@ -5,6 +5,7 @@
 
 import math
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from core.interfaces import DecisionRecord, Violation
@@ -141,13 +142,65 @@ def _fail(inst: Instance, order: Order, code: str, evidence: str) -> DecisionRec
                           evidence=evidence, dims=dims_of(inst, order))
 
 
-def _assign_one(inst: Instance, order: Order, params: dict,
-                schedules: dict[str, list[Job]]) -> DecisionRecord:
-    dur = duration_min(order, params)
+def eligible_workers(inst: Instance, order: Order) -> tuple[list[Worker], list[Worker], list[Worker]]:
+    """(소속 지점 작업자, 기술 보유자, 기술·자격 보유자)."""
     pool = [w for w in inst.workers if w.branch == order.branch]
     skilled = [w for w in pool if order.media in w.skills]
     cert = REQUIRED_CERT.get(order.difficulty)
     certified = [w for w in skilled if cert is None or cert in w.certs]
+    return pool, skilled, certified
+
+
+def stage_slots(inst: Instance, order: Order, stage: int, certified: list[Worker],
+                jobs_of: Callable[[Worker], list[Job]], params: dict) -> list[Slot]:
+    """stage(1부터) 매칭 범위 안에서 들어갈 수 있는 작업자별 최선의 시작 시각."""
+    window = params["matching"]["time_window_min"][stage - 1]
+    ext = params["matching"]["area_extension_km"][stage - 1]
+    dur = duration_min(order, params)
+    in_area = [w for w in certified if inst.distance_outside(w.branch, order.x) <= ext]
+    lo, hi = order.desired - window, order.desired + window
+    return [s for w in in_area if (s := _best_slot(w, order, dur, lo, hi, jobs_of(w), params))]
+
+
+def pick(slots: list[Slot], params: dict) -> Slot:
+    """명장 우선 → 이동시간 → CEI 높은 순 → 작업자 ID."""
+    threshold = params["cei"]["master_threshold"]
+    return min(slots, key=lambda s: (s.worker.cei < threshold, s.travel, -s.worker.cei, s.worker.id))
+
+
+def actual_stage(inst: Instance, order: Order, worker: Worker, start: int, params: dict) -> int | None:
+    """배정이 실제로 해당하는 가장 엄격한 매칭 단계. 3단계 범위도 벗어나면 None."""
+    m = params["matching"]
+    outside = inst.distance_outside(worker.branch, order.x)
+    for stage, (window, ext) in enumerate(zip(m["time_window_min"], m["area_extension_km"]), start=1):
+        if abs(start - order.desired) <= window and outside <= ext:
+            return stage
+    return None
+
+
+def schedules_from(inst: Instance, decisions: list[DecisionRecord], params: dict,
+                   exclude: str | None = None) -> dict[tuple[str, int], list[Job]]:
+    """결정 목록에서 (작업자, 날짜)별 일정표를 만든다."""
+    schedules: dict[tuple[str, int], list[Job]] = defaultdict(list)
+    for d in decisions:
+        if d.decision is None or d.status not in PLACED_STATUSES or d.item_id == exclude:
+            continue
+        order = inst.order_index.get(d.item_id)
+        worker_id = str(d.decision.get("worker_id"))
+        start = parse_start(d.decision)
+        if order is None or worker_id not in inst.worker_index or start is None:
+            continue
+        schedules[(worker_id, order.day)].append(Job(start, start + duration_min(order, params), order))
+    for jobs in schedules.values():
+        jobs.sort(key=lambda j: j.start)
+    return schedules
+
+
+def _assign_one(inst: Instance, order: Order, params: dict,
+                schedules: dict[str, list[Job]]) -> DecisionRecord:
+    dur = duration_min(order, params)
+    pool, skilled, certified = eligible_workers(inst, order)
+    cert = REQUIRED_CERT.get(order.difficulty)
     funnel = f"후보: {order.branch}지점 {len(pool)}명 → {order.media} 기술 {len(skilled)}명"
     if cert:
         funnel += f" → {cert} 자격 {len(certified)}명"
@@ -160,13 +213,10 @@ def _assign_one(inst: Instance, order: Order, params: dict,
     threshold = params["cei"]["master_threshold"]
     for stage, (window, ext) in enumerate(zip(matching["time_window_min"],
                                               matching["area_extension_km"]), start=1):
-        in_area = [w for w in certified if inst.distance_outside(w.branch, order.x) <= ext]
-        lo, hi = order.desired - window, order.desired + window
-        slots = [s for w in in_area
-                 if (s := _best_slot(w, order, dur, lo, hi, schedules[w.id], params))]
+        slots = stage_slots(inst, order, stage, certified, lambda w: schedules[w.id], params)
         if not slots:
             continue
-        chosen = min(slots, key=lambda s: (s.worker.cei < threshold, s.travel, -s.worker.cei, s.worker.id))
+        chosen = pick(slots, params)
         w = chosen.worker
         schedules[w.id].append(Job(chosen.start, chosen.start + dur, order))
         schedules[w.id].sort(key=lambda j: j.start)
