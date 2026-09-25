@@ -26,6 +26,8 @@ from core.llm.client import AnthropicClient, LLMClient, load_config
 from core.registry import list_domains, list_faults, load_pack, load_params
 from core.storage.store import Store, to_jsonable
 
+from . import improvement
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB = ROOT / "runs" / "harness.db"
 WEB_DIST = ROOT / "web" / "dist"
@@ -197,7 +199,9 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
             raise HTTPException(400, "runs 파라미터가 비어 있음")
         return compare(store, run_ids)
 
-    if serve_web and WEB_DIST.is_dir():
+    improvement.register(app, improvement.Context(store, executor, make_llm, llm_config))
+
+    if serve_web and WEB_DIST.is_dir():   # 정적 파일은 모든 API 경로 뒤에 붙인다
         app.mount("/", StaticFiles(directory=WEB_DIST, html=True), name="web")
     return app
 
