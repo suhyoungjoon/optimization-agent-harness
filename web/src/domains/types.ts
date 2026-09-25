@@ -9,6 +9,7 @@ export interface ResultViewProps {
   reasonLabels: Record<string, string>;
   selected?: string | null;
   onSelect?: (itemId: string) => void;
+  highlight?: string[] | null; // 강조할 항목 (나머지는 흐리게)
 }
 
 export interface MetricSpec {

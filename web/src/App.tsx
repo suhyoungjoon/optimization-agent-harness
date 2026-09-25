@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
+import AnalysisPanel from "./components/AnalysisPanel";
 import ComparePanel from "./components/ComparePanel";
+import ImprovementPanel from "./components/ImprovementPanel";
 import TracePanel from "./components/TracePanel";
 import { adapters } from "./domains";
 import type { CompareSummary, Dataset, DecisionRecord, DomainInfo, HarnessInfo, Run } from "./types";
 
-type Tab = "compare" | "trace";
-const TABS: { id: Tab | "analysis" | "improve"; label: string; milestone?: string }[] = [
+type Tab = "compare" | "trace" | "analysis" | "improve";
+const TABS: { id: Tab; label: string; milestone?: string }[] = [
   { id: "compare", label: "비교" },
   { id: "trace", label: "트레이스" },
-  { id: "analysis", label: "분석", milestone: "M4" },
-  { id: "improve", label: "개선", milestone: "M4" },
+  { id: "analysis", label: "분석" },
+  { id: "improve", label: "개선" },
 ];
 
 const sameScope = (a: string[] | null | undefined, b: string[] | null) =>
@@ -37,6 +39,8 @@ export default function App() {
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reportId, setReportId] = useState<string | null>(null);
+  const [batchId, setBatchId] = useState<string | null>(null);
   const streams = useRef<(() => void)[]>([]);
 
   useEffect(() => {
@@ -115,6 +119,14 @@ export default function App() {
 
   const onRunRule = () => guard("규칙 agent 실행 중", runRule);
 
+  // 분석 탭: 결함 패턴이 가장 잘 드러나는 전체(10일치) 규칙 agent 실행
+  const runFullRule = async () => {
+    if (!dataset) return;
+    const run = await api.ruleRun(dataset.id, {});
+    await loadDecisions(run.run_id);
+    upsert(run);
+  };
+
   const onRunAi = () =>
     guard("AI agent 실행 요청 중", async () => {
       if (!dataset) return;
@@ -159,7 +171,7 @@ export default function App() {
             aria-selected={tab === t.id}
             disabled={!!t.milestone}
             title={t.milestone ? `${t.milestone}에서 추가` : undefined}
-            onClick={() => !t.milestone && setTab(t.id as Tab)}
+            onClick={() => !t.milestone && setTab(t.id)}
           >
             {t.label}
             {t.milestone && <span className="badge">{t.milestone}</span>}
@@ -209,6 +221,34 @@ export default function App() {
             selectedItem={selectedItem}
             onSelectItem={selectItem}
             reasonLabels={reasonLabels}
+          />
+        )}
+        {domain && adapter && tab === "analysis" && (
+          <AnalysisPanel
+            domain={domain}
+            adapter={adapter}
+            reasonLabels={reasonLabels}
+            dataset={dataset}
+            runs={runs.filter((r) => r.dataset_id === dataset?.id)}
+            decisionsOf={(id) => decisions[id]}
+            loadDecisions={loadDecisions}
+            onRunFullRule={runFullRule}
+            reportId={reportId}
+            setReportId={(id) => {
+              setReportId(id);
+              setBatchId(null);
+            }}
+          />
+        )}
+        {domain && adapter && tab === "improve" && (
+          <ImprovementPanel
+            domainName={domain.name}
+            adapter={adapter}
+            harness={harness}
+            scopes={scopes}
+            reportId={reportId}
+            batchId={batchId}
+            setBatchId={setBatchId}
           />
         )}
       </main>

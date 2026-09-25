@@ -46,7 +46,7 @@ type Hover =
   | { kind: "order"; order: Order; record?: DecisionRecord; x: number; y: number }
   | { kind: "worker"; worker: Worker; jobs: number; x: number; y: number };
 
-export default function DispatchMap({ instance, decisions, reasonLabels, selected, onSelect }: ResultViewProps) {
+export default function DispatchMap({ instance, decisions, reasonLabels, selected, onSelect, highlight }: ResultViewProps) {
   const inst = instance as Instance;
   const records = useMemo(() => new Map(decisions.map((d) => [d.item_id, d])), [decisions]);
   // 실행 범위에 들어 있는 날짜만 고를 수 있다
@@ -54,8 +54,16 @@ export default function DispatchMap({ instance, decisions, reasonLabels, selecte
     const inRun = new Set(inst.orders.filter((o) => records.has(o.id)).map((o) => o.day));
     return [...inRun].sort((a, b) => a - b);
   }, [inst, records]);
+  const lit = useMemo(() => (highlight ? new Set(highlight) : null), [highlight]);
+  // 강조 항목이 있으면 강조 항목이 가장 많은 날을 기본으로 보여준다
+  const litDay = useMemo(() => {
+    if (!lit) return null;
+    const counts = new Map<number, number>();
+    for (const o of inst.orders) if (lit.has(o.id)) counts.set(o.day, (counts.get(o.day) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  }, [inst, lit]);
   const [dayChoice, setDay] = useState<number | null>(null);
-  const day = dayChoice !== null && days.includes(dayChoice) ? dayChoice : (days[0] ?? 1);
+  const day = dayChoice !== null && days.includes(dayChoice) ? dayChoice : (litDay ?? days[0] ?? 1);
   const [hover, setHover] = useState<Hover | null>(null);
   const setSelected = (id: string) => onSelect?.(id);
 
@@ -104,6 +112,7 @@ export default function DispatchMap({ instance, decisions, reasonLabels, selecte
         </label>
         <span className="muted">
           지시서 {orders.length}건 · 배정 {orders.length - failed}건 · <span className="critical-text">미할당 {failed}건</span>
+          {lit && <> · 강조 {orders.filter((o) => lit.has(o.id)).length}건</>}
           {held > 0 && <> (차단·승인 대기 {held}건 포함)</>}
         </span>
       </div>
@@ -140,6 +149,7 @@ export default function DispatchMap({ instance, decisions, reasonLabels, selecte
 
           {orders.map((o) => {
             const r = records.get(o.id);
+            const dim = lit !== null && !lit.has(o.id);
             const ok = r?.status === "success";
             const handlers = {
               onMouseEnter: (e: MouseEvent) => setHover({ kind: "order", order: o, record: r, ...place(e) }),
@@ -148,7 +158,7 @@ export default function DispatchMap({ instance, decisions, reasonLabels, selecte
             const isSel = selected === o.id;
             if (r?.status === "pending_approval") {
               return (
-                <g key={o.id} className="order-pending" {...handlers}>
+                <g key={o.id} className={`order-pending${dim ? " dim" : ""}`} {...handlers}>
                   <circle cx={sx(o.x)} cy={sy(o.y)} r={8} className="hit" />
                   <circle cx={sx(o.x)} cy={sy(o.y)} r={isSel ? 6 : 4.5} className="ring" />
                 </g>
@@ -161,11 +171,11 @@ export default function DispatchMap({ instance, decisions, reasonLabels, selecte
                 cy={sy(o.y)}
                 r={isSel ? 6 : 4}
                 fill={branchColor(o.branch)}
-                className="order-dot"
+                className={`order-dot${dim ? " dim" : ""}${lit?.has(o.id) ? " lit" : ""}`}
                 {...handlers}
               />
             ) : (
-              <g key={o.id} className="order-fail" {...handlers}>
+              <g key={o.id} className={`order-fail${dim ? " dim" : ""}`} {...handlers}>
                 <circle cx={sx(o.x)} cy={sy(o.y)} r={8} className="hit" />
                 <path
                   d={`M${sx(o.x) - 4},${sy(o.y) - 4}L${sx(o.x) + 4},${sy(o.y) + 4}M${sx(o.x) + 4},${sy(o.y) - 4}L${sx(o.x) - 4},${sy(o.y) + 4}`}

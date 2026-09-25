@@ -143,3 +143,10 @@ def test_levels_and_domain_codes(client):
     assert list(body["levels"]) == ["L0", "L1", "L2", "L3", "L4", "L5"]
     assert body["llm"]["model"] == "claude-sonnet-5"
     assert "LLM_REFUSAL" in client.get("/domains").json()[0]["core_reason_codes"]
+
+
+def test_domain_params(client):
+    body = client.get("/domains/dispatch/params").json()
+    assert body["params"]["version"] >= 1 and "overrides" in body["params"]
+    assert list(body["spec_sections"])[0] == "목적"
+    assert client.get("/domains/nope/params").status_code == 404
