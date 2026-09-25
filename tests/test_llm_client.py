@@ -82,3 +82,16 @@ def test_usage_cost(config):
     assert usage.cost_usd("claude-sonnet-5", config) == pytest.approx(expected)
     assert usage.calls == 2 and usage.cached_calls == 1
     assert usage.cost_usd("unknown-model", config) is None
+
+
+def test_load_dotenv(tmp_path, monkeypatch):
+    from core.llm.client import load_dotenv
+    env = tmp_path / ".env"
+    env.write_text("# comment\nOAH_TEST_KEY='abc'\nOAH_EMPTY=\nOAH_KEEP=new\n", encoding="utf-8")
+    monkeypatch.delenv("OAH_TEST_KEY", raising=False)
+    monkeypatch.setenv("OAH_KEEP", "old")
+    load_dotenv(env)
+    import os
+    assert os.environ["OAH_TEST_KEY"] == "abc" and os.environ["OAH_KEEP"] == "old"
+    assert "OAH_EMPTY" not in os.environ
+    monkeypatch.delenv("OAH_TEST_KEY")

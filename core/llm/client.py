@@ -20,6 +20,18 @@ DEFAULT_CACHE_PATH = ROOT / "runs" / "llm_cache.sqlite"
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 
 
+def load_dotenv(path: Path = ROOT / ".env") -> None:
+    """.env의 KEY=VALUE를 환경변수로 읽는다 (이미 설정된 값은 덮어쓰지 않는다)."""
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            if value.strip():
+                os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
 def load_config(path: Path = CONFIG_PATH) -> dict:
     config = yaml.safe_load(path.read_text(encoding="utf-8"))
     env_cache = os.environ.get("LLM_CACHE")
@@ -118,6 +130,7 @@ class AnthropicClient:
         if api is None:
             import anthropic  # 실제 호출 때만 필요
 
+            load_dotenv()
             api = anthropic.Anthropic()
         self.api = api
 
