@@ -197,3 +197,40 @@ def test_tools_are_declared(pack, generated):
     for tool in tools:
         assert {"name", "description"} <= set(tool)
 
+
+
+# --- [M3] AI agent 하네스용 계약 ------------------------------------------
+
+def test_tools_have_schema_and_handler(pack, generated):
+    instance, _ = generated
+    for tool in pack.tools(instance):
+        assert tool["input_schema"]["type"] == "object"
+        assert callable(tool["handler"])
+
+
+def test_decision_schema(pack):
+    schema = pack.decision_schema()
+    assert schema["type"] == "object" and schema.get("properties")
+
+
+def test_item_dims_declared(pack, generated):
+    instance, _ = generated
+    declared = set(pack.dimensions()["dimensions"])
+    item = pack.items(instance)[0]
+    assert set(pack.item_dims(instance, item)) <= declared
+
+
+def test_subset_keeps_only_requested_items(pack, generated):
+    instance, _ = generated
+    picked = pack.items(instance)[:5]
+    sub = pack.subset(instance, picked)
+    assert sorted(pack.items(sub)) == sorted(picked)
+
+
+def test_approval_reasons_are_strings(pack, generated):
+    instance, _ = generated
+    params = yaml.safe_load(Path(pack.params_path()).read_text(encoding="utf-8"))
+    decisions = pack.solve(instance, params)
+    for record in decisions[:20]:
+        reasons = pack.approval_reasons(instance, record, decisions)
+        assert isinstance(reasons, list) and all(isinstance(r, str) for r in reasons)

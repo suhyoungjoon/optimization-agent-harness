@@ -69,6 +69,7 @@ python -m scripts.generate --domain dispatch --seed 42 --faults P1,P2   # 데이
 python -m api.main               # API + 빌드된 프런트엔드 서빙 (http://127.0.0.1:8000)
 (cd web && npm run dev)          # 프런트엔드 개발 서버 (API는 :8000으로 프록시)
 ```
+AI agent 실행에는 `.env`의 `ANTHROPIC_API_KEY`가 필요하다. 모델·effort·캐시는 `configs/llm.yaml`, 최종 측정 때는 `LLM_CACHE=0`으로 입력 해시 캐시를 끈다.
 (명령어가 바뀌면 이 섹션을 갱신한다.)
 
 ## 작업 방식
