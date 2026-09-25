@@ -222,3 +222,16 @@ def test_approval_reasons_are_strings(pack, generated):
     for record in decisions[:20]:
         reasons = pack.approval_reasons(instance, record, decisions)
         assert isinstance(reasons, list) and all(isinstance(r, str) for r in reasons)
+
+
+# --- [M4] 분석 agent용 계약 ----------------------------------------------
+
+def test_analysis_tools(pack, generated):
+    instance, _ = generated
+    params = yaml.safe_load(Path(pack.params_path()).read_text(encoding="utf-8"))
+    decisions = pack.solve(instance, params)
+    tools = pack.analysis_tools(instance, decisions)
+    assert tools
+    for tool in tools:
+        assert {"name", "description", "input_schema"} <= set(tool) and callable(tool["handler"])
+        assert tool["handler"]({}) is not None
