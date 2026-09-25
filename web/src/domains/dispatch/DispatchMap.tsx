@@ -46,14 +46,20 @@ type Hover =
   | { kind: "order"; order: Order; record?: DecisionRecord; x: number; y: number }
   | { kind: "worker"; worker: Worker; jobs: number; x: number; y: number };
 
-export default function DispatchMap({ instance, decisions, dimensions }: ResultViewProps) {
+export default function DispatchMap({ instance, decisions, reasonLabels, selected, onSelect }: ResultViewProps) {
   const inst = instance as Instance;
-  const [day, setDay] = useState(1);
-  const [hover, setHover] = useState<Hover | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-
   const records = useMemo(() => new Map(decisions.map((d) => [d.item_id, d])), [decisions]);
-  const orders = inst.orders.filter((o) => o.day === day);
+  // 실행 범위에 들어 있는 날짜만 고를 수 있다
+  const days = useMemo(() => {
+    const inRun = new Set(inst.orders.filter((o) => records.has(o.id)).map((o) => o.day));
+    return [...inRun].sort((a, b) => a - b);
+  }, [inst, records]);
+  const [dayChoice, setDay] = useState<number | null>(null);
+  const day = dayChoice !== null && days.includes(dayChoice) ? dayChoice : (days[0] ?? 1);
+  const [hover, setHover] = useState<Hover | null>(null);
+  const setSelected = (id: string) => onSelect?.(id);
+
+  const orders = inst.orders.filter((o) => o.day === day && records.has(o.id));
   const workers = inst.workers;
   const widthKm = Math.max(...Object.values(inst.branches).map((r) => r[1]));
 
@@ -71,6 +77,10 @@ export default function DispatchMap({ instance, decisions, dimensions }: ResultV
   }, [orders, records]);
 
   const failed = orders.filter((o) => records.get(o.id)?.status !== "success").length;
+  const held = orders.filter((o) => {
+    const st = records.get(o.id)?.status;
+    return st === "blocked" || st === "pending_approval";
+  }).length;
   const selectedRecord = selected ? records.get(selected) : undefined;
   const selectedOrder = selected ? inst.orders.find((o) => o.id === selected) : undefined;
 
@@ -85,15 +95,16 @@ export default function DispatchMap({ instance, decisions, dimensions }: ResultV
         <label>
           날짜{" "}
           <select value={day} onChange={(e) => setDay(Number(e.target.value))}>
-            {Array.from({ length: inst.days }, (_, i) => (
-              <option key={i + 1} value={i + 1}>
-                {i + 1}일차
+            {days.map((d) => (
+              <option key={d} value={d}>
+                {d}일차
               </option>
             ))}
           </select>
         </label>
         <span className="muted">
           지시서 {orders.length}건 · 배정 {orders.length - failed}건 · <span className="critical-text">미할당 {failed}건</span>
+          {held > 0 && <> (차단·승인 대기 {held}건 포함)</>}
         </span>
       </div>
 
@@ -135,6 +146,14 @@ export default function DispatchMap({ instance, decisions, dimensions }: ResultV
               onClick: () => setSelected(o.id),
             };
             const isSel = selected === o.id;
+            if (r?.status === "pending_approval") {
+              return (
+                <g key={o.id} className="order-pending" {...handlers}>
+                  <circle cx={sx(o.x)} cy={sy(o.y)} r={8} className="hit" />
+                  <circle cx={sx(o.x)} cy={sy(o.y)} r={isSel ? 6 : 4.5} className="ring" />
+                </g>
+              );
+            }
             return ok ? (
               <circle
                 key={o.id}
@@ -176,7 +195,7 @@ export default function DispatchMap({ instance, decisions, dimensions }: ResultV
         {hover && (
           <div className="tooltip" style={{ left: hover.x + 12, top: hover.y + 12 }}>
             {hover.kind === "order" ? (
-              <OrderSummary order={hover.order} record={hover.record} reasons={dimensions.reason_codes} />
+              <OrderSummary order={hover.order} record={hover.record} reasons={reasonLabels} />
             ) : (
               <>
                 <strong>
@@ -202,14 +221,15 @@ export default function DispatchMap({ instance, decisions, dimensions }: ResultV
         ))}
         <span>▪ 작업자</span>
         <span>● 배정된 지시서</span>
-        <span className="critical-text">✕ 미할당</span>
+        <span className="critical-text">✕ 미할당·차단</span>
+        <span className="warning-text">◯ 승인 대기</span>
         <span>— 작업자 동선</span>
       </div>
 
       <div className="detail">
         {selectedOrder ? (
           <>
-            <OrderSummary order={selectedOrder} record={selectedRecord} reasons={dimensions.reason_codes} />
+            <OrderSummary order={selectedOrder} record={selectedRecord} reasons={reasonLabels} />
             <p className="evidence">{selectedRecord?.evidence}</p>
           </>
         ) : (
@@ -242,6 +262,10 @@ function OrderSummary({
       {record?.status === "success" && d ? (
         <div>
           → {String(d.worker_id)} {String(d.start_time)} ({String(d.matching_stage)}단계)
+        </div>
+      ) : (record?.status === "blocked" || record?.status === "pending_approval") && d ? (
+        <div className="critical-text">
+          {record.status === "blocked" ? "✕ 차단" : "⏸ 승인 대기"}: {String(d.worker_id)} {String(d.start_time)}
         </div>
       ) : (
         <div className="critical-text">

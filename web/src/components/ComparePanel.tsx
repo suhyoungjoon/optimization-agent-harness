@@ -1,76 +1,113 @@
-import { useState } from "react";
-import { api } from "../api";
-import { adapters } from "../domains";
-import type { Dataset, DecisionRecord, DomainInfo, Run } from "../types";
+import type { DomainAdapter, Scope } from "../domains/types";
+import type { CompareSummary, Dataset, DecisionRecord, DomainInfo, HarnessInfo, Run } from "../types";
+import CompareTable from "./CompareTable";
 import HarnessToggle from "./HarnessToggle";
 import MetricsPanel from "./MetricsPanel";
 
-export default function ComparePanel({ domain }: { domain: DomainInfo }) {
-  const adapter = adapters[domain.name];
-  const [seed, setSeed] = useState(42);
-  const [faults, setFaults] = useState<string[]>([]);
-  const [dataset, setDataset] = useState<Dataset | null>(null);
-  const [run, setRun] = useState<Run | null>(null);
-  const [decisions, setDecisions] = useState<DecisionRecord[]>([]);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+export interface CompareProps {
+  domain: DomainInfo;
+  adapter: DomainAdapter;
+  harness: HarnessInfo | null;
+  reasonLabels: Record<string, string>;
+  seed: number;
+  setSeed: (n: number) => void;
+  faults: string[];
+  toggleFault: (id: string) => void;
+  dataset: Dataset | null;
+  scopes: Scope[];
+  scopeId: string;
+  setScopeId: (id: string) => void;
+  level: string;
+  setLevel: (l: string) => void;
+  repeats: number;
+  setRepeats: (n: number) => void;
+  ruleRun: Run | null;
+  aiRuns: Run[];
+  shownAiRun: Run | null;
+  setShownAiRun: (id: string) => void;
+  decisionsOf: (runId: string) => DecisionRecord[] | undefined;
+  summary: CompareSummary[];
+  selectedItem: string | null;
+  onSelectItem: (id: string) => void;
+  busy: string | null;
+  error: string | null;
+  onGenerate: () => void;
+  onRunRule: () => void;
+  onRunAi: () => void;
+}
 
-  const guard = async (label: string, fn: () => Promise<void>) => {
-    setBusy(label);
-    setError(null);
-    try {
-      await fn();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const generate = () =>
-    guard("데이터 생성 중", async () => {
-      const ds = await api.createDataset(domain.name, seed, faults);
-      setDataset(await api.dataset(domain.name, ds.id));
-      setRun(null);
-      setDecisions([]);
-    });
-
-  const runRule = () =>
-    guard("규칙 agent 실행 중", async () => {
-      if (!dataset) return;
-      const r = await api.createRun(dataset.id, "rule");
-      setDecisions(await api.decisions(r.run_id));
-      setRun(r);
-    });
-
-  const toggleFault = (id: string) =>
-    setFaults((f) => (f.includes(id) ? f.filter((x) => x !== id) : [...f, id].sort()));
+export default function ComparePanel(p: CompareProps) {
+  const ruleDecisions = p.ruleRun ? p.decisionsOf(p.ruleRun.run_id) : undefined;
+  const aiDecisions = p.shownAiRun ? p.decisionsOf(p.shownAiRun.run_id) : undefined;
+  const scope = p.scopes.find((s) => s.id === p.scopeId);
+  const view = (run: Run, decisions: DecisionRecord[]) => (
+    <>
+      <p.adapter.ResultView
+        instance={p.dataset!.instance}
+        decisions={decisions}
+        dimensions={p.domain.dimensions}
+        reasonLabels={p.reasonLabels}
+        selected={p.selectedItem}
+        onSelect={p.onSelectItem}
+      />
+      <MetricsPanel run={run} decisions={decisions} specs={p.adapter.metrics} reasonLabels={p.reasonLabels} />
+    </>
+  );
 
   return (
     <section className="compare">
       <div className="controls">
         <label>
-          seed <input type="number" value={seed} onChange={(e) => setSeed(Number(e.target.value))} />
+          seed <input type="number" value={p.seed} onChange={(e) => p.setSeed(Number(e.target.value))} />
         </label>
         <fieldset>
           <legend className="muted">결함 패턴</legend>
-          {domain.faults.map((f) => (
+          {p.domain.faults.map((f) => (
             <label key={f.id} title={f.name}>
-              <input type="checkbox" checked={faults.includes(f.id)} onChange={() => toggleFault(f.id)} />
+              <input type="checkbox" checked={p.faults.includes(f.id)} onChange={() => p.toggleFault(f.id)} />
               {f.id} {f.name}
             </label>
           ))}
         </fieldset>
-        <button onClick={generate} disabled={!!busy}>데이터 생성</button>
-        <button onClick={runRule} disabled={!!busy || !dataset} className="primary">규칙 agent 실행</button>
-        <HarnessToggle />
+        <button onClick={p.onGenerate} disabled={!!p.busy}>데이터 생성</button>
+        {p.dataset && (
+          <label>
+            실행 범위{" "}
+            <select value={p.scopeId} onChange={(e) => p.setScopeId(e.target.value)} disabled={!!p.busy}>
+              {p.scopes.map((s) => (
+                <option key={s.id} value={s.id}>{s.label}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        <button onClick={p.onRunRule} disabled={!!p.busy || !p.dataset}>규칙 agent 실행</button>
       </div>
+
+      <div className="controls ai-controls">
+        <HarnessToggle harness={p.harness} level={p.level} onChange={p.setLevel} disabled={!!p.busy} />
+        <label>
+          반복{" "}
+          <select value={p.repeats} onChange={(e) => p.setRepeats(Number(e.target.value))}>
+            {[1, 2, 3].map((n) => <option key={n} value={n}>{n}회</option>)}
+          </select>
+        </label>
+        <button className="primary" onClick={p.onRunAi} disabled={!!p.busy || !p.dataset}>
+          AI agent 실행 ({p.level})
+        </button>
+        {p.harness && (
+          <span className="muted small">
+            {p.harness.llm.model} · effort {p.harness.llm.effort}
+            {p.harness.llm.cache ? " · 응답 캐시 켬" : ""}
+          </span>
+        )}
+      </div>
+
       <div className="status-line" aria-live="polite">
-        {busy && <span className="muted">{busy}…</span>}
-        {error && <span className="critical-text">✕ {error}</span>}
-        {dataset && !busy && (
+        {p.busy && <span className="muted">{p.busy}…</span>}
+        {p.error && <span className="critical-text">✕ {p.error}</span>}
+        {p.dataset && !p.busy && (
           <span className="muted">
-            데이터셋 {dataset.id} · {dataset.items}건{run ? ` · 실행 ${run.run_id} · params v${run.params_version}` : ""}
+            데이터셋 {p.dataset.id} · 범위 {scope?.label ?? "–"}
           </span>
         )}
       </div>
@@ -78,22 +115,69 @@ export default function ComparePanel({ domain }: { domain: DomainInfo }) {
       <div className="split">
         <article className="panel">
           <h2>규칙 agent</h2>
-          {dataset?.instance && run ? (
-            <>
-              <adapter.ResultView instance={dataset.instance} decisions={decisions} dimensions={domain.dimensions} />
-              <MetricsPanel run={run} decisions={decisions} specs={adapter.metrics} dimensions={domain.dimensions} />
-            </>
+          {p.dataset?.instance && p.ruleRun && ruleDecisions ? (
+            view(p.ruleRun, ruleDecisions)
           ) : (
             <p className="muted empty">
-              {dataset ? "규칙 agent를 실행하면 배정 결과가 표시됩니다." : "seed와 결함 패턴을 고르고 데이터를 생성하세요."}
+              {p.dataset ? "규칙 agent를 실행하면 배정 결과가 표시됩니다." : "seed와 결함 패턴을 고르고 데이터를 생성하세요."}
             </p>
           )}
         </article>
-        <article className="panel placeholder">
-          <h2>AI agent</h2>
-          <p className="muted empty">하네스 레벨별 AI agent 결과는 M3에서 이 영역에 표시됩니다.</p>
+        <article className="panel">
+          <div className="panel-head">
+            <h2>AI agent</h2>
+            {p.aiRuns.length > 0 && (
+              <select value={p.shownAiRun?.run_id ?? ""} onChange={(e) => p.setShownAiRun(e.target.value)}
+                aria-label="표시할 AI 실행">
+                {p.aiRuns.map((r) => (
+                  <option key={r.run_id} value={r.run_id}>
+                    {r.level} · 반복 {(r.repeat ?? 0) + 1} · {runState(r)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+          <RunProgressList runs={p.aiRuns} />
+          {p.shownAiRun?.status === "error" && (
+            <p className="critical-text">✕ 실행 실패: {p.shownAiRun.meta?.error ?? p.shownAiRun.progress?.error}</p>
+          )}
+          {p.dataset?.instance && p.shownAiRun?.status === "done" && aiDecisions ? (
+            view(p.shownAiRun, aiDecisions)
+          ) : (
+            p.aiRuns.length === 0 && (
+              <p className="muted empty">하네스 레벨을 고르고 AI agent를 실행하세요. 같은 범위에서 규칙 agent도 함께 실행됩니다.</p>
+            )
+          )}
         </article>
       </div>
+
+      <CompareTable rows={p.summary} specs={p.adapter.metrics} />
     </section>
+  );
+}
+
+function runState(r: Run) {
+  if (r.status === "done") return "완료";
+  if (r.status === "error") return "실패";
+  const { done = 0, total = 0 } = r.progress ?? {};
+  return total ? `진행 ${Math.round((done / total) * 100)}%` : "대기";
+}
+
+function RunProgressList({ runs }: { runs: Run[] }) {
+  const active = runs.filter((r) => r.status === "running");
+  if (active.length === 0) return null;
+  return (
+    <ul className="progress-list">
+      {active.map((r) => {
+        const { done = 0, total = 0 } = r.progress ?? {};
+        return (
+          <li key={r.run_id}>
+            <span className="small">{r.level} · 반복 {(r.repeat ?? 0) + 1}</span>
+            <progress max={total || 1} value={done} aria-label={`${r.level} 진행`} />
+            <span className="small muted">{done}/{total}</span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
