@@ -1,4 +1,7 @@
-import type { CompareResult, Dataset, DecisionRecord, DomainInfo, HarnessInfo, Run, TraceRecord } from "./types";
+import type {
+  CompareResult, Dataset, DecisionRecord, DomainInfo, HarnessInfo, HistoryRow, Proposal, ProposalBatch, Report, Run,
+  SpecEstimate, TraceRecord,
+} from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -50,6 +53,27 @@ export const api = {
   decisions: (runId: string) => request<DecisionRecord[]>(`/runs/${runId}/decisions`),
   traces: (runId: string, itemId: string) => request<TraceRecord[]>(`/runs/${runId}/traces/${itemId}`),
   compare: (runIds: string[]) => request<CompareResult>(`/compare?runs=${runIds.join(",")}`),
+  // --- M4: 분석·개선 ---
+  params: (domain: string) =>
+    request<{ params: Record<string, unknown>; spec_sections: Record<string, string> }>(`/domains/${domain}/params`),
+  analyze: (runId: string) =>
+    request<{ id: string }>("/analysis", { method: "POST", body: JSON.stringify({ run_id: runId }) }),
+  report: (id: string) => request<Report>(`/analysis/${id}`),
+  label: (id: string, findingId: string, label: "valid" | "false_positive" | null) =>
+    request<Report>(`/analysis/${id}/labels`, { method: "POST", body: JSON.stringify({ finding_id: findingId, label }) }),
+  propose: (reportId: string) =>
+    request<{ id: string }>("/proposals", { method: "POST", body: JSON.stringify({ report_id: reportId }) }),
+  batch: (id: string) => request<ProposalBatch>(`/proposals/batches/${id}`),
+  proposal: (id: string) => request<Proposal>(`/proposals/${id}`),
+  simulate: (id: string, body: { confirm?: boolean; level?: string; scope?: string[] } = {}) =>
+    request<Proposal | { needs_confirmation: true; estimate: SpecEstimate } | { id: string; status: string }>(
+      `/proposals/${id}/simulate`, { method: "POST", body: JSON.stringify(body) }),
+  approve: (id: string, note: string, force = false) =>
+    request<Proposal>(`/proposals/${id}/approve`, { method: "POST", body: JSON.stringify({ note, force }) }),
+  reject: (id: string, note: string) =>
+    request<Proposal>(`/proposals/${id}/reject`, { method: "POST", body: JSON.stringify({ note }) }),
+  history: () => request<HistoryRow[]>("/history"),
+
   // 진행 상황 SSE. 닫는 함수를 돌려준다.
   stream: (runId: string, onEvent: (e: { status: string; done?: number; total?: number }) => void) => {
     const source = new EventSource(`/runs/${runId}/stream`);
