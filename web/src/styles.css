@@ -15,6 +15,8 @@
   --good: #0ca30c;
   --good-text: #006300;
   --critical: #d03b3b;
+  --warning: #fab219;
+  --warning-text: #8a5a00;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -33,6 +35,7 @@
     --series-3: #199e70;
     --good-text: #0ca30c;
     --critical: #e05a5a;
+    --warning-text: #fab219;
   }
 }
 :root[data-theme="dark"] {
@@ -51,6 +54,7 @@
   --series-3: #199e70;
   --good-text: #0ca30c;
   --critical: #e05a5a;
+  --warning-text: #fab219;
 }
 
 * { box-sizing: border-box; }
@@ -79,6 +83,7 @@ button:not(:disabled) { cursor: pointer; }
 button:not(:disabled):hover { background: var(--hover-wash); }
 button:disabled { opacity: 0.5; }
 button.primary { background: var(--series-1); color: #fff; border-color: transparent; }
+button.primary:not(:disabled):hover { background: var(--series-1); filter: brightness(1.1); }
 input[type="number"] { width: 80px; }
 
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
@@ -109,7 +114,10 @@ input[type="number"] { width: 80px; }
 .order-dot { stroke: var(--surface); stroke-width: 2; cursor: pointer; }
 .order-fail { cursor: pointer; }
 .order-fail path { stroke: var(--critical); stroke-linecap: round; }
-.order-fail .hit { fill: transparent; }
+.order-fail .hit, .order-pending .hit { fill: transparent; }
+.order-pending { cursor: pointer; }
+.order-pending .ring { fill: none; stroke: var(--warning); stroke-width: 2.5; }
+.warning-text { color: var(--warning-text); }
 .worker { stroke: var(--surface); stroke-width: 2; }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-secondary); margin: 8px 0; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
@@ -141,3 +149,61 @@ input[type="number"] { width: 80px; }
 .chart figcaption { font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; }
 .violations { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
 .violations th, .violations td { text-align: left; border-bottom: 1px solid var(--border); padding: 4px; }
+
+/* --- M3: 하네스 토글, 진행 표시, 비교표, 트레이스 --- */
+.small { font-size: 12px; }
+.good-text { color: var(--good-text); }
+.ai-controls { margin-top: 8px; }
+.harness { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.harness-levels { display: inline-flex; gap: 4px; }
+.harness-levels button { padding: 2px 10px; }
+.harness-levels button.selected, .chips button.selected {
+  background: var(--series-1); color: #fff; border-color: transparent;
+}
+.harness-flags { display: inline-flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--text-muted); }
+.harness-flags .flag.on { color: var(--text-primary); }
+.panel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+.panel-head h2 { margin: 0; }
+.progress-list { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 4px; }
+.progress-list li { display: grid; grid-template-columns: 110px 1fr 60px; gap: 8px; align-items: center; }
+.progress-list progress { width: 100%; accent-color: var(--series-1); }
+.tile-note { font-size: 11px; color: var(--text-muted); }
+
+.compare-table { margin-top: 16px; }
+.table-scroll { overflow-x: auto; }
+.compare-table table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.compare-table th, .compare-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+.compare-table thead th { color: var(--text-secondary); font-weight: 500; font-size: 12px; }
+.compare-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.compare-table tr.baseline th, .compare-table tr.baseline td { background: var(--hover-wash); }
+.note { font-size: 12px; margin: 8px 0 0; }
+
+.chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.chips button { padding: 2px 10px; font-size: 12px; }
+.trace-split { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; margin-top: 12px; }
+@media (max-width: 800px) { .trace-split { grid-template-columns: 1fr; } }
+.item-list { list-style: none; margin: 0; padding: 0; max-height: 70vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.item-list button { width: 100%; text-align: left; border: none; border-radius: 0; background: none; padding: 4px 10px; display: flex; gap: 6px; align-items: center; }
+.item-list button.selected { background: var(--hover-wash); font-weight: 600; }
+.mark { width: 14px; display: inline-block; text-align: center; }
+.mark-failed, .mark-blocked { color: var(--critical); }
+.mark-pending_approval { color: var(--warning-text); }
+.mark-success { color: var(--series-1); }
+.timeline { min-width: 0; }
+.decision-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+@media (max-width: 800px) { .decision-pair { grid-template-columns: 1fr; } }
+.decision-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.step { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--axis); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+.step-tool_call { border-left-color: var(--series-1); }
+.step-validate { border-left-color: var(--series-3); }
+.step-retry { border-left-color: var(--warning); }
+.step-guardrail { border-left-color: var(--series-2); }
+.step-head { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+.step-no { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.step p, .step ul { margin: 4px 0; }
+.step pre { background: var(--page); border-radius: 6px; padding: 8px; overflow-x: auto; font-size: 12px; margin: 6px 0 0; }
+.call { font-size: 12px; margin: 2px 0; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+code.json { color: var(--text-secondary); word-break: break-all; }
+.said { white-space: pre-wrap; color: var(--text-secondary); }
