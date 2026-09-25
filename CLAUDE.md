@@ -29,7 +29,7 @@ api/             FastAPI
 web/             React + Vite 프런트엔드
 scripts/         데이터 생성, 일괄 실행 CLI
 tests/           pytest
-docs/            plan.md(기획서), domain-pack-guide.md
+docs/            plan.md(기획서), ai-application-boundary.md(AI 적용 경계), domain-pack-guide.md
 runs/            실행 결과 (git 제외)
 ```
 
