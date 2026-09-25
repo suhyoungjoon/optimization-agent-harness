@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from core.interfaces import DecisionRecord, Violation
+from core.params import apply_overrides
 
 from .models import Instance, Order, Worker, grid_distance, hhmm_to_min, min_to_hhmm
 
@@ -39,6 +40,11 @@ def dims_of(inst: Instance, order: Order) -> dict[str, str]:
         "difficulty": order.difficulty,
         "area_zone": inst.area_zone(order),
     }
+
+
+def effective_params(inst: Instance, order: Order, params: dict) -> dict:
+    """지시서에 해당하는 구간 조건(overrides)을 적용한 파라미터."""
+    return apply_overrides(params, dims_of(inst, order))
 
 
 def parse_start(decision: dict) -> int | None:
@@ -154,6 +160,7 @@ def eligible_workers(inst: Instance, order: Order) -> tuple[list[Worker], list[W
 def stage_slots(inst: Instance, order: Order, stage: int, certified: list[Worker],
                 jobs_of: Callable[[Worker], list[Job]], params: dict) -> list[Slot]:
     """stage(1부터) 매칭 범위 안에서 들어갈 수 있는 작업자별 최선의 시작 시각."""
+    params = effective_params(inst, order, params)
     window = params["matching"]["time_window_min"][stage - 1]
     ext = params["matching"]["area_extension_km"][stage - 1]
     dur = duration_min(order, params)
@@ -170,7 +177,7 @@ def pick(slots: list[Slot], params: dict) -> Slot:
 
 def actual_stage(inst: Instance, order: Order, worker: Worker, start: int, params: dict) -> int | None:
     """배정이 실제로 해당하는 가장 엄격한 매칭 단계. 3단계 범위도 벗어나면 None."""
-    m = params["matching"]
+    m = effective_params(inst, order, params)["matching"]
     outside = inst.distance_outside(worker.branch, order.x)
     for stage, (window, ext) in enumerate(zip(m["time_window_min"], m["area_extension_km"]), start=1):
         if abs(start - order.desired) <= window and outside <= ext:
@@ -198,6 +205,7 @@ def schedules_from(inst: Instance, decisions: list[DecisionRecord], params: dict
 
 def _assign_one(inst: Instance, order: Order, params: dict,
                 schedules: dict[str, list[Job]]) -> DecisionRecord:
+    params = effective_params(inst, order, params)
     dur = duration_min(order, params)
     pool, skilled, certified = eligible_workers(inst, order)
     cert = REQUIRED_CERT.get(order.difficulty)

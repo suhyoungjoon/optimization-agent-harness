@@ -73,3 +73,14 @@ def test_p4_boundary_orders_fail_and_recover_with_one_km(pack):
     _, _, after = run(pack, ["P4"], relaxed)
     rate = lambda recs: sum(r.status == "success" for r in recs) / len(recs)  # noqa: E731
     assert rate(after) >= rate(records) + 0.1
+
+
+def test_p3_visible_through_analysis_tools(pack):
+    inst, truth, records = run(pack, ["P3"])
+    # 기본 정렬(작업시간 적은 순) 상위 7명 중 5명 이상이 P3 작업자이고, 맨 위는 오후만 가능한 작업자
+    stats = next(t for t in pack.analysis_tools(inst, records) if t["name"] == "worker_stats")["handler"]({"limit": 7})
+    lowest = {r["worker_id"] for r in stats["rows"]}
+    assert len(lowest & set(truth["faults"]["P3"]["affected_workers"])) >= 5
+    assert stats["rows"][0]["available"] == "13:00-18:00"
+    hours = next(t for t in pack.analysis_tools(inst, records) if t["name"] == "demand_by_hour")["handler"]({})
+    assert hours["rows"][0]["hour"] == "09" and hours["rows"][0]["workers_available"] < 30

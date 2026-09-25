@@ -31,3 +31,7 @@ approval_required:              # L4 가드레일: 아래 중 하나라도 해�
   matching_stage_gte: 3         # 이 단계 이상 완화 매칭으로 배정
   non_master: true              # 명장 후보가 있는데 명장이 아닌 작업자에게 배정
   bounds: {matching_stage_gte: [1, 3]}
+
+overrides:                      # 구간 조건: when의 차원 값에 해당하는 지시서에만 set을 적용
+  allowed_sections: [matching, cei, approval_required]   # 검증(작업소요·이동시간)에 쓰는 섹션은 제외
+  rules: []                     # 예: {when: {branch: B, hour: ["09", "10"]}, set: {"matching.area_extension_km[2]": 4}}

@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 from core.interfaces import DecisionRecord, Violation
+from core.params import check_params
 
 DOMAINS_DIR = Path(__file__).resolve().parent.parent / "domains"
 
@@ -70,21 +71,8 @@ def test_spec_has_fixed_sections_in_order(domain):
 @pytest.mark.parametrize("domain", DOMAINS)
 def test_params_version_and_bounds(domain):
     params = load_yaml(domain, "params.yaml")
-    assert isinstance(params.get("version"), int)
-
-    sections = {k: v for k, v in params.items() if k != "version"}
-    assert sections, "params.yaml에 파라미터 섹션이 있어야 한다"
-    for name, section in sections.items():
-        assert isinstance(section, dict), f"{name}: 섹션은 매핑이어야 한다"
-        tunable = {k: v for k, v in section.items() if k != "bounds" and numeric_leaves(v)}
-        bounds = section.get("bounds", {})
-        missing = set(tunable) - set(bounds)
-        assert not missing, f"{name}: 허용 범위(bounds)가 없는 수치 파라미터 {sorted(missing)}"
-        for key, (lo, hi) in bounds.items():
-            assert key in section, f"{name}.bounds.{key}: 존재하지 않는 파라미터"
-            assert lo <= hi, f"{name}.bounds.{key}: min > max"
-            for v in numeric_leaves(section[key]):
-                assert lo <= v <= hi, f"{name}.{key}={v}가 허용 범위 [{lo}, {hi}] 밖"
+    assert [k for k in params if k not in ("version", "overrides")], "파라미터 섹션이 있어야 한다"
+    assert check_params(params, load_yaml(domain, "dimensions.yaml")) == []
 
 
 @pytest.mark.parametrize("domain", DOMAINS)
@@ -234,3 +222,16 @@ def test_approval_reasons_are_strings(pack, generated):
     for record in decisions[:20]:
         reasons = pack.approval_reasons(instance, record, decisions)
         assert isinstance(reasons, list) and all(isinstance(r, str) for r in reasons)
+
+
+# --- [M4] 분석 agent용 계약 ----------------------------------------------
+
+def test_analysis_tools(pack, generated):
+    instance, _ = generated
+    params = yaml.safe_load(Path(pack.params_path()).read_text(encoding="utf-8"))
+    decisions = pack.solve(instance, params)
+    tools = pack.analysis_tools(instance, decisions)
+    assert tools
+    for tool in tools:
+        assert {"name", "description", "input_schema"} <= set(tool) and callable(tool["handler"])
+        assert tool["handler"]({}) is not None

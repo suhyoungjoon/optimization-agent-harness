@@ -22,8 +22,11 @@ def submit(item_id: str, worker_id: str | None = None, start: str | None = None,
 
 
 def item_of(messages: list[dict]) -> str:
-    last = messages[0]["content"][-1]["text"]
-    return last.split("\n")[1].strip()
+    """하네스 러너의 항목 ID. 분석·개선 루프처럼 문자열 메시지면 대화 하나로 본다."""
+    first = messages[0]["content"]
+    if isinstance(first, str):
+        return "_conversation"
+    return first[-1]["text"].split("\n")[1].strip()
 
 
 class FakeLLM:

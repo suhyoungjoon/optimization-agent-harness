@@ -64,3 +64,8 @@ class DomainPack(Protocol):
     def approval_reasons(self, instance: Any, record: DecisionRecord,
                          decisions: list[DecisionRecord]) -> list[str]: ...    # 비면 승인 불필요
     def subset(self, instance: Any, item_ids: list[str]) -> Any: ...          # 항목 일부만 남긴 인스턴스
+
+    # --- [M4 추가] 분석 agent용 ---
+    # 차원 집계로 드러나지 않는 도메인 고유 통계 (예: 자원별 활용률).
+    # 각 항목: {"name", "description", "input_schema", "handler": fn(args: dict) -> Any}
+    def analysis_tools(self, instance: Any, decisions: list[DecisionRecord]) -> list[dict]: ...

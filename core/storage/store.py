@@ -53,6 +53,39 @@ CREATE TABLE IF NOT EXISTS traces (
     ts REAL NOT NULL,
     PRIMARY KEY (run_id, item_id, step)
 );
+CREATE TABLE IF NOT EXISTS reports (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(run_id),
+    status TEXT NOT NULL,
+    body TEXT,
+    score TEXT,
+    labels TEXT NOT NULL DEFAULT '{}',
+    error TEXT,
+    created_at REAL NOT NULL,
+    finished_at REAL
+);
+CREATE TABLE IF NOT EXISTS proposal_batches (
+    id TEXT PRIMARY KEY,
+    report_id TEXT NOT NULL REFERENCES reports(id),
+    status TEXT NOT NULL,
+    meta TEXT,
+    error TEXT,
+    created_at REAL NOT NULL,
+    finished_at REAL
+);
+CREATE TABLE IF NOT EXISTS proposals (
+    id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL REFERENCES proposal_batches(id),
+    report_id TEXT NOT NULL REFERENCES reports(id),
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,          -- proposed | invalid | simulating | simulated | approved | rejected | stale
+    body TEXT NOT NULL,
+    errors TEXT NOT NULL,
+    simulation TEXT,
+    decision TEXT,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
 """
 
 # M3에서 runs에 추가한 열 (기존 DB는 ALTER TABLE로 보강)
@@ -175,3 +208,117 @@ class Store:
             rows = self.conn.execute(
                 "SELECT record FROM decisions WHERE run_id = ? ORDER BY seq", (run_id,)).fetchall()
         return [json.loads(r["record"]) for r in rows]
+
+    # --- 분석 리포트 ---
+    def create_report(self, run_id: str) -> str:
+        report_id = f"rep-{uuid.uuid4().hex[:8]}"
+        with self.lock, self.conn:
+            self.conn.execute("INSERT INTO reports (id, run_id, status, created_at) VALUES (?, ?, 'running', ?)",
+                              (report_id, run_id, time.time()))
+        return report_id
+
+    def finish_report(self, report_id: str, body: dict, score: dict) -> None:
+        with self.lock, self.conn:
+            self.conn.execute("UPDATE reports SET status = 'done', body = ?, score = ?, finished_at = ? WHERE id = ?",
+                              (json.dumps(to_jsonable(body), ensure_ascii=False), json.dumps(score, ensure_ascii=False),
+                               time.time(), report_id))
+
+    def fail_report(self, report_id: str, error: str) -> None:
+        with self.lock, self.conn:
+            self.conn.execute("UPDATE reports SET status = 'error', error = ?, finished_at = ? WHERE id = ?",
+                              (error, time.time(), report_id))
+
+    def set_label(self, report_id: str, finding_id: str, label: str | None) -> dict:
+        report = self.get_report(report_id)
+        labels = dict(report["labels"])
+        if label is None:
+            labels.pop(finding_id, None)
+        else:
+            labels[finding_id] = label
+        with self.lock, self.conn:
+            self.conn.execute("UPDATE reports SET labels = ? WHERE id = ?", (json.dumps(labels), report_id))
+        return labels
+
+    def get_report(self, report_id: str) -> dict | None:
+        with self.lock:
+            row = self.conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
+        if row is None:
+            return None
+        out = dict(row)
+        for key in ("body", "score", "labels"):
+            out[key] = json.loads(out[key]) if out[key] else None
+        return out
+
+    # --- 개선안 ---
+    def create_batch(self, report_id: str) -> str:
+        batch_id = f"bat-{uuid.uuid4().hex[:8]}"
+        with self.lock, self.conn:
+            self.conn.execute("INSERT INTO proposal_batches (id, report_id, status, created_at) VALUES (?, ?, 'running', ?)",
+                              (batch_id, report_id, time.time()))
+        return batch_id
+
+    def finish_batch(self, batch_id: str, report_id: str, proposals: list[dict], meta: dict) -> list[str]:
+        now = time.time()
+        ids = []
+        with self.lock, self.conn:
+            for p in proposals:
+                pid = f"prop-{uuid.uuid4().hex[:8]}"
+                ids.append(pid)
+                self.conn.execute(
+                    "INSERT INTO proposals (id, batch_id, report_id, kind, status, body, errors, created_at, updated_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (pid, batch_id, report_id, str(p["proposal"].get("kind")),
+                     "invalid" if p["errors"] else "proposed",
+                     json.dumps(p["proposal"], ensure_ascii=False), json.dumps(p["errors"], ensure_ascii=False), now, now))
+            self.conn.execute("UPDATE proposal_batches SET status = 'done', meta = ?, finished_at = ? WHERE id = ?",
+                              (json.dumps(to_jsonable(meta), ensure_ascii=False), now, batch_id))
+        return ids
+
+    def fail_batch(self, batch_id: str, error: str) -> None:
+        with self.lock, self.conn:
+            self.conn.execute("UPDATE proposal_batches SET status = 'error', error = ?, finished_at = ? WHERE id = ?",
+                              (error, time.time(), batch_id))
+
+    def get_batch(self, batch_id: str) -> dict | None:
+        with self.lock:
+            row = self.conn.execute("SELECT * FROM proposal_batches WHERE id = ?", (batch_id,)).fetchone()
+            ids = [r["id"] for r in self.conn.execute(
+                "SELECT id FROM proposals WHERE batch_id = ? ORDER BY created_at, rowid", (batch_id,))]
+        if row is None:
+            return None
+        return {**dict(row), "meta": json.loads(row["meta"]) if row["meta"] else None,
+                "proposals": [self.get_proposal(i) for i in ids]}
+
+    def get_proposal(self, proposal_id: str) -> dict | None:
+        with self.lock:
+            row = self.conn.execute("SELECT * FROM proposals WHERE id = ?", (proposal_id,)).fetchone()
+        if row is None:
+            return None
+        out = dict(row)
+        for key in ("body", "errors", "simulation", "decision"):
+            out[key] = json.loads(out[key]) if out[key] else None
+        return out
+
+    def update_proposal(self, proposal_id: str, **fields) -> dict:
+        sets, args = [], []
+        for key, value in fields.items():
+            sets.append(f"{key} = ?")
+            args.append(json.dumps(to_jsonable(value), ensure_ascii=False)
+                        if key in ("simulation", "decision") and value is not None else value)
+        with self.lock, self.conn:
+            self.conn.execute(f"UPDATE proposals SET {', '.join(sets)}, updated_at = ? WHERE id = ?",
+                              (*args, time.time(), proposal_id))
+        return self.get_proposal(proposal_id)
+
+    def mark_stale(self, kind: str, except_id: str) -> None:
+        """승인으로 기준 파일이 바뀌면, 같은 종류의 다른 미결 개선안은 옛 기준으로 만든 것이 된다."""
+        with self.lock, self.conn:
+            self.conn.execute("UPDATE proposals SET status = 'stale', updated_at = ? WHERE kind = ? AND id != ?"
+                              " AND status IN ('proposed', 'simulated')", (time.time(), kind, except_id))
+
+    def decided_proposals(self) -> list[dict]:
+        with self.lock:
+            ids = [r["id"] for r in self.conn.execute(
+                "SELECT id FROM proposals WHERE status IN ('approved', 'rejected') ORDER BY updated_at")]
+        return [self.get_proposal(i) for i in ids]
+
