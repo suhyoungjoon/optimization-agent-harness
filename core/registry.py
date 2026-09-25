@@ -26,3 +26,10 @@ def load_pack(domain: str, params: dict | None = None) -> DomainPack:
 
 def load_params(pack: DomainPack) -> dict:
     return yaml.safe_load(Path(pack.params_path()).read_text(encoding="utf-8"))
+
+
+def list_faults(pack: DomainPack) -> list[dict]:
+    """심을 수 있는 결함의 ID와 이름. 정답(answer)은 노출하지 않는다."""
+    path = Path(pack.params_path()).parent / "faults.yaml"
+    faults = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return [{"id": fid, "name": spec.get("name", fid)} for fid, spec in faults.items()]
