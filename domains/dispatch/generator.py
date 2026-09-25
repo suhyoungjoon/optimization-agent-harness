@@ -115,7 +115,7 @@ def _inject_p2(rng, inst: Instance, spec: dict, cfg: dict):
         w.certs.remove(cert)
     n_target = round(len(holders) * g["share_in_branch"])
     in_target = [w for w in inst.workers if w.branch == target]
-    others = [w for w in inst.workers if w.branch != target]
+    others = [w for w in inst.workers if w.branch not in (target, g.get("starved_branch"))]
     chosen = rng.sample(in_target, min(n_target, len(in_target)))
     chosen += rng.sample(others, len(holders) - len(chosen))
     for w in chosen:

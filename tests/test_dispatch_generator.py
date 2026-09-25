@@ -68,6 +68,7 @@ def test_p2_concentrates_pole_certs(base):
     holders = [w for w in inst.workers if "pole" in w.certs]
     assert len(holders) == sum("pole" in w.certs for w in base[0].workers)
     assert sum(w.branch == "A" for w in holders) / len(holders) >= 0.8
+    assert not any(w.branch == "C" for w in holders)
     assert truth["faults"]["P2"]["affected_workers"] == sorted(w.id for w in holders)
 
 
