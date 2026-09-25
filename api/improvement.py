@@ -24,9 +24,12 @@ from core.interfaces import DecisionRecord
 from core.registry import load_pack, load_params
 from core.storage.store import Store
 
+from .replay import equivalent_run_ids
+
 
 class AnalysisRequest(BaseModel):
     run_id: str
+    cached: bool = False      # 같은 조건 실행의 저장된 리포트를 재생 (시연 모드에서는 항상)
 
 
 class LabelRequest(BaseModel):
@@ -36,12 +39,14 @@ class LabelRequest(BaseModel):
 
 class ProposalRequest(BaseModel):
     report_id: str
+    cached: bool = False
 
 
 class SimulateRequest(BaseModel):
     level: str = "L3"                 # spec 개선안: AI agent를 돌릴 레벨
     scope: list[str] | None = None    # spec 개선안: 실행 범위 (없으면 분석한 run의 범위)
     confirm: bool = False             # spec 개선안: 비용 확인 후 true로 다시 요청
+    cached: bool = False              # spec 개선안: 저장된 시뮬레이션 결과를 재생
 
 
 class DecisionRequest(BaseModel):
@@ -55,6 +60,7 @@ class Context:
     executor: Any
     make_llm: Any
     llm_config: dict
+    replay: bool = False      # 시연 모드: LLM 대신 저장된 결과를 재생
 
 
 def _run_context(store: Store, run_id: str):
@@ -104,7 +110,12 @@ def register(app: FastAPI, ctx: Context) -> None:
     # --- 분석 ---
     @app.post("/analysis")
     def create_analysis(req: AnalysisRequest):
-        _run_context(store, req.run_id)
+        run, *_ = _run_context(store, req.run_id)
+        if ctx.replay or req.cached:
+            report = store.latest_report(equivalent_run_ids(store, run))
+            if report is None:
+                raise HTTPException(404, "같은 조건의 실행에 대한 저장된 분석 리포트가 없음")
+            return JSONResponse(status_code=202, content={"id": report["id"], "status": "done", "replayed": True})
         llm = _llm_or_503(ctx)
         report_id = store.create_report(req.run_id)
         ctx.executor.submit(_analyze_job, report_id, req.run_id, llm)
@@ -139,6 +150,11 @@ def register(app: FastAPI, ctx: Context) -> None:
         report = get_analysis(req.report_id)
         if report["status"] != "done":
             raise HTTPException(400, "끝난 리포트로만 개선안을 만들 수 있음")
+        if ctx.replay or req.cached:
+            batch = store.latest_batch(req.report_id)
+            if batch is None:
+                raise HTTPException(404, "이 리포트로 만든 저장된 개선안이 없음")
+            return JSONResponse(status_code=202, content={"id": batch["id"], "status": "done", "replayed": True})
         llm = _llm_or_503(ctx)
         batch_id = store.create_batch(req.report_id)
         ctx.executor.submit(_propose_job, batch_id, report, llm)
@@ -195,6 +211,16 @@ def register(app: FastAPI, ctx: Context) -> None:
         scope = req.scope or run.get("scope")
         if not scope:
             raise HTTPException(400, "명세 개선안 시뮬레이션에는 실행 범위(scope)가 필요함 (비용 때문)")
+        stored = p.get("simulation") or {}
+        if ctx.replay or req.cached:
+            if not stored.get("run_ids"):
+                raise HTTPException(404, "이 명세 개선안의 저장된 시뮬레이션 결과가 없음")
+            if not req.confirm:
+                return {"needs_confirmation": True, "estimate": {
+                    "level": stored.get("level"), "items": stored.get("items"), "runs": 2,
+                    "estimate_usd": stored.get("cost_usd"), "replayed": True,
+                    "note": "저장된 결과를 재생합니다 (실제 비용 없음)"}}
+            return store.update_proposal(proposal_id, status="simulated", simulation={**stored, "replayed": True})
         estimate = estimate_spec_cost(store, req.level, len(scope))
         if not req.confirm:
             return {"needs_confirmation": True, "estimate": estimate}
