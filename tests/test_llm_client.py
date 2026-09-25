@@ -9,8 +9,9 @@ class FakeMessage:
     def __init__(self, n):
         self.n = n
 
-    def to_dict(self):
-        return {"content": [{"type": "text", "text": f"reply {self.n}"}], "stop_reason": "end_turn",
+    def to_dict(self, **kwargs):
+        return {"content": [{"type": "text", "text": f"reply {self.n}", "citations": None}],
+                "stop_reason": "end_turn",
                 "model": "claude-sonnet-5",
                 "usage": {"input_tokens": 1000, "output_tokens": 200,
                           "cache_creation_input_tokens": 0, "cache_read_input_tokens": 3000}}
@@ -47,6 +48,11 @@ def test_request_shape(config, tmp_path):
     assert req["thinking"] == {"type": "adaptive"}
     assert req["output_config"] == {"effort": config["effort"]}
     assert "temperature" not in req
+
+
+def test_null_fields_dropped(config, tmp_path):
+    client, _ = make(config, tmp_path)
+    assert client.create(**ARGS).content == [{"type": "text", "text": "reply 1"}]
 
 
 def test_cache_hits_and_salt(config, tmp_path):

@@ -148,10 +148,19 @@ class AnthropicClient:
         key = ResponseCache.key({**request, "salt": salt}) if self.cache else None
         if key and (hit := self.cache.get(key)):
             return hit
-        raw = self.api.messages.create(**request).to_dict()
-        resp = LLMResponse(content=raw["content"], stop_reason=raw["stop_reason"],
+        raw = self.api.messages.create(**request).to_dict(mode="json")
+        resp = LLMResponse(content=[_drop_none(block) for block in raw["content"]], stop_reason=raw["stop_reason"],
                            usage={k: raw.get("usage", {}).get(k) or 0 for k in USAGE_KEYS},
                            model=raw.get("model", self.model))
         if key:
             self.cache.put(key, resp)
         return resp
+
+
+def _drop_none(value: Any) -> Any:
+    """응답의 null 필드를 지운다. content 블록을 그대로 다음 요청에 되돌려 보내기 위함."""
+    if isinstance(value, dict):
+        return {k: _drop_none(v) for k, v in value.items() if v is not None}
+    if isinstance(value, list):
+        return [_drop_none(v) for v in value]
+    return value
