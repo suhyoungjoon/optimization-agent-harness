@@ -259,3 +259,12 @@ code.json { color: var(--text-secondary); word-break: break-all; }
 .compare-table-inner thead th { color: var(--text-secondary); font-weight: 500; font-size: 12px; }
 .tile input[type="number"] { width: 100px; margin: 4px 0; }
 .status-line > span + span { margin-left: 12px; }
+
+/* 시연 모드 표시 */
+.demo-banner {
+  display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline;
+  margin: 0 0 12px; padding: 8px 12px;
+  border: 1px solid var(--series-1); border-left-width: 4px; border-radius: 6px;
+  background: var(--surface);
+}
+.demo-banner strong { color: var(--series-1); }

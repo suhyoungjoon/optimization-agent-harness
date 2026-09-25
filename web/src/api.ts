@@ -1,5 +1,5 @@
 import type {
-  CompareResult, Dataset, DecisionRecord, DomainInfo, HarnessInfo, HistoryRow, Proposal, ProposalBatch, Report, Run,
+  CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DecisionRecord, DomainInfo, HarnessInfo, HistoryRow, Proposal, ProposalBatch, Report, Run,
   SpecEstimate, TraceRecord,
 } from "./types";
 
@@ -26,6 +26,8 @@ export interface RunOptions {
 export const api = {
   domains: () => request<DomainInfo[]>("/domains"),
   harness: () => request<HarnessInfo>("/harness/levels"),
+  demo: () =>
+    request<{ demo: boolean; manifest?: DemoManifest; work_dir?: string; catalog?: DemoCatalogEntry[] }>("/demo"),
   createDataset: (domain: string, seed: number, faults: string[]) =>
     request<Dataset>(`/domains/${domain}/datasets`, {
       method: "POST",

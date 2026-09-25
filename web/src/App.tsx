@@ -5,7 +5,7 @@ import ComparePanel from "./components/ComparePanel";
 import ImprovementPanel from "./components/ImprovementPanel";
 import TracePanel from "./components/TracePanel";
 import { adapters } from "./domains";
-import type { CompareSummary, Dataset, DecisionRecord, DomainInfo, HarnessInfo, Run } from "./types";
+import type { CompareSummary, Dataset, DecisionRecord, DemoCatalogEntry, DomainInfo, HarnessInfo, Run } from "./types";
 
 type Tab = "compare" | "trace" | "analysis" | "improve";
 const TABS: { id: Tab; label: string; milestone?: string }[] = [
@@ -22,6 +22,7 @@ export default function App() {
   const [domains, setDomains] = useState<DomainInfo[]>([]);
   const [domainName, setDomainName] = useState("");
   const [harness, setHarness] = useState<HarnessInfo | null>(null);
+  const [demoCatalog, setDemoCatalog] = useState<DemoCatalogEntry[]>([]);
   const [tab, setTab] = useState<Tab>("compare");
   const [fatal, setFatal] = useState<string | null>(null);
 
@@ -49,6 +50,7 @@ export default function App() {
         setDomains(d);
         setDomainName(d[0]?.name ?? "");
         setHarness(h);
+        if (h.demo) api.demo().then((d) => setDemoCatalog(d.catalog ?? [])).catch(() => undefined);
       })
       .catch((e) => setFatal(String(e)));
     return () => streams.current.forEach((close) => close());
@@ -163,6 +165,7 @@ export default function App() {
           domainName && <span className="muted">도메인: {domainName}</span>
         )}
       </header>
+      {harness?.demo && <DemoBanner manifest={harness.demo} catalog={demoCatalog} />}
       <nav className="tabs" role="tablist">
         {TABS.map((t) => (
           <button
@@ -252,6 +255,28 @@ export default function App() {
           />
         )}
       </main>
+    </div>
+  );
+}
+
+function DemoBanner({ manifest, catalog }: { manifest: NonNullable<HarnessInfo["demo"]>; catalog: DemoCatalogEntry[] }) {
+  return (
+    <div className="demo-banner" role="note">
+      <strong>시연 모드</strong>
+      <span>
+        AI 결과는 저장된 실행을 재생합니다 (LLM 호출·네트워크 없음). 규칙 agent와 시뮬레이션은 실제로 계산하고, 승인은 작업 복사본에만 반영됩니다.
+      </span>
+      <span className="muted small">
+        번들 {manifest.created_at}
+        {manifest.git_commit && ` · ${manifest.git_ref} ${manifest.git_commit.slice(0, 7)}`}
+        {manifest.note && ` · ${manifest.note}`}
+      </span>
+      {catalog.length > 0 && (
+        <span className="muted small">
+          재생 가능한 AI 실행:{" "}
+          {catalog.map((c) => `${c.dataset_id} ${c.level} ${c.items}건 ×${c.runs}`).join(" · ")}
+        </span>
+      )}
     </div>
   );
 }

@@ -24,10 +24,11 @@ from core.harness.levels import load_levels
 from core.harness.runner import CORE_REASON_CODES
 from core.improvement.changes import spec_sections
 from core.llm.client import AnthropicClient, LLMClient, load_config
-from core.registry import list_domains, list_faults, load_pack, load_params
+from core.registry import list_domains, list_faults, load_pack, load_params, set_domain_files_root
 from core.storage.store import Store, to_jsonable
 
 from . import improvement
+from .replay import REPLAY_SECONDS, DemoBundle, ReplayClock
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB = ROOT / "runs" / "harness.db"
@@ -46,6 +47,7 @@ class RunRequest(BaseModel):
     repeats: int = Field(default=1, ge=1, le=10)
     scope: list[str] | None = None      # 실행할 항목 ID (없으면 전체)
     group_id: str | None = None         # 같은 실험으로 묶을 때
+    cached: bool = False                # AI: 같은 조건의 저장된 실행을 재생 (시연 모드에서는 항상)
 
 
 class Progress:
@@ -64,14 +66,37 @@ class Progress:
             return dict(self._state[run_id]) if run_id in self._state else None
 
 
+def _no_llm_in_demo():
+    raise RuntimeError("시연 모드에서는 LLM을 호출하지 않는다 (저장된 결과만 재생)")
+
+
 def create_app(db_path: str | Path | None = None, serve_web: bool = True,
-               llm_factory: Callable[[], LLMClient] | None = None) -> FastAPI:
-    store = Store(db_path or os.environ.get("HARNESS_DB", DEFAULT_DB))
+               llm_factory: Callable[[], LLMClient] | None = None,
+               demo_bundle: str | Path | None = None, demo_work_root: str | Path | None = None,
+               replay_seconds: float = REPLAY_SECONDS) -> FastAPI:
+    """demo_bundle을 주면 시연 모드: 번들의 작업 복사본을 쓰고, LLM은 만들지 않고, AI 결과는 재생만 한다."""
+    demo = DemoBundle(demo_bundle, demo_work_root or ROOT / "runs") if demo_bundle else None
+    if demo:
+        set_domain_files_root(demo.domain_root)
+        store = Store(demo.db_path)
+        make_llm = _no_llm_in_demo
+    else:
+        store = Store(db_path or os.environ.get("HARNESS_DB", DEFAULT_DB))
     llm_config = load_config()
-    make_llm = llm_factory or (lambda: AnthropicClient(llm_config))
+    if not demo:
+        make_llm = llm_factory or (lambda: AnthropicClient(llm_config))
     executor = ThreadPoolExecutor(max_workers=llm_config.get("concurrency", 4))
     progress = Progress()
+    replay = ReplayClock(replay_seconds)
     app = FastAPI(title="optimization-agent-harness")
+
+    def view(run: dict) -> dict:
+        """재생 중인 실행은 진행률이 끝날 때까지 running으로 보인다."""
+        state = replay.state(run["run_id"])
+        if state is None:
+            return {**run, "progress": progress.get(run["run_id"])}
+        return {**run, "status": run["status"] if state["finished"] else "running", "progress": state,
+                "replayed": True}
 
     def pack_or_404(domain: str):
         try:
@@ -93,7 +118,14 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
     @app.get("/harness/levels")
     def levels():
         return {"levels": {name: to_jsonable(level) for name, level in load_levels().items()},
-                "llm": {k: llm_config.get(k) for k in ("model", "effort", "cache", "concurrency")}}
+                "llm": {k: llm_config.get(k) for k in ("model", "effort", "cache", "concurrency")},
+                "demo": demo.manifest if demo else None}
+
+    @app.get("/demo")
+    def demo_info():
+        if not demo:
+            return {"demo": False}
+        return {"demo": True, "manifest": demo.manifest, "work_dir": str(demo.work), "catalog": demo.catalog(store)}
 
     @app.post("/domains/{domain}/datasets")
     def create_dataset(domain: str, req: DatasetRequest):
@@ -138,6 +170,17 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
 
         if req.level not in load_levels():
             raise HTTPException(400, f"unknown harness level: {req.level}")
+        if demo or req.cached:
+            stored = store.done_runs(dataset["id"], "ai", req.level, req.scope)
+            if not stored:
+                raise HTTPException(404, f"저장된 AI 실행이 없음: {dataset['id']} · {req.level} · "
+                                         f"{'전체' if req.scope is None else f'{len(req.scope)}건'} 범위"
+                                         + (" (시연 모드: 번들에 저장된 조건으로만 실행할 수 있음)" if demo else ""))
+            runs = stored[:req.repeats]
+            for run in runs:
+                replay.start(run["run_id"], (run.get("meta") or {}).get("items") or len(req.scope or []))
+            return JSONResponse(status_code=202, content={"group_id": runs[0].get("group_id"), "replayed": True,
+                                                          "runs": [view(r) for r in runs]})
         try:
             llm = make_llm()
         except Exception as exc:  # 자격 증명이 없는 경우 등
@@ -169,7 +212,7 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
 
     @app.get("/runs/{run_id}")
     def get_run(run_id: str):
-        return {**run_or_404(run_id), "progress": progress.get(run_id)}
+        return view(run_or_404(run_id))
 
     @app.get("/runs/{run_id}/decisions")
     def get_decisions(run_id: str):
@@ -189,8 +232,9 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
         def events():
             last = None
             while True:
-                run = store.get_run(run_id)
-                state = {"run_id": run_id, "status": run["status"], **(progress.get(run_id) or {})}
+                run = view(store.get_run(run_id))
+                state = {"run_id": run_id, "status": run["status"], **(run.get("progress") or {})}
+                state.pop("finished", None)
                 if state != last:
                     yield f"data: {json.dumps(state, ensure_ascii=False)}\n\n"
                     last = state
@@ -207,7 +251,7 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
             raise HTTPException(400, "runs 파라미터가 비어 있음")
         return compare(store, run_ids)
 
-    improvement.register(app, improvement.Context(store, executor, make_llm, llm_config))
+    improvement.register(app, improvement.Context(store, executor, make_llm, llm_config, replay=bool(demo)))
 
     if serve_web and WEB_DIST.is_dir():   # 정적 파일은 모든 API 경로 뒤에 붙인다
         app.mount("/", StaticFiles(directory=WEB_DIST, html=True), name="web")
@@ -215,6 +259,12 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
 
 
 if __name__ == "__main__":
+    import argparse
+
     import uvicorn
 
-    uvicorn.run(create_app(), host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "8000")))
+    parser = argparse.ArgumentParser(description="API + 빌드된 프런트엔드 서버")
+    parser.add_argument("--demo", help="시연 번들 폴더 (저장된 결과만 재생, 네트워크 사용 안 함)")
+    args = parser.parse_args()
+    uvicorn.run(create_app(demo_bundle=args.demo), host=os.environ.get("HOST", "127.0.0.1"),
+                port=int(os.environ.get("PORT", "8000")))

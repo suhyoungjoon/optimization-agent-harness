@@ -12,6 +12,23 @@ from core.interfaces import DomainPack
 
 DOMAINS_DIR = Path(__file__).resolve().parent.parent / "domains"
 
+# 도메인 파일(params.yaml, domain-spec.md 등)을 읽고 쓸 위치를 바꾼다 (시연 번들의 작업 복사본).
+# 설정하면 <root>/<도메인>/<파일>이 있을 때 그 파일을 쓴다.
+_domain_files_root: Path | None = None
+
+
+def set_domain_files_root(root: str | Path | None) -> None:
+    global _domain_files_root
+    _domain_files_root = Path(root) if root is not None else None
+
+
+def domain_file(domain: str, filename: str, default_dir: str | Path) -> Path:
+    if _domain_files_root is not None:
+        candidate = _domain_files_root / domain / filename
+        if candidate.is_file():
+            return candidate
+    return Path(default_dir) / filename
+
 
 def list_domains() -> list[str]:
     return sorted(p.name for p in DOMAINS_DIR.iterdir() if (p / "pack.py").is_file())

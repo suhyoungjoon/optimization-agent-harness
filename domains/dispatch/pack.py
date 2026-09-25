@@ -5,6 +5,7 @@ from pathlib import Path
 import yaml
 
 from core.interfaces import DecisionRecord, Violation
+from core.registry import domain_file
 
 from . import generator, metrics, rule_engine
 from .analysis import build_analysis_tools
@@ -12,10 +13,11 @@ from .models import Instance
 from .tools import build_tools
 
 PACK_DIR = Path(__file__).resolve().parent
+NAME = "dispatch"
 
 
 class DispatchPack:
-    name = "dispatch"
+    name = NAME
 
     def __init__(self, params: dict | None = None):
         # validate·metrics는 작업소요·이동시간 계산에 params가 필요하다.
@@ -43,10 +45,10 @@ class DispatchPack:
         return build_tools(instance, self.params)
 
     def spec_path(self) -> str:
-        return str(PACK_DIR / "domain-spec.md")
+        return str(domain_file(NAME, "domain-spec.md", PACK_DIR))
 
     def params_path(self) -> str:
-        return str(PACK_DIR / "params.yaml")
+        return str(domain_file(NAME, "params.yaml", PACK_DIR))
 
     def dimensions(self) -> dict:
         return yaml.safe_load((PACK_DIR / "dimensions.yaml").read_text(encoding="utf-8"))

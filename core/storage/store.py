@@ -322,3 +322,29 @@ class Store:
                 "SELECT id FROM proposals WHERE status IN ('approved', 'rejected') ORDER BY updated_at")]
         return [self.get_proposal(i) for i in ids]
 
+
+    # --- 재생(시연 모드, cached=true)용 조회 ---
+    def done_runs(self, dataset_id: str, agent: str, level: str | None, scope: list[str] | None) -> list[dict]:
+        """같은 데이터셋·agent·레벨·범위로 끝난 실행 (명세 시뮬레이션용 실행은 제외), 오래된 순."""
+        want = json.dumps(scope) if scope is not None else None
+        with self.lock:
+            ids = [r["run_id"] for r in self.conn.execute(
+                "SELECT run_id FROM runs WHERE dataset_id = ? AND agent = ? AND status = 'done'"
+                " AND level IS ? AND scope IS ? AND (group_id IS NULL OR group_id NOT LIKE 'spec-%')"
+                " ORDER BY created_at, rowid", (dataset_id, agent, level, want))]
+        return [self.get_run(i) for i in ids]
+
+    def latest_report(self, run_ids: list[str]) -> dict | None:
+        if not run_ids:
+            return None
+        marks = ",".join("?" for _ in run_ids)
+        with self.lock:
+            row = self.conn.execute(f"SELECT id FROM reports WHERE status = 'done' AND run_id IN ({marks})"
+                                    " ORDER BY created_at DESC LIMIT 1", run_ids).fetchone()
+        return self.get_report(row["id"]) if row else None
+
+    def latest_batch(self, report_id: str) -> dict | None:
+        with self.lock:
+            row = self.conn.execute("SELECT id FROM proposal_batches WHERE status = 'done' AND report_id = ?"
+                                    " ORDER BY created_at DESC LIMIT 1", (report_id,)).fetchone()
+        return self.get_batch(row["id"]) if row else None
