@@ -78,8 +78,9 @@ class DispatchPack:
         start = rule_engine.parse_start(record.decision)
         if order is None or worker is None or start is None:
             return []
-        rules = self.params["approval_required"]
-        threshold = self.params["cei"]["master_threshold"]
+        params = rule_engine.effective_params(instance, order, self.params)
+        rules = params["approval_required"]
+        threshold = params["cei"]["master_threshold"]
         reasons = []
         stage = rule_engine.actual_stage(instance, order, worker, start, self.params)
         if stage is None:

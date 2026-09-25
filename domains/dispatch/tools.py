@@ -95,7 +95,7 @@ def build_tools(inst: Instance, params: dict) -> list[dict]:
         schedules = rule_engine.schedules_from(inst, ctx.decisions, params, exclude=o.id)
         slots = rule_engine.stage_slots(inst, o, stage, certified,
                                         lambda w: schedules.get((w.id, o.day), []), params)
-        threshold = params["cei"]["master_threshold"]
+        threshold = rule_engine.effective_params(inst, o, params)["cei"]["master_threshold"]
         return {
             "stage": stage,
             "time_window_min": params["matching"]["time_window_min"][stage - 1],
