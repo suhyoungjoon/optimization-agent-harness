@@ -37,15 +37,30 @@ class Violation:
     message: str
 
 
+@dataclass
+class ToolContext:              # [M3 추가] 도구 handler가 받는 실행 맥락
+    item_id: str                 # 지금 결정 중인 항목
+    decisions: list[DecisionRecord]   # 지금까지 배정된 결정 (success, pending_approval)
+
+
 class DomainPack(Protocol):
     name: str
 
     def generate(self, seed: int, faults: list[str]) -> tuple[Any, dict]: ...
-    def items(self, instance: Any) -> list[str]: ...
+    def items(self, instance: Any) -> list[str]: ...          # 처리 순서대로
     def solve(self, instance: Any, params: dict) -> list[DecisionRecord]: ...
     def validate(self, instance: Any, decisions: list[DecisionRecord]) -> list[Violation]: ...
     def metrics(self, instance: Any, decisions: list[DecisionRecord]) -> dict[str, float]: ...
+    # 각 항목: {"name", "description", "input_schema", "handler": fn(args: dict, ctx: ToolContext) -> Any}
+    # handler는 [M3 추가]. 코어는 LLM에 보낼 때 handler를 뺀다.
     def tools(self, instance: Any) -> list[dict]: ...
     def spec_path(self) -> str: ...
     def params_path(self) -> str: ...
     def dimensions(self) -> dict: ...
+
+    # --- [M3 추가] AI agent 하네스용 ---
+    def decision_schema(self) -> dict: ...                     # DecisionRecord.decision의 JSON Schema
+    def item_dims(self, instance: Any, item_id: str) -> dict[str, str]: ...   # 항목의 분석 차원 값
+    def approval_reasons(self, instance: Any, record: DecisionRecord,
+                         decisions: list[DecisionRecord]) -> list[str]: ...    # 비면 승인 불필요
+    def subset(self, instance: Any, item_ids: list[str]) -> Any: ...          # 항목 일부만 남긴 인스턴스
