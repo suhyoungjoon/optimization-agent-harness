@@ -54,18 +54,21 @@ class AbortRun(RuntimeError):
 
 
 class HarnessRunner:
-    def __init__(self, pack: DomainPack, llm: LLMClient, level: Level, max_calls_per_item: int = 12):
+    def __init__(self, pack: DomainPack, llm: LLMClient, level: Level, max_calls_per_item: int = 12,
+                 spec_text: str | None = None):
         self.pack = pack
         self.llm = llm
         self.level = level
         self.max_calls = max_calls_per_item
+        self.spec_text = spec_text   # 명세 개선안 시뮬레이션용 (없으면 domain-spec.md)
 
     # --- 프롬프트 구성 -------------------------------------------------------
 
     def _system(self) -> list[dict]:
         text = BASE_INSTRUCTION
         if self.level.spec:
-            text += "\n\n# 도메인 명세\n" + Path(self.pack.spec_path()).read_text(encoding="utf-8")
+            spec = self.spec_text if self.spec_text is not None else Path(self.pack.spec_path()).read_text(encoding="utf-8")
+            text += "\n\n# 도메인 명세\n" + spec
         return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
 
     def _submit_tool(self) -> dict:
