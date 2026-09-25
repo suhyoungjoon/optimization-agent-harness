@@ -44,7 +44,20 @@ pytest                                  # 테스트 (LLM 호출 없음)
 python -m api.main                      # http://127.0.0.1:8000 (API + 화면)
 ```
 
-프런트엔드를 고치는 중이면 `python -m api.main`을 띄운 채 `(cd web && npm run dev)`.
+프런트엔드를 고치는 중이면 `python -m api.main`을 띄운 채 `(cd web && npm run dev)` 후 http://localhost:5173 (API 요청은 :8000으로 프록시).
+
+API 키가 없으면 비교 탭의 데이터 생성·규칙 agent까지만 동작한다(AI agent·분석·개선은 LLM이 필요).
+
+### API 키 없이 전체 흐름 보기 (리허설 번들)
+
+가짜 LLM으로 결과를 미리 만든 시연 번들을 시연 모드로 연다. 비교(L0·L3·L5), 트레이스, 분석, 개선까지 화면 전체를 네트워크 없이 돌려 볼 수 있다. 수치는 AI 성능과 무관하다(흐름·화면 확인용).
+
+```bash
+python -m scripts.rehearsal_bundle            # → demo/rehearsal
+python -m api.main --demo demo/rehearsal      # http://127.0.0.1:8000
+```
+
+화면에서 결함 패턴 P1~P4를 모두 켜고 seed 42로 데이터를 생성한 뒤, 실행 범위를 **1일차 앞 10건(시범)**으로 두고 AI agent를 L0·L3·L5로 실행한다. 분석 탭은 **규칙 agent 전체 실행** 후 **분석 agent 실행**. 승인은 작업 복사본에만 반영되므로 서버를 다시 시작하면 처음 상태로 돌아간다.
 
 ### AI agent 실행
 
