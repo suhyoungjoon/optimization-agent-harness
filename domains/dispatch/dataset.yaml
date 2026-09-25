@@ -1,0 +1,30 @@
+# 가상 데이터 규모와 분포 (generator 입력). 개선 루프가 바꾸는 대상이 아니다.
+# 시각은 모두 "HH:MM", 거리는 km.
+
+grid: {width_km: 30, height_km: 10}
+branches:                        # 가로로 나란히 놓인 세로 띠. x_range = 관할 구역
+  A: {x_range: [0, 10]}
+  B: {x_range: [10, 20]}
+  C: {x_range: [20, 30]}
+boundary_zone_km: 1              # 다른 지점과 맞닿은 관할 경계에서 이 거리 이내면 area_zone=boundary
+
+days: 10
+orders_per_day: 150
+workers_per_branch: 10
+
+day: {start: "08:00", end: "18:00"}
+worker_availability: ["09:00", "18:00"]   # 기본 가능시간
+desired_time:                    # 고객 희망시간: step 간격, 시(hour)별 가중치
+  step_min: 30
+  hour_weights: {9: 3, 10: 3, 11: 2, 12: 1, 13: 2, 14: 2, 15: 2, 16: 1}
+
+orders:                          # 항목별 비율
+  work_type: {install: 0.5, repair: 0.5}
+  media: {HFC: 0.3, FTTx: 0.5, CATV: 0.2}
+  difficulty: {none: 0.6, pole: 0.15, outdoor: 0.15, high_risk: 0.1}
+  building_type: {house: 0.5, apartment: 0.5}
+
+workers:
+  skill_prob: {HFC: 0.5, FTTx: 0.7, CATV: 0.4}   # 기술별 보유 확률 (최소 1개 보장)
+  cert_share: {pole: 0.3, high_risk: 0.3}        # 자격 보유 비율 (지점별로 고르게 배분)
+  cei_range: [50, 100]
