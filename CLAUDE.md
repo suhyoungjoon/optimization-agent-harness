@@ -70,6 +70,7 @@ python -m api.main               # API + 빌드된 프런트엔드 서빙 (http:
 (cd web && npm run dev)          # 프런트엔드 개발 서버 (API는 :8000으로 프록시)
 python -m scripts.snapshot export --out demo/bundle --note "..."   # 시연 번들 (runs/harness.db + 커밋된 도메인 파일)
 python -m api.main --demo demo/bundle   # 시연 모드: 저장된 AI 결과만 재생, LLM·네트워크 없음
+node scripts/record_demo.mjs --stills   # 시연 장면 녹화 (시연 모드 서버에 대해, runs/recordings)
 ```
 AI agent 실행에는 `.env`의 `ANTHROPIC_API_KEY`가 필요하다. 모델·effort·캐시는 `configs/llm.yaml`, 최종 측정 때는 `LLM_CACHE=0`으로 입력 해시 캐시를 끈다.
 (명령어가 바뀌면 이 섹션을 갱신한다.)
