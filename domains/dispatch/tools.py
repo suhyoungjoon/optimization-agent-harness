@@ -4,6 +4,8 @@ handler는 (args, ctx: ToolContext)를 받아 JSON으로 바꿀 수 있는 값�
 오류는 {"error": ...}로 돌려주고, 코어가 tool_result의 is_error로 전달한다.
 """
 
+from collections import Counter
+
 from core.interfaces import DecisionRecord, ToolContext
 
 from . import rule_engine
@@ -136,8 +138,17 @@ def build_tools(inst: Instance, params: dict) -> list[dict]:
             decision={"worker_id": args.get("worker_id"), "start_time": args.get("start_time")},
             status="success", reason_code=None, evidence="", dims={})
         others = [d for d in ctx.decisions if d.item_id != o.id]
-        violations = [v for v in rule_engine.validate(inst, others + [candidate], params) if v.item_id == o.id]
-        return {"ok": not violations, "violations": [{"rule": v.rule, "message": v.message} for v in violations]}
+        # 겹침 위반은 늦게 시작하는 작업에 붙으므로, 후보를 넣기 전후를 비교해 새로 생긴 위반을 모두 본다
+        before = Counter((v.item_id, v.rule, v.message) for v in rule_engine.validate(inst, others, params))
+        violations = []
+        for v in rule_engine.validate(inst, others + [candidate], params):
+            key = (v.item_id, v.rule, v.message)
+            if before[key]:
+                before[key] -= 1
+            else:
+                violations.append(v)
+        return {"ok": not violations,
+                "violations": [{"item_id": v.item_id, "rule": v.rule, "message": v.message} for v in violations]}
 
     handlers = {"get_order": get_order, "find_candidates": find_candidates, "get_travel_time": get_travel_time,
                 "get_worker_schedule": get_worker_schedule, "check_assignment": check_assignment}

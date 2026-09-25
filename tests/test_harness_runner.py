@@ -161,3 +161,25 @@ def test_usage_accumulates(pack, small):  # noqa: F811
     out, _, _ = run(pack, small, "L0", rule_policy)
     n = len(small.orders)
     assert out.usage.tokens["input_tokens"] == 100 * n and out.usage.tokens["cache_read_input_tokens"] == 50 * n
+
+
+def test_overlap_with_earlier_placed_job_is_caught(pack, small):  # noqa: F811
+    """새 결정이 이미 배정된 작업보다 앞 시각에 들어가 겹치면, validate()는 위반을 기존(늦은) 작업에
+    붙인다. 검증 루프·가드레일은 이 경우도 새 결정의 위반으로 잡아야 한다."""
+    def policy(item, n, messages, tools):
+        if item == "O2":  # W2 10:00~10:45
+            return submit("O2", "W2", "10:00", 3)
+        if item == "O3":  # W2 09:00~10:30 (90분) → 뒤에 있는 O2와 겹침. 위반은 O2에 기록된다
+            return submit("O3", "W2", "09:00", 1) if n == 0 else submit("O3", reason="CAPACITY")
+        return rule_policy(item, n, messages, tools)
+
+    out, llm, got = run(pack, small, "L3", policy)
+    assert got["O3"].metrics["retries"] == 1 and got["O3"].status == "failed"
+    feedback = [c for c in llm.calls if c["item"] == "O3"][1]["messages"][-1]["content"][-1]["content"]
+    assert "schedule_overlap" in feedback
+    assert pack.validate(small, out.decisions) == []
+
+    out, _, got = run(pack, small, "L4", lambda item, n, m, t:
+                      submit("O3", "W2", "09:00", 1) if item == "O3" else policy(item, n, m, t))
+    assert got["O3"].status == "blocked"
+    assert pack.validate(small, out.decisions) == []

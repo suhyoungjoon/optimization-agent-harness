@@ -77,3 +77,12 @@ def test_subset_one_day(pack):
     records = pack.solve(sub, pack.params)
     assert len(records) == 150 and pack.validate(sub, records) == []
     assert 0 < pack.metrics(sub, records)["worker_utilization"] < 1
+
+
+def test_check_assignment_catches_overlap_with_later_job(pack, small):  # noqa: F811
+    before = [placed("O2", "W2", "10:00", stage=3)]   # W2 10:00~10:45
+    got = call(pack, small, "check_assignment", {"order_id": "O3", "worker_id": "W2", "start_time": "09:00"}, "O3",
+               before)
+    # 겹침은 늦게 시작하는 O2에 기록되지만, O3를 넣어서 생긴 위반으로 돌려준다
+    assert got["ok"] is False
+    assert [(v["item_id"], v["rule"]) for v in got["violations"]] == [("O2", "schedule_overlap")]
