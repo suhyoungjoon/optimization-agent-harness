@@ -7,9 +7,11 @@
 - 역할 분담: 규칙이 명확한 반복 실행은 규칙 엔진이 싸고 빠르다. AI는 규칙을 분석·개선하는 시행착오에서 유리하다 ([AI 적용 경계](docs/ai-application-boundary.md)).
 - 첫 도메인은 출동 스케줄링(`dispatch`)이며 가상 데이터만 쓴다. 지역은 서울 강남3구(서초·강남·송파 지점)로, 실제 구 경계 안에 지시서와 작업자를 만든다. 데이터에 문제 패턴(P1~P4)을 심어 두고, 분석 agent의 탐지율을 정답표로 채점한다.
 
-전체 기획은 [docs/plan.md](docs/plan.md), 새 도메인 추가는 [docs/domain-pack-guide.md](docs/domain-pack-guide.md).
+전체 기획은 [docs/plan.md](docs/plan.md), 화면 사용법은 [docs/ui-guide.md](docs/ui-guide.md), 새 도메인 추가는 [docs/domain-pack-guide.md](docs/domain-pack-guide.md).
 
 ## 화면
+
+자세한 사용법과 캡처는 [화면 매뉴얼](docs/ui-guide.md).
 
 | 탭 | 내용 |
 |---|---|
@@ -35,14 +37,36 @@
 
 ## 시작하기
 
-Python 3.11+, Node 20+.
+Python 3.11+, Node 20+, Git. 레포가 비공개라 클론하려면 GitHub 인증(`gh auth login` 또는 SSH 키)이 필요하다.
+
+macOS / Linux:
 
 ```bash
+git clone https://github.com/suhyoungjoon/optimization-agent-harness.git
+cd optimization-agent-harness
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest                                  # 테스트 (LLM 호출 없음)
 (cd web && npm ci && npm run build)     # 프런트엔드 빌드 → web/dist
 python -m api.main                      # http://127.0.0.1:8000 (API + 화면)
 ```
+
+Windows (PowerShell):
+
+```powershell
+winget install Python.Python.3.11 OpenJS.NodeJS.LTS Git.Git GitHub.cli   # 없는 것만. 설치 후 새 터미널
+gh auth login                                          # 비공개 레포 접근
+git clone https://github.com/suhyoungjoon/optimization-agent-harness.git
+cd optimization-agent-harness
+py -3.11 -m venv .venv
+.venv\Scripts\Activate.ps1                              # 막히면: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+pip install -e ".[dev]"
+pytest
+cd web; npm ci; npm run build; cd ..
+python -m api.main                                     # http://127.0.0.1:8000
+```
+
+환경변수는 PowerShell에서 `$env:LLM_CACHE="0"`, `$env:PORT="8080"`처럼 설정한다. 서버는 `Ctrl+C`로 끈다. 이후 명령은 macOS와 같다(`python -m ...`). `(cd web && ...)` 형태만 PowerShell에서는 `cd web; ...; cd ..`로 바꾼다.
 
 프런트엔드를 고치는 중이면 `python -m api.main`을 띄운 채 `(cd web && npm run dev)` 후 http://localhost:5173 (API 요청은 :8000으로 프록시).
 
