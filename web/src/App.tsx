@@ -2,13 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import AnalysisPanel from "./components/AnalysisPanel";
 import ComparePanel from "./components/ComparePanel";
+import DomainPanel from "./components/DomainPanel";
 import ImprovementPanel from "./components/ImprovementPanel";
 import TracePanel from "./components/TracePanel";
 import { adapters } from "./domains";
 import type { CompareSummary, Dataset, DecisionRecord, DemoCatalogEntry, DomainInfo, HarnessInfo, Run } from "./types";
 
-type Tab = "compare" | "trace" | "analysis" | "improve";
+type Tab = "domain" | "compare" | "trace" | "analysis" | "improve";
 const TABS: { id: Tab; label: string; milestone?: string }[] = [
+  { id: "domain", label: "도메인" },
   { id: "compare", label: "비교" },
   { id: "trace", label: "트레이스" },
   { id: "analysis", label: "분석" },
@@ -183,6 +185,9 @@ export default function App() {
       </nav>
       <main>
         {fatal && <p className="critical-text">✕ API에 연결할 수 없습니다: {fatal}</p>}
+        {domain && adapter && tab === "domain" && (
+          <DomainPanel domainName={domain.name} adapter={adapter} dataset={dataset} busy={busy} onGenerate={generate} />
+        )}
         {domain && adapter && tab === "compare" && (
           <ComparePanel
             domain={domain}

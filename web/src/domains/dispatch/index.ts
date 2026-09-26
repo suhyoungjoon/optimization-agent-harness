@@ -1,8 +1,32 @@
 import type { DomainAdapter, Scope } from "../types";
+import DispatchDataMap from "./DispatchDataMap";
 import DispatchMap from "./DispatchMap";
+import { hhmm } from "./districtMap";
+
+const LABELS: Record<string, string> = {
+  install: "개통", repair: "장애", none: "일반", pole: "승주", outdoor: "옥외", high_risk: "고위험",
+  house: "주택", apartment: "아파트",
+};
 
 export const dispatchAdapter: DomainAdapter = {
   ResultView: DispatchMap,
+  data: {
+    tables: [
+      { key: "branches", label: "지점", idField: "id" },
+      { key: "workers", label: "작업자", idField: "id" },
+      { key: "orders", label: "지시서", idField: "id" },
+    ],
+    hidden: ["polygon"],
+    format: (_table, field, value) => {
+      if (field === "desired" && typeof value === "number") return hhmm(value);
+      if (field === "available" && Array.isArray(value)) return `${hhmm(value[0])}~${hhmm(value[1])}`;
+      if (field === "certs" && Array.isArray(value)) return value.map((v) => LABELS[v] ?? v).join(", ") || "없음";
+      if (["work_type", "difficulty", "building_type"].includes(field) && typeof value === "string")
+        return `${LABELS[value] ?? value} (${value})`;
+      return undefined;
+    },
+    View: DispatchDataMap,
+  },
   metrics: [
     { key: "assignment_rate", label: "할당성공률", format: "pct", headline: true },
     { key: "desired_time_match_rate", label: "희망시간 일치율", format: "pct", headline: true },

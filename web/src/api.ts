@@ -1,5 +1,5 @@
 import type {
-  CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DecisionRecord, DomainInfo, HarnessInfo, HistoryRow, Proposal, ProposalBatch, Report, Run,
+  CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DomainDefinition, DecisionRecord, DomainInfo, HarnessInfo, HistoryRow, Proposal, ProposalBatch, Report, Run,
   SpecEstimate, TraceRecord,
 } from "./types";
 
@@ -33,6 +33,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ seed, faults }),
     }),
+  definition: (domain: string, answers = false) =>
+    request<DomainDefinition>(`/domains/${domain}/definition${answers ? "?answers=true" : ""}`),
   dataset: (domain: string, id: string) => request<Dataset>(`/domains/${domain}/datasets/${id}`),
   ruleRun: (datasetId: string, opts: Omit<RunOptions, "agent">) =>
     request<Run>("/runs", {

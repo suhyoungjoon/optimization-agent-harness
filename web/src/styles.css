@@ -287,3 +287,33 @@ code.json { color: var(--text-secondary); word-break: break-all; }
   :root:not([data-theme="light"]) .base-tiles { filter: invert(1) hue-rotate(180deg) grayscale(0.7) brightness(0.8) opacity(0.7); }
 }
 :root[data-theme="dark"] .base-tiles { filter: invert(1) hue-rotate(180deg) grayscale(0.7) brightness(0.8) opacity(0.7); }
+
+/* 도메인 탭 */
+.section-nav { margin-bottom: 12px; align-items: center; }
+.section-nav .muted { margin-left: auto; }
+.domain-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; }
+.domain-grid .wide { grid-column: 1 / -1; }
+.domain-stack { display: flex; flex-direction: column; gap: 12px; }
+.domain .panel h2 { margin-bottom: 8px; }
+.domain h2.spaced { margin-top: 16px; }
+.param-table, .kv-table, .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.param-table th, .param-table td, .kv-table th, .kv-table td, .data-table th, .data-table td {
+  text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top;
+}
+.param-table th, .data-table th { color: var(--text-secondary); font-weight: 600; }
+.kv-table th { width: 1%; white-space: nowrap; font-weight: 500; }
+.num-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.spec-section summary { cursor: pointer; }
+.spec-text { white-space: pre-wrap; margin-top: 8px; line-height: 1.6; }
+.data-panel .search { min-width: 180px; }
+.data-panel .facets { gap: 10px; }
+.data-scroll { max-height: 560px; overflow: auto; }
+.data-table th { position: sticky; top: 0; background: var(--surface); cursor: pointer; white-space: nowrap; }
+.data-table td { white-space: nowrap; }
+.data-table tbody tr { cursor: pointer; }
+.data-table tbody tr:hover { background: var(--page); }
+.data-table tbody tr.selected { background: color-mix(in srgb, var(--series-1) 14%, transparent); }
+.branch-zone.focused { fill-opacity: 0.3; stroke-width: 3; }
+.worker.focused { border-color: var(--text-primary); }
+.param-table.fixed { table-layout: fixed; }
+.num-cell.wrap { white-space: normal; }
