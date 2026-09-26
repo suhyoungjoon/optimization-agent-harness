@@ -140,6 +140,7 @@ def test_demo_runs_full_flow_offline(bundle, tmp_path, offline):
         rep = client.post("/analysis", json={"run_id": rule["run_id"]}).json()
         report = client.get(f"/analysis/{rep['id']}").json()
         assert report["status"] == "done" and report["score"]["detected"] == 1 and report["score"]["unlabeled"] == 1
+        assert report["run_id"] == rule["run_id"]      # 화면이 분석 대상 실행의 결과를 함께 그릴 수 있게
 
         # 개선: 저장된 개선안을 결정 전 상태로 재생, params 시뮬레이션은 실제 계산
         batch = client.get(f"/proposals/batches/{client.post('/proposals', json={'report_id': rep['id']}).json()['id']}").json()
