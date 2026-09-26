@@ -8,7 +8,7 @@ import yaml
 from core.interfaces import DecisionRecord
 from domains.dispatch import rule_engine
 from domains.dispatch.generator import generate
-from domains.dispatch.models import Instance, Order, Worker, hhmm_to_min
+from domains.dispatch.models import Branch, Instance, Order, Worker, hhmm_to_min
 
 PARAMS = yaml.safe_load(
     (Path(__file__).resolve().parent.parent / "domains" / "dispatch" / "params.yaml").read_text(encoding="utf-8"))
@@ -37,8 +37,9 @@ def small():
         order("O8", "09:00", 6, 6, media="HFC", work_type="repair"),  # W2 일정이 참
         order("O9", "15:00", 8, 8),                                  # W2가 가깝지만 명장 W1 우선
     ]
-    return Instance(branches={"A": (0, 10), "B": (10, 20)}, boundary_zone_km=1,
-                    workers=workers, orders=orders, days=1)
+    square = lambda x0: [(x0, 0), (x0 + 10, 0), (x0 + 10, 10), (x0, 10)]  # noqa: E731
+    return Instance(branches={"A": Branch("A", square(0)), "B": Branch("B", square(10))}, boundary_zone_km=1,
+                    workers=workers, orders=orders, days=1, geo={})
 
 
 def by_id(records):

@@ -19,9 +19,10 @@ weights:
   building: {house: 1.0, apartment: 1.1}
   bounds: {difficulty: [1.0, 3.0], building: [0.5, 2.0]}
 
-travel:                         # 이동시간 = 격자 거리 / 평균 속도
+travel:                         # 이동시간 = 직선거리 × 우회계수 / 평균 속도
   avg_speed_kmh: 30
-  bounds: {avg_speed_kmh: [10, 60]}
+  detour_factor: 1.3            # 도로 우회 근사. 고정값 (개선 대상 아님: bounds 폭 0)
+  bounds: {avg_speed_kmh: [10, 60], detour_factor: [1.3, 1.3]}
 
 cei:
   master_threshold: 80          # 이 값 이상이면 명장

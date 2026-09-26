@@ -104,7 +104,8 @@ class DispatchPack:
         keep = set(item_ids)
         orders = [o for o in instance.orders if o.id in keep]
         return Instance(branches=instance.branches, boundary_zone_km=instance.boundary_zone_km,
-                        workers=instance.workers, orders=orders, days=len({o.day for o in orders}) or 1)
+                        workers=instance.workers, orders=orders, days=len({o.day for o in orders}) or 1,
+                        geo=instance.geo)
 
     def analysis_tools(self, instance: Instance, decisions: list[DecisionRecord]) -> list[dict]:
         return build_analysis_tools(instance, decisions, self.params)
