@@ -150,3 +150,16 @@ def test_domain_params(client):
     assert body["params"]["version"] >= 1 and "overrides" in body["params"]
     assert list(body["spec_sections"])[0] == "목적"
     assert client.get("/domains/nope/params").status_code == 404
+
+
+def test_domain_definition_hides_answers_by_default(client):
+    d = client.get("/domains/dispatch/definition").json()
+    assert d["params"]["matching"]["docs"]["time_window_min"]
+    assert list(d["spec_sections"]) == ["목적", "필수 조건", "선호 조건", "판단 순서", "예외 처리", "사용 도구"]
+    assert "violation_rules" in d["dimensions"] and "LLM_ERROR" in d["core_reason_codes"]
+    assert d["files"]["params.yaml"] == "domains/dispatch/params.yaml"
+    assert [f["id"] for f in d["faults"]] == ["P1", "P2", "P3", "P4"]
+    assert all(set(f) == {"id", "name", "expected"} for f in d["faults"])     # 주입 방식·정답 없음
+    full = client.get("/domains/dispatch/definition?answers=true").json()
+    assert all({"generation", "answer"} <= set(f) for f in full["faults"])
+    assert client.get("/domains/nope/definition").status_code == 404

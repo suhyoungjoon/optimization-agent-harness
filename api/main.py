@@ -24,7 +24,7 @@ from core.harness.levels import load_levels
 from core.harness.runner import CORE_REASON_CODES
 from core.improvement.changes import spec_sections
 from core.llm.client import AnthropicClient, LLMClient, load_config
-from core.registry import list_domains, list_faults, load_pack, load_params, set_domain_files_root
+from core.registry import list_domains, list_faults, load_faults, load_pack, load_params, set_domain_files_root
 from core.storage.store import Store, to_jsonable
 
 from . import improvement
@@ -64,6 +64,13 @@ class Progress:
     def get(self, run_id: str) -> dict | None:
         with self._lock:
             return dict(self._state[run_id]) if run_id in self._state else None
+
+
+def _rel(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return str(path)          # 시연 모드 작업 복사본 등 레포 밖
 
 
 def _no_llm_in_demo():
@@ -151,6 +158,21 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
         pack = pack_or_404(domain)
         spec = Path(pack.spec_path()).read_text(encoding="utf-8")
         return {"params": load_params(pack), "spec_sections": spec_sections(spec)}
+
+    @app.get("/domains/{domain}/definition")
+    def get_definition(domain: str, answers: bool = False):
+        """도메인 탭용: 규칙 파라미터(허용 범위·설명), 명세, 차원·사유코드·필수조건, 결함 패턴.
+        결함의 주입 방식(generation)과 정답(answer)은 answers=true일 때만 넣는다: 주입 방식만 봐도
+        정답을 알 수 있으므로, 분석 장면 전에 노출되지 않게 기본은 이름과 기대 현상만."""
+        pack = pack_or_404(domain)
+        spec = Path(pack.spec_path()).read_text(encoding="utf-8")
+        faults = [{"id": fid, "name": f.get("name", fid), "expected": f.get("expected"),
+                   **({"generation": f.get("generation"), "answer": f.get("answer")} if answers else {})}
+                  for fid, f in load_faults(pack).items()]
+        return {"domain": domain, "params": load_params(pack), "spec_sections": spec_sections(spec),
+                "dimensions": pack.dimensions(), "core_reason_codes": CORE_REASON_CODES, "faults": faults,
+                "files": {name: _rel(Path(pack.params_path()).parent / name)
+                          for name in ("params.yaml", "domain-spec.md", "dimensions.yaml", "faults.yaml")}}
 
     @app.post("/runs")
     def create_run(req: RunRequest):

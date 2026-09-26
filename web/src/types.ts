@@ -32,6 +32,24 @@ export interface Dimensions {
   violation_rules: Record<string, string>;
 }
 
+export interface DomainFault {
+  id: string;
+  name: string;
+  expected?: string;
+  generation?: Record<string, unknown>; // answers=true일 때만
+  answer?: Record<string, unknown>;     // answers=true일 때만
+}
+
+export interface DomainDefinition {
+  domain: string;
+  params: Record<string, unknown>;
+  spec_sections: Record<string, string>;
+  dimensions: Dimensions;
+  core_reason_codes: Record<string, string>;
+  faults: DomainFault[];
+  files: Record<string, string>;
+}
+
 export interface DomainInfo {
   name: string;
   dimensions: Dimensions;

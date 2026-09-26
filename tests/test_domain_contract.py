@@ -76,6 +76,15 @@ def test_params_version_and_bounds(domain):
 
 
 @pytest.mark.parametrize("domain", DOMAINS)
+def test_every_param_has_docs(domain):
+    """모든 파라미터에 설명(docs)이 있어야 한다: 화면과 개선 agent가 의미를 알 수 있게."""
+    params = load_yaml(domain, "params.yaml")
+    missing = [f"{name}.{key}" for name, section in params.items() if name not in ("version", "overrides")
+               for key in section if key not in ("bounds", "docs") and key not in (section.get("docs") or {})]
+    assert not missing, f"docs가 없는 파라미터: {missing}"
+
+
+@pytest.mark.parametrize("domain", DOMAINS)
 def test_dimensions_schema(domain):
     dims = load_yaml(domain, "dimensions.yaml")
     assert dims.get("dimensions"), "분석 차원이 하나 이상 있어야 한다"

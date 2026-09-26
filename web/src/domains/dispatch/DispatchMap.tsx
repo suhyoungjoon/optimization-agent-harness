@@ -1,52 +1,8 @@
 import L from "leaflet";
-import "leaflet/dist/leaflet.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DecisionRecord } from "../../types";
 import type { ResultViewProps } from "../types";
-
-// domains/dispatch/models.py 의 JSON 형태. 좌표는 km 평면이고 geo로 위경도로 바꾼다.
-interface Worker {
-  id: string;
-  branch: string;
-  skills: string[];
-  certs: string[];
-  cei: number;
-  x: number;
-  y: number;
-  available: [number, number];
-}
-interface Order {
-  id: string;
-  day: number;
-  branch: string;
-  work_type: string;
-  media: string;
-  difficulty: string;
-  building_type: string;
-  desired: number;
-  x: number;
-  y: number;
-}
-interface Branch {
-  name: string;
-  polygon: [number, number][];
-}
-interface Instance {
-  branches: Record<string, Branch>;
-  geo: { origin: [number, number]; km_per_deg: [number, number] };
-  workers: Worker[];
-  orders: Order[];
-  days: number;
-}
-
-const BRANCH_SLOT: Record<string, number> = { A: 1, B: 2, C: 3 };
-const TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
-const BOUNDARY_ATTRIBUTION = "행정구역 경계: 통계청(2013)";
-
-const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-const branchColor = (b: string) => `var(--series-${BRANCH_SLOT[b] ?? 1})`;
-const slot = (b: string) => `b${BRANCH_SLOT[b] ?? 1}`;
+import { branchColor, hhmm, slot, useDistrictMap, type Instance, type Order, type Worker } from "./districtMap";
 
 type Hover =
   | { kind: "order"; order: Order; record?: DecisionRecord; x: number; y: number }
@@ -99,56 +55,11 @@ export default function DispatchMap({ instance, decisions, reasonLabels, selecte
 
   // --- Leaflet ---------------------------------------------------------------
   const box = useRef<HTMLDivElement>(null);
-  const map = useRef<L.Map | null>(null);
-  const tileLayer = useRef<L.TileLayer | null>(null);
-  const dataLayer = useRef<L.LayerGroup | null>(null);
-  const [ready, setReady] = useState(0); // 지도를 새로 만들 때마다 증가 (아래 효과들이 다시 그리도록)
-  const toLatLng = useMemo(() => {
-    const [lon0, lat0] = inst.geo.origin;
-    const [kx, ky] = inst.geo.km_per_deg;
-    return (x: number, y: number): L.LatLngTuple => [lat0 + y / ky, lon0 + x / kx];
-  }, [inst.geo]);
-
-  // 지도와 관할 구역 (인스턴스가 바뀔 때만 다시 만든다)
-  useEffect(() => {
-    if (!box.current) return;
-    const m = L.map(box.current, { scrollWheelZoom: false, zoomSnap: 0.25 });
-    m.attributionControl.setPrefix(false).addAttribution(BOUNDARY_ATTRIBUTION);
-    const zones = Object.entries(inst.branches).map(([b, br]) =>
-      L.polygon(br.polygon.map(([x, y]) => toLatLng(x, y)), { className: `branch-zone ${slot(b)}`, interactive: false })
-        .bindTooltip(`${br.name}지점`, { permanent: true, direction: "center", className: "branch-label" })
-        .addTo(m),
-    );
-    m.fitBounds(L.featureGroup(zones).getBounds(), { padding: [8, 8] });
-    dataLayer.current = L.layerGroup().addTo(m);
-    map.current = m;
-    setReady((n) => n + 1);
-    const resize = new ResizeObserver(() => m.invalidateSize());
-    resize.observe(box.current);
-    return () => {
-      resize.disconnect();
-      m.remove();
-      map.current = null;
-      tileLayer.current = null;
-      dataLayer.current = null;
-    };
-  }, [inst, toLatLng]);
-
-  // 배경 지도 (인터넷이 안 되면 타일만 비고 관할 구역은 그대로 보인다)
-  useEffect(() => {
-    const m = map.current;
-    if (!m) return;
-    if (tiles && !tileLayer.current) {
-      tileLayer.current = L.tileLayer(TILES, { maxZoom: 18, attribution: TILE_ATTRIBUTION, className: "base-tiles" }).addTo(m);
-    } else if (!tiles && tileLayer.current) {
-      tileLayer.current.remove();
-      tileLayer.current = null;
-    }
-  }, [tiles, ready]);
+  const { district, toLatLng } = useDistrictMap(box, inst, tiles);
 
   // 지시서·작업자·동선
   useEffect(() => {
-    const layer = dataLayer.current;
+    const layer = district?.data;
     if (!layer) return;
     layer.clearLayers();
     const hoverAt = (e: L.LeafletMouseEvent) => ({ x: e.containerPoint.x, y: e.containerPoint.y });
@@ -200,7 +111,7 @@ export default function DispatchMap({ instance, decisions, reasonLabels, selecte
         .on("mouseout", () => setHover(null))
         .addTo(layer);
     }
-  }, [ready, inst, orders, records, routes, lit, selected, onSelect, toLatLng]);
+  }, [district, inst, orders, records, routes, lit, selected, onSelect, toLatLng]);
 
   return (
     <div className="dispatch-map">

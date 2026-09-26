@@ -7,7 +7,7 @@ spec 개선안:   {"spec_edits": [{"section": "고정 섹션 제목", "text": "�
 import copy
 import re
 
-from core.params import check_params, set_path
+from core.params import check_params, path_errors, set_path
 
 
 def apply_params(params: dict, proposal: dict) -> dict:
@@ -24,6 +24,9 @@ def apply_params(params: dict, proposal: dict) -> dict:
 def params_errors(params: dict, proposal: dict, dimensions: dict) -> list[str]:
     if not (proposal.get("params_changes") or proposal.get("override_rules")):
         return ["params_changes 또는 override_rules가 필요하다"]
+    blocked = [e for c in proposal.get("params_changes") or [] for e in path_errors(str(c.get("path", "")))]
+    if blocked:
+        return blocked
     try:
         candidate = apply_params(params, proposal)
     except (ValueError, KeyError, IndexError, TypeError) as exc:
