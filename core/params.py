@@ -2,7 +2,7 @@
 
 params.yaml 구조 (도메인 공통 규약):
   version: int
-  <섹션>: {<키>: 값, ..., bounds: {<키>: [min, max]}}
+  <섹션>: {<키>: 값, ..., bounds: {<키>: [min, max]}, docs: {<키>: 설명}}
   overrides:
     allowed_sections: [<섹션>, ...]     # 구간 조건으로 바꿀 수 있는 섹션
     rules:                               # 위에서부터 순서대로 적용
@@ -16,6 +16,7 @@ from numbers import Number
 from typing import Any
 
 RESERVED = ("version", "overrides")
+SECTION_META = ("bounds", "docs")      # 섹션 안의 메타 키: 파라미터가 아니며 개선안으로 바꿀 수 없다
 _PATH = re.compile(r"^([A-Za-z_]\w*)\.([A-Za-z_]\w*)(?:\[(\d+)\])?$")
 
 
@@ -62,6 +63,17 @@ def apply_overrides(params: dict, dims: dict[str, str]) -> dict:
     return effective
 
 
+def path_errors(path: str) -> list[str]:
+    """개선안이 바꿀 수 없는 경로 (예약 섹션, 허용 범위·설명 같은 메타 키)."""
+    try:
+        section, key, _ = parse_path(path)
+    except ValueError as exc:
+        return [str(exc)]
+    if section in RESERVED or key in SECTION_META:
+        return [f"{path}: 바꿀 수 없는 경로 ({section}.{key}는 파라미터가 아님)"]
+    return []
+
+
 def numeric_leaves(value) -> list[Number]:
     if isinstance(value, bool):
         return []
@@ -97,8 +109,13 @@ def check_params(params: dict, dimensions: dict | None = None) -> list[str]:
                 errors.append(f"{name}.bounds.{key}: 존재하지 않는 파라미터")
             elif bound[0] > bound[1]:
                 errors.append(f"{name}.bounds.{key}: min > max")
+        for key, text in (section.get("docs") or {}).items():
+            if key not in section or key in SECTION_META:
+                errors.append(f"{name}.docs.{key}: 존재하지 않는 파라미터")
+            elif not isinstance(text, str):
+                errors.append(f"{name}.docs.{key}: 설명은 문자열이어야 한다")
         for key, value in section.items():
-            if key != "bounds":
+            if key not in SECTION_META:
                 errors += _check_value(section, key, value, f"{name}.{key}")
 
     overrides = params.get("overrides") or {}
@@ -117,6 +134,9 @@ def check_params(params: dict, dimensions: dict | None = None) -> list[str]:
                 if bad:
                     errors.append(f"{where}.when.{dim}: 선언되지 않은 값 {sorted(bad)}")
         for path, value in sets.items():
+            if blocked := path_errors(path):
+                errors += [f"{where}.set: {e}" for e in blocked]
+                continue
             try:
                 section, key, index = parse_path(path)
                 current = get_path(params, path)

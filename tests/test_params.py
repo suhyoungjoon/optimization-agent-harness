@@ -77,3 +77,26 @@ def test_rule_engine_applies_overrides_to_slice_only(pack):
     core_changed = [a for a, b in zip(after, base) if a.dims["area_zone"] == "core" and a.status != b.status]
     assert len(core_changed) < 0.05 * len(after)   # 경계 지시서가 일정을 차지하는 간접 효과만 있다
     assert pack.validate(inst, after) == []
+
+
+def test_docs_are_meta_not_parameters(pack):
+    p = copy.deepcopy(pack.params)
+    assert "docs" in p["matching"] and check_params(p) == []
+    p["matching"]["docs"]["no_such_key"] = "x"
+    assert any("matching.docs.no_such_key" in e for e in check_params(p))
+    p = copy.deepcopy(pack.params)
+    p["cei"]["docs"]["master_threshold"] = 3
+    assert any("문자열" in e for e in check_params(p))
+
+
+@pytest.mark.parametrize("change", [
+    {"params_changes": [{"path": "matching.bounds", "value": {"time_window_min": [0, 999], "area_extension_km": [0, 99]}}]},
+    {"params_changes": [{"path": "matching.docs", "value": {}}]},
+    {"params_changes": [{"path": "version.x", "value": 9}]},
+    {"override_rules": [{"when": {"area_zone": ["boundary"]}, "set": {"matching.bounds": {}}}]},
+])
+def test_proposals_cannot_touch_bounds_or_docs(pack, change):
+    """개선안이 허용 범위나 설명을 바꿔 검사를 우회하지 못한다."""
+    from core.improvement.changes import params_errors
+    errors = params_errors(pack.params, change, pack.dimensions())
+    assert errors and any("바꿀 수 없는 경로" in e for e in errors)
