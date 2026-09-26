@@ -1,0 +1,9 @@
+# 맥·윈도우에서 같이 쓰므로 텍스트 파일은 저장소에 항상 LF로 둔다 (git 설정과 무관하게)
+* text=auto eol=lf
+
+# 바이너리
+*.png binary
+*.jpg binary
+*.webm binary
+*.sqlite binary
+*.db binary
