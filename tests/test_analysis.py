@@ -116,7 +116,7 @@ def test_analyze_keeps_grounded_and_drops_ungrounded(run_p4):
 def pack_answer(fid):
     import yaml
     from pathlib import Path
-    return yaml.safe_load((Path(get_pack().params_path()).parent / "faults.yaml").read_text())[fid]["answer"]
+    return yaml.safe_load((Path(get_pack().params_path()).parent / "faults.yaml").read_text(encoding="utf-8"))[fid]["answer"]
 
 
 def test_analyze_exposes_domain_tools(run_p4):

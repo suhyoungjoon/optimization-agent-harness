@@ -28,7 +28,7 @@ def _git_show(ref: str, path: Path) -> str | None:
     try:
         rel = path.resolve().relative_to(ROOT)
         out = subprocess.run(["git", "-C", str(ROOT), "show", f"{ref}:{rel.as_posix()}"],
-                             capture_output=True, text=True, check=True)
+                             capture_output=True, text=True, encoding="utf-8", check=True)
         return out.stdout
     except (subprocess.CalledProcessError, ValueError, FileNotFoundError):
         return None
@@ -36,7 +36,7 @@ def _git_show(ref: str, path: Path) -> str | None:
 
 def _git_commit(ref: str) -> str | None:
     try:
-        return subprocess.run(["git", "-C", str(ROOT), "rev-parse", ref], capture_output=True, text=True,
+        return subprocess.run(["git", "-C", str(ROOT), "rev-parse", ref], capture_output=True, text=True, encoding="utf-8",
                               check=True).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
