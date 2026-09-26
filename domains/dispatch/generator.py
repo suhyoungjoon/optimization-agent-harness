@@ -164,11 +164,20 @@ def _inject_p4(rng, inst: Instance, spec: dict, cfg: dict):
     d_lo, d_hi = g["boundary_distance_km"]
     affected = []
     for o in rng.sample(inst.orders, round(len(inst.orders) * g["share_of_orders"])):
-        # 이웃 지점 구역 안, 소속 관할 경계에서 d_lo~d_hi km 떨어진 곳으로 옮긴다 (관할 경계 너머 수요)
+        # 이웃 지점과 맞닿은 경계의 한 점에서 바깥쪽으로 d_lo~d_hi km 옮긴다 (관할 경계 너머 수요).
+        # 옮긴 곳이 이웃 지점 구역 안이고 실제 관할 밖 거리가 범위 안일 때만 받아들인다.
+        edges = inst.shared_edges(o.branch)
         neighbors = [b for b in inst.branches if b != o.branch]
         while True:
-            x, y = _sample_in(rng, inst.branches, rng.choice(neighbors))
-            if d_lo <= inst.distance_outside(o.branch, x, y) <= d_hi:
+            (x1, y1), (x2, y2) = rng.choices(edges, weights=[math.dist(*e) for e in edges])[0]
+            t, d = rng.random(), rng.uniform(d_lo, d_hi)
+            px, py = x1 + t * (x2 - x1), y1 + t * (y2 - y1)
+            nx, ny = (y2 - y1) / math.dist((x1, y1), (x2, y2)), -(x2 - x1) / math.dist((x1, y1), (x2, y2))
+            if inst.contains(o.branch, px + nx * 0.05, py + ny * 0.05):
+                nx, ny = -nx, -ny                                      # 법선이 관할 안쪽을 향하면 뒤집는다
+            x, y = round(px + nx * d, 3), round(py + ny * d, 3)
+            if (any(inst.contains(b, x, y) for b in neighbors)
+                    and d_lo <= inst.distance_outside(o.branch, x, y) <= d_hi):
                 break
         o.x, o.y = x, y
         affected.append(o.id)

@@ -73,21 +73,33 @@ class Instance:
                          if any(_distance_to_ring(*_midpoint(seg), ring) <= 0.3 for ring in others)]
         return shared
 
+    def shared_edges(self, branch: str) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+        return self._shared_edges[branch]
+
     def contains(self, branch: str, x: float, y: float) -> bool:
         return inside_polygon(x, y, self.branches[branch].polygon)
 
+    @cached_property
+    def _outside_cache(self) -> dict[tuple, float | str]:
+        return {}
+
     def distance_outside(self, branch: str, x: float, y: float) -> float:
-        """좌표가 지점 관할 구역 밖으로 벗어난 거리 km (안이면 0)."""
-        polygon = self.branches[branch].polygon
-        return 0.0 if inside_polygon(x, y, polygon) else _distance_to_ring(x, y, polygon)
+        """좌표가 지점 관할 구역 밖으로 벗어난 거리 km (안이면 0). 매칭마다 반복 계산되므로 기억해 둔다."""
+        key = (branch, x, y)
+        if key not in self._outside_cache:
+            polygon = self.branches[branch].polygon
+            self._outside_cache[key] = 0.0 if inside_polygon(x, y, polygon) else _distance_to_ring(x, y, polygon)
+        return self._outside_cache[key]
 
     def area_zone(self, order: Order) -> str:
         """소속 관할 밖이거나, 다른 지점과 맞닿은 경계에서 boundary_zone_km 이내면 boundary."""
-        if self.distance_outside(order.branch, order.x, order.y) > 0:
-            return "boundary"
-        near = any(_distance_to_segment(order.x, order.y, *seg) <= self.boundary_zone_km
-                   for seg in self._shared_edges[order.branch])
-        return "boundary" if near else "core"
+        key = ("zone", order.branch, order.x, order.y)
+        if key not in self._outside_cache:
+            outside = self.distance_outside(order.branch, order.x, order.y) > 0
+            near = any(_distance_to_segment(order.x, order.y, *seg) <= self.boundary_zone_km
+                       for seg in self._shared_edges[order.branch])
+            self._outside_cache[key] = "boundary" if outside or near else "core"
+        return self._outside_cache[key]
 
 
 def road_distance(x1: float, y1: float, x2: float, y2: float, detour: float) -> float:
