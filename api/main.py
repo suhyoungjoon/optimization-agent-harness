@@ -125,7 +125,8 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
     @app.get("/harness/levels")
     def levels():
         return {"levels": {name: to_jsonable(level) for name, level in load_levels().items()},
-                "llm": {k: llm_config.get(k) for k in ("model", "effort", "cache", "concurrency")},
+                "llm": {k: llm_config.get(k) for k in ("model", "effort", "cache", "concurrency",
+                                                         "max_llm_calls_per_item")},
                 "demo": demo.manifest if demo else None}
 
     @app.get("/demo")
@@ -169,7 +170,11 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
         faults = [{"id": fid, "name": f.get("name", fid), "expected": f.get("expected"),
                    **({"generation": f.get("generation"), "answer": f.get("answer")} if answers else {})}
                   for fid, f in load_faults(pack).items()]
+        # 도구 목록(이름·설명)은 인스턴스에 따라 바뀌지 않으므로 기본 인스턴스(seed 0, 결함 없음)로 만든다
+        base, _truth = pack.generate(0, [])
+        tools = [{"name": t["name"], "description": t.get("description", "")} for t in pack.tools(base)]
         return {"domain": domain, "params": load_params(pack), "spec_sections": spec_sections(spec),
+                "tools": tools,
                 "dimensions": pack.dimensions(), "core_reason_codes": CORE_REASON_CODES, "faults": faults,
                 "files": {name: _rel(Path(pack.params_path()).parent / name)
                           for name in ("params.yaml", "domain-spec.md", "dimensions.yaml", "faults.yaml")}}

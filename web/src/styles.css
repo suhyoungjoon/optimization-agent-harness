@@ -317,3 +317,64 @@ code.json { color: var(--text-secondary); word-break: break-all; }
 .worker.focused { border-color: var(--text-primary); }
 .param-table.fixed { table-layout: fixed; }
 .num-cell.wrap { white-space: normal; }
+
+/* 하네스 파이프라인 그림 (비교 탭 하네스 설명) */
+.link-button { border: none; background: none; padding: 2px 4px; color: var(--series-1); font-size: 13px; }
+.pipeline-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; margin-top: 8px; }
+.pipeline { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); column-gap: 22px; row-gap: 0; }
+.stage {
+  position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  text-align: left; padding: 8px 10px; border: 1px solid var(--axis); border-radius: 8px; min-width: 0;
+}
+.stage:not(:last-of-type)::after {
+  content: "→"; position: absolute; right: -18px; top: 50%; transform: translateY(-50%);
+  color: var(--text-muted); pointer-events: none;
+}
+.stage.current { border-color: var(--series-1); box-shadow: 0 0 0 1px var(--series-1); }
+.stage.off { border-style: dashed; color: var(--text-muted); }
+.stage.off .stage-row { opacity: 0.6; }
+.stage-title { font-weight: 600; }
+.stage-row { font-size: 12px; color: var(--text-secondary); }
+.stage-row em { font-style: normal; color: var(--text-muted); margin-left: 4px; }
+.stage-row.off { opacity: 0.55; text-decoration: line-through; }
+.stage-off { font-size: 11px; color: var(--warning-text); }
+.data-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.data-mode .mode { border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; opacity: 0.55; }
+.data-mode .mode.current { opacity: 1; border-color: var(--series-1); color: var(--text-primary); }
+/* 재시도: ④ 아래에서 ②로 되돌아가는 화살표 */
+.retry-loop {
+  grid-column: 2 / 5; grid-row: 2; position: relative; height: 26px; margin: 0 20% 0 12%;
+  border: 2px solid var(--series-2); border-top: none; border-radius: 0 0 8px 8px;
+  display: flex; justify-content: center; align-items: flex-end;
+}
+.retry-loop::before { content: "▲"; position: absolute; left: -7px; top: -9px; font-size: 10px; color: var(--series-2); }
+.retry-loop span { font-size: 12px; background: var(--surface); padding: 0 6px; transform: translateY(55%); color: var(--text-secondary); }
+.retry-loop.off { border-color: var(--axis); border-style: dashed; }
+.retry-loop.off::before { color: var(--axis); }
+.retry-loop.off span { color: var(--text-muted); }
+.posthoc { margin: 18px 0 8px; padding: 6px 10px; border: 1px dashed var(--axis); border-radius: 8px; font-size: 13px; }
+.stage-detail { border-top: 1px solid var(--border); padding-top: 8px; font-size: 13px; }
+.stage-detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
+.stage-detail dt { color: var(--text-muted); }
+.stage-detail dd { margin: 0; }
+.tool-list ul { margin: 4px 0 0; padding-left: 18px; }
+.tool-list li { font-size: 12px; }
+.level-matrix { border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+.level-matrix caption { text-align: left; padding-bottom: 4px; }
+.level-matrix th, .level-matrix td { padding: 3px 12px; border-bottom: 1px solid var(--grid); text-align: center; }
+.level-matrix tbody tr { cursor: pointer; }
+.level-matrix tbody tr:hover { background: var(--hover-wash); }
+.level-matrix tr.current { background: var(--hover-wash); font-weight: 600; }
+.level-matrix tbody th button { padding: 0 8px; }
+.level-matrix tr.current th button { border-color: var(--series-1); }
+.level-matrix .dot { color: var(--text-muted); }
+.level-matrix .dot.on { color: var(--series-1); }
+@media (max-width: 900px) {
+  .pipeline { grid-template-columns: 1fr; row-gap: 18px; }
+  .stage:not(:last-of-type)::after { content: "↓"; right: auto; left: 50%; top: auto; bottom: -19px; transform: none; }
+  .retry-loop { grid-column: 1; grid-row: auto; height: auto; margin: 0; border: 1px dashed var(--series-2); border-radius: 6px; padding: 2px 6px; order: 1; }
+  .stage:nth-of-type(n+5) { order: 2; }
+  .retry-loop::before { content: none; }
+  .retry-loop span { transform: none; }
+  .stage-detail dl { grid-template-columns: 1fr; }
+}

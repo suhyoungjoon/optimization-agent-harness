@@ -47,6 +47,7 @@ export interface DomainDefinition {
   dimensions: Dimensions;
   core_reason_codes: Record<string, string>;
   faults: DomainFault[];
+  tools: { name: string; description: string }[];   // AI agent 조회 도구 (L2부터 제공)
   files: Record<string, string>;
 }
 
@@ -116,7 +117,7 @@ export interface HarnessLevel {
 
 export interface HarnessInfo {
   levels: Record<string, HarnessLevel>;
-  llm: { model: string; effort: string; cache: boolean; concurrency: number };
+  llm: { model: string; effort: string; cache: boolean; concurrency: number; max_llm_calls_per_item: number };
   demo?: DemoManifest | null;   // 시연 모드일 때 번들 정보
 }
 

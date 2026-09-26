@@ -1,6 +1,8 @@
+import { useState } from "react";
 import type { DomainAdapter, Scope } from "../domains/types";
 import type { CompareSummary, Dataset, DecisionRecord, DomainInfo, HarnessInfo, Run } from "../types";
 import CompareTable from "./CompareTable";
+import HarnessPipeline from "./HarnessPipeline";
 import HarnessToggle from "./HarnessToggle";
 import MetricsPanel from "./MetricsPanel";
 
@@ -40,6 +42,7 @@ export default function ComparePanel(p: CompareProps) {
   const ruleDecisions = p.ruleRun ? p.decisionsOf(p.ruleRun.run_id) : undefined;
   const aiDecisions = p.shownAiRun ? p.decisionsOf(p.shownAiRun.run_id) : undefined;
   const scope = p.scopes.find((s) => s.id === p.scopeId);
+  const [explain, setExplain] = useState(false);
   const view = (run: Run, decisions: DecisionRecord[]) => (
     <>
       <p.adapter.ResultView
@@ -85,6 +88,11 @@ export default function ComparePanel(p: CompareProps) {
 
       <div className="controls ai-controls">
         <HarnessToggle harness={p.harness} level={p.level} onChange={p.setLevel} disabled={!!p.busy} />
+        {p.harness && (
+          <button type="button" className="link-button" aria-expanded={explain} onClick={() => setExplain(!explain)}>
+            {explain ? "▾" : "▸"} 하네스 설명
+          </button>
+        )}
         <label>
           반복{" "}
           <select value={p.repeats} onChange={(e) => p.setRepeats(Number(e.target.value))}>
@@ -101,6 +109,11 @@ export default function ComparePanel(p: CompareProps) {
           </span>
         )}
       </div>
+
+      {explain && p.harness && (
+        <HarnessPipeline harness={p.harness} domain={p.domain.name} level={p.level} onChange={p.setLevel}
+          disabled={!!p.busy} />
+      )}
 
       <div className="status-line" aria-live="polite">
         {p.busy && <span className="muted">{p.busy}…</span>}
