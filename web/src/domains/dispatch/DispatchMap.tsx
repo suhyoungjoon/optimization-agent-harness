@@ -1,8 +1,10 @@
-import { useMemo, useState, type MouseEvent } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { DecisionRecord } from "../../types";
 import type { ResultViewProps } from "../types";
 
-// domains/dispatch/models.py 의 JSON 형태
+// domains/dispatch/models.py 의 JSON 형태. 좌표는 km 평면이고 geo로 위경도로 바꾼다.
 interface Worker {
   id: string;
   branch: string;
@@ -25,22 +27,26 @@ interface Order {
   x: number;
   y: number;
 }
+interface Branch {
+  name: string;
+  polygon: [number, number][];
+}
 interface Instance {
-  branches: Record<string, [number, number]>;
+  branches: Record<string, Branch>;
+  geo: { origin: [number, number]; km_per_deg: [number, number] };
   workers: Worker[];
   orders: Order[];
   days: number;
 }
 
-const PX = 30; // km → px
-const PAD = 12;
-const HEIGHT_KM = 10;
 const BRANCH_SLOT: Record<string, number> = { A: 1, B: 2, C: 3 };
+const TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+const BOUNDARY_ATTRIBUTION = "행정구역 경계: 통계청(2013)";
 
 const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-const sx = (x: number) => PAD + x * PX;
-const sy = (y: number) => PAD + (HEIGHT_KM - y) * PX;
 const branchColor = (b: string) => `var(--series-${BRANCH_SLOT[b] ?? 1})`;
+const slot = (b: string) => `b${BRANCH_SLOT[b] ?? 1}`;
 
 type Hover =
   | { kind: "order"; order: Order; record?: DecisionRecord; x: number; y: number }
@@ -65,11 +71,10 @@ export default function DispatchMap({ instance, decisions, reasonLabels, selecte
   const [dayChoice, setDay] = useState<number | null>(null);
   const day = dayChoice !== null && days.includes(dayChoice) ? dayChoice : (litDay ?? days[0] ?? 1);
   const [hover, setHover] = useState<Hover | null>(null);
-  const setSelected = (id: string) => onSelect?.(id);
+  const [tiles, setTiles] = useState(true);
 
-  const orders = inst.orders.filter((o) => o.day === day && records.has(o.id));
-  const workers = inst.workers;
-  const widthKm = Math.max(...Object.values(inst.branches).map((r) => r[1]));
+  const orders = useMemo(() => inst.orders.filter((o) => o.day === day && records.has(o.id)), [inst, day, records]);
+  const branchName = (b: string) => `${inst.branches[b]?.name ?? b}지점`;
 
   // 작업자별 당일 경로: 작업자 좌표 → 배정된 지시서를 시작 시각 순으로
   const routes = useMemo(() => {
@@ -92,10 +97,110 @@ export default function DispatchMap({ instance, decisions, reasonLabels, selecte
   const selectedRecord = selected ? records.get(selected) : undefined;
   const selectedOrder = selected ? inst.orders.find((o) => o.id === selected) : undefined;
 
-  const place = (e: MouseEvent) => {
-    const box = (e.currentTarget as SVGElement).ownerSVGElement?.parentElement?.getBoundingClientRect();
-    return box ? { x: e.clientX - box.left, y: e.clientY - box.top } : { x: 0, y: 0 };
-  };
+  // --- Leaflet ---------------------------------------------------------------
+  const box = useRef<HTMLDivElement>(null);
+  const map = useRef<L.Map | null>(null);
+  const tileLayer = useRef<L.TileLayer | null>(null);
+  const dataLayer = useRef<L.LayerGroup | null>(null);
+  const [ready, setReady] = useState(0); // 지도를 새로 만들 때마다 증가 (아래 효과들이 다시 그리도록)
+  const toLatLng = useMemo(() => {
+    const [lon0, lat0] = inst.geo.origin;
+    const [kx, ky] = inst.geo.km_per_deg;
+    return (x: number, y: number): L.LatLngTuple => [lat0 + y / ky, lon0 + x / kx];
+  }, [inst.geo]);
+
+  // 지도와 관할 구역 (인스턴스가 바뀔 때만 다시 만든다)
+  useEffect(() => {
+    if (!box.current) return;
+    const m = L.map(box.current, { scrollWheelZoom: false, zoomSnap: 0.25 });
+    m.attributionControl.setPrefix(false).addAttribution(BOUNDARY_ATTRIBUTION);
+    const zones = Object.entries(inst.branches).map(([b, br]) =>
+      L.polygon(br.polygon.map(([x, y]) => toLatLng(x, y)), { className: `branch-zone ${slot(b)}`, interactive: false })
+        .bindTooltip(`${br.name}지점`, { permanent: true, direction: "center", className: "branch-label" })
+        .addTo(m),
+    );
+    m.fitBounds(L.featureGroup(zones).getBounds(), { padding: [8, 8] });
+    dataLayer.current = L.layerGroup().addTo(m);
+    map.current = m;
+    setReady((n) => n + 1);
+    const resize = new ResizeObserver(() => m.invalidateSize());
+    resize.observe(box.current);
+    return () => {
+      resize.disconnect();
+      m.remove();
+      map.current = null;
+      tileLayer.current = null;
+      dataLayer.current = null;
+    };
+  }, [inst, toLatLng]);
+
+  // 배경 지도 (인터넷이 안 되면 타일만 비고 관할 구역은 그대로 보인다)
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    if (tiles && !tileLayer.current) {
+      tileLayer.current = L.tileLayer(TILES, { maxZoom: 18, attribution: TILE_ATTRIBUTION, className: "base-tiles" }).addTo(m);
+    } else if (!tiles && tileLayer.current) {
+      tileLayer.current.remove();
+      tileLayer.current = null;
+    }
+  }, [tiles, ready]);
+
+  // 지시서·작업자·동선
+  useEffect(() => {
+    const layer = dataLayer.current;
+    if (!layer) return;
+    layer.clearLayers();
+    const hoverAt = (e: L.LeafletMouseEvent) => ({ x: e.containerPoint.x, y: e.containerPoint.y });
+
+    for (const [wid, jobs] of routes) {
+      const w = inst.workers.find((x) => x.id === wid);
+      if (!w) continue;
+      const pts = [toLatLng(w.x, w.y), ...jobs.map((j) => toLatLng(j.order.x, j.order.y))];
+      L.polyline(pts, { className: `route ${slot(w.branch)}`, interactive: false }).addTo(layer);
+    }
+
+    for (const o of orders) {
+      const r = records.get(o.id);
+      const dim = lit !== null && !lit.has(o.id) ? " dim" : "";
+      const isSel = selected === o.id;
+      const at = toLatLng(o.x, o.y);
+      let marker: L.CircleMarker | L.Marker;
+      if (r?.status === "success") {
+        marker = L.circleMarker(at, {
+          radius: isSel ? 7 : 5,
+          className: `order-dot ${slot(o.branch)}${dim}${lit?.has(o.id) ? " lit" : ""}${isSel ? " selected" : ""}`,
+        });
+      } else if (r?.status === "pending_approval") {
+        marker = L.circleMarker(at, { radius: isSel ? 7 : 5.5, className: `order-pending${dim}` });
+      } else {
+        const size = isSel ? 18 : 14;
+        marker = L.marker(at, {
+          icon: L.divIcon({
+            className: `order-fail${dim}`,
+            iconSize: [size, size],
+            html: `<svg viewBox="0 0 10 10" width="${size}" height="${size}"><path d="M2,2L8,8M8,2L2,8" stroke-width="${isSel ? 2.4 : 1.8}"/></svg>`,
+          }),
+        });
+      }
+      marker
+        .on("mouseover", (e: L.LeafletMouseEvent) => setHover({ kind: "order", order: o, record: r, ...hoverAt(e) }))
+        .on("mouseout", () => setHover(null))
+        .on("click", () => onSelect?.(o.id))
+        .addTo(layer);
+    }
+
+    for (const w of inst.workers) {
+      L.marker(toLatLng(w.x, w.y), {
+        icon: L.divIcon({ className: `worker ${slot(w.branch)}`, iconSize: [11, 11] }),
+        keyboard: false,
+      })
+        .on("mouseover", (e: L.LeafletMouseEvent) =>
+          setHover({ kind: "worker", worker: w, jobs: routes.get(w.id)?.length ?? 0, ...hoverAt(e) }))
+        .on("mouseout", () => setHover(null))
+        .addTo(layer);
+    }
+  }, [ready, inst, orders, records, routes, lit, selected, onSelect, toLatLng]);
 
   return (
     <div className="dispatch-map">
@@ -115,101 +220,21 @@ export default function DispatchMap({ instance, decisions, reasonLabels, selecte
           {lit && <> · 강조 {orders.filter((o) => lit.has(o.id)).length}건</>}
           {held > 0 && <> (차단·승인 대기 {held}건 포함)</>}
         </span>
+        <label className="small muted">
+          <input type="checkbox" checked={tiles} onChange={(e) => setTiles(e.target.checked)} /> 배경 지도
+        </label>
       </div>
 
       <div className="map-frame" onMouseLeave={() => setHover(null)}>
-        <svg
-          viewBox={`0 0 ${widthKm * PX + PAD * 2} ${HEIGHT_KM * PX + PAD * 2}`}
-          role="img"
-          aria-label={`${day}일차 배정 지도`}
-        >
-          {Object.entries(inst.branches).map(([b, [lo, hi]]) => (
-            <g key={b}>
-              <rect
-                x={sx(lo)}
-                y={sy(HEIGHT_KM)}
-                width={(hi - lo) * PX}
-                height={HEIGHT_KM * PX}
-                fill={branchColor(b)}
-                className="branch-zone"
-              />
-              <text x={sx(lo) + 6} y={sy(HEIGHT_KM) + 16} className="branch-label">
-                {b}지점
-              </text>
-            </g>
-          ))}
-
-          {[...routes.entries()].map(([wid, jobs]) => {
-            const w = workers.find((x) => x.id === wid)!;
-            const pts = [[w.x, w.y], ...jobs.map((j) => [j.order.x, j.order.y])]
-              .map(([x, y]) => `${sx(x)},${sy(y)}`)
-              .join(" ");
-            return <polyline key={wid} points={pts} className="route" stroke={branchColor(w.branch)} />;
-          })}
-
-          {orders.map((o) => {
-            const r = records.get(o.id);
-            const dim = lit !== null && !lit.has(o.id);
-            const ok = r?.status === "success";
-            const handlers = {
-              onMouseEnter: (e: MouseEvent) => setHover({ kind: "order", order: o, record: r, ...place(e) }),
-              onClick: () => setSelected(o.id),
-            };
-            const isSel = selected === o.id;
-            if (r?.status === "pending_approval") {
-              return (
-                <g key={o.id} className={`order-pending${dim ? " dim" : ""}`} {...handlers}>
-                  <circle cx={sx(o.x)} cy={sy(o.y)} r={8} className="hit" />
-                  <circle cx={sx(o.x)} cy={sy(o.y)} r={isSel ? 6 : 4.5} className="ring" />
-                </g>
-              );
-            }
-            return ok ? (
-              <circle
-                key={o.id}
-                cx={sx(o.x)}
-                cy={sy(o.y)}
-                r={isSel ? 6 : 4}
-                fill={branchColor(o.branch)}
-                className={`order-dot${dim ? " dim" : ""}${lit?.has(o.id) ? " lit" : ""}`}
-                {...handlers}
-              />
-            ) : (
-              <g key={o.id} className={`order-fail${dim ? " dim" : ""}`} {...handlers}>
-                <circle cx={sx(o.x)} cy={sy(o.y)} r={8} className="hit" />
-                <path
-                  d={`M${sx(o.x) - 4},${sy(o.y) - 4}L${sx(o.x) + 4},${sy(o.y) + 4}M${sx(o.x) + 4},${sy(o.y) - 4}L${sx(o.x) - 4},${sy(o.y) + 4}`}
-                  strokeWidth={isSel ? 3.5 : 2.5}
-                />
-              </g>
-            );
-          })}
-
-          {workers.map((w) => (
-            <rect
-              key={w.id}
-              x={sx(w.x) - 6}
-              y={sy(w.y) - 6}
-              width={12}
-              height={12}
-              rx={2}
-              fill={branchColor(w.branch)}
-              className="worker"
-              onMouseEnter={(e) =>
-                setHover({ kind: "worker", worker: w, jobs: routes.get(w.id)?.length ?? 0, ...place(e) })
-              }
-            />
-          ))}
-        </svg>
-
+        <div ref={box} className="leaflet-box" role="img" aria-label={`${day}일차 배정 지도 (서울 강남3구)`} />
         {hover && (
           <div className="tooltip" style={{ left: hover.x + 12, top: hover.y + 12 }}>
             {hover.kind === "order" ? (
-              <OrderSummary order={hover.order} record={hover.record} reasons={reasonLabels} />
+              <OrderSummary order={hover.order} record={hover.record} reasons={reasonLabels} branchName={branchName} />
             ) : (
               <>
                 <strong>
-                  {hover.worker.id} · {hover.worker.branch}지점
+                  {hover.worker.id} · {branchName(hover.worker.branch)}
                 </strong>
                 <div>기술 {hover.worker.skills.join(", ")}</div>
                 <div>자격 {hover.worker.certs.join(", ") || "없음"} · CEI {hover.worker.cei}</div>
@@ -226,7 +251,7 @@ export default function DispatchMap({ instance, decisions, reasonLabels, selecte
         {Object.keys(inst.branches).map((b) => (
           <span key={b}>
             <i className="swatch" style={{ background: branchColor(b) }} />
-            {b}지점
+            {branchName(b)}
           </span>
         ))}
         <span>▪ 작업자</span>
@@ -239,7 +264,7 @@ export default function DispatchMap({ instance, decisions, reasonLabels, selecte
       <div className="detail">
         {selectedOrder ? (
           <>
-            <OrderSummary order={selectedOrder} record={selectedRecord} reasons={reasonLabels} />
+            <OrderSummary order={selectedOrder} record={selectedRecord} reasons={reasonLabels} branchName={branchName} />
             <p className="evidence">{selectedRecord?.evidence}</p>
           </>
         ) : (
@@ -254,16 +279,18 @@ function OrderSummary({
   order,
   record,
   reasons,
+  branchName,
 }: {
   order: Order;
   record?: DecisionRecord;
   reasons: Record<string, string>;
+  branchName: (b: string) => string;
 }) {
   const d = record?.decision;
   return (
     <>
       <strong>
-        {order.id} · {order.branch}지점
+        {order.id} · {branchName(order.branch)}
       </strong>
       <div>
         {order.work_type === "install" ? "개통" : "장애"} · {order.media} · {order.difficulty} · {order.building_type}

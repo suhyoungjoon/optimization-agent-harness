@@ -107,18 +107,30 @@ input[type="number"] { width: 80px; }
 
 .map-toolbar { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
 .map-frame { position: relative; }
-.map-frame svg { width: 100%; height: auto; display: block; }
-.branch-zone { opacity: 0.07; }
-.branch-label { fill: var(--text-secondary); font-size: 13px; font-weight: 600; }
-.route { fill: none; stroke-width: 1.5; opacity: 0.45; stroke-linejoin: round; }
-.order-dot { stroke: var(--surface); stroke-width: 2; cursor: pointer; }
-.order-fail { cursor: pointer; }
-.order-fail path { stroke: var(--critical); stroke-linecap: round; }
-.order-fail .hit, .order-pending .hit { fill: transparent; }
-.order-pending { cursor: pointer; }
-.order-pending .ring { fill: none; stroke: var(--warning); stroke-width: 2.5; }
+.leaflet-box { width: 100%; aspect-ratio: 4 / 3; max-height: 560px; border-radius: 8px; background: var(--page); }
+.leaflet-container { font: inherit; }
+.leaflet-container .leaflet-control-attribution { font-size: 10px; }
+/* 배경 지도는 데이터보다 한 단계 뒤로 */
+.base-tiles { filter: grayscale(0.7) opacity(0.75); }
+.b1 { --branch: var(--series-1); }
+.b2 { --branch: var(--series-2); }
+.b3 { --branch: var(--series-3); }
+.branch-zone { fill: var(--branch); fill-opacity: 0.1; stroke: var(--branch); stroke-width: 1.5; stroke-opacity: 0.7; }
+.leaflet-tooltip.branch-label {
+  background: transparent; border: none; box-shadow: none; padding: 0;
+  color: var(--text-secondary); font-size: 13px; font-weight: 700;
+  text-shadow: 0 0 3px var(--surface), 0 0 3px var(--surface);
+}
+.route { fill: none; stroke: var(--branch); stroke-width: 1.5; stroke-opacity: 0.55; stroke-linejoin: round; }
+.order-dot { fill: var(--branch); fill-opacity: 1; stroke: var(--surface); stroke-width: 1.5; cursor: pointer; }
+.order-dot.selected { stroke: var(--text-primary); stroke-width: 2; }
+.order-fail { cursor: pointer; background: none; border: none; }
+.order-fail svg { display: block; overflow: visible; }
+.order-fail path { stroke: var(--critical); stroke-linecap: round; fill: none; }
+.order-pending { fill: none; stroke: var(--warning); stroke-width: 2.5; cursor: pointer; }
 .warning-text { color: var(--warning-text); }
-.worker { stroke: var(--surface); stroke-width: 2; }
+.worker { background: var(--branch); border: 2px solid var(--surface); border-radius: 2px; box-sizing: border-box; }
+.map-frame .tooltip { z-index: 1000; }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-secondary); margin: 8px 0; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 .detail { border-top: 1px solid var(--border); padding-top: 8px; font-size: 13px; }
@@ -211,6 +223,7 @@ code.json { color: var(--text-secondary); word-break: break-all; }
 /* --- M4: 강조 --- */
 .dim { opacity: 0.12; }
 .order-dot.lit { stroke: var(--text-primary); stroke-width: 1.5; }
+.leaflet-marker-icon.dim, path.dim { opacity: 0.12; }
 
 /* --- M4: 분석 탭 --- */
 .analysis .tiles, .improvement .tiles { margin-bottom: 12px; }
@@ -268,3 +281,9 @@ code.json { color: var(--text-secondary); word-break: break-all; }
   background: var(--surface);
 }
 .demo-banner strong { color: var(--series-1); }
+
+/* 어두운 테마에서 배경 지도 반전 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .base-tiles { filter: invert(1) hue-rotate(180deg) grayscale(0.7) brightness(0.8) opacity(0.7); }
+}
+:root[data-theme="dark"] .base-tiles { filter: invert(1) hue-rotate(180deg) grayscale(0.7) brightness(0.8) opacity(0.7); }
