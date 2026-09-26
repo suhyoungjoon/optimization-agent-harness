@@ -77,12 +77,28 @@ def bundle(tmp_path, source_files):
     return out, manifest, ds, scope
 
 
+LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
+
 @pytest.fixture
 def offline(monkeypatch):
-    def refuse(*args, **kwargs):
-        raise AssertionError("시연 모드에서 네트워크 연결 시도")
-    monkeypatch.setattr(socket.socket, "connect", refuse)
-    monkeypatch.setattr(socket, "create_connection", refuse)
+    """외부 연결은 막고 루프백만 허용한다 (윈도우 asyncio는 이벤트 루프를 만들 때 127.0.0.1 소켓쌍을 쓴다)."""
+    connect, create_connection = socket.socket.connect, socket.create_connection
+
+    def guarded_connect(sock, address, *args, **kwargs):
+        if isinstance(address, tuple) and address[0] in LOOPBACK:
+            return connect(sock, address, *args, **kwargs)
+        raise AssertionError(f"시연 모드에서 네트워크 연결 시도: {address}")
+
+    def guarded_create_connection(address, *args, **kwargs):
+        if address[0] in LOOPBACK:
+            return create_connection(address, *args, **kwargs)
+        raise AssertionError(f"시연 모드에서 네트워크 연결 시도: {address}")
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    monkeypatch.setattr(socket, "create_connection", guarded_create_connection)
+    with pytest.raises(AssertionError):                       # 외부 주소는 실제로 막힌다
+        socket.create_connection(("203.0.113.1", 443), timeout=0.1)
 
 
 def forbidden_llm():
