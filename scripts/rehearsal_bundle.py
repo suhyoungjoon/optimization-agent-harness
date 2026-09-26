@@ -117,7 +117,8 @@ def build(out: str | Path, seed: int = 42, faults: list[str] | None = None) -> d
     pack = load_pack("dispatch", load_params(pack))
     instance, _ = pack.generate(seed, faults)
     policy = build_policy(pack, instance)
-    with tempfile.TemporaryDirectory() as tmp:
+    # 윈도우는 열린 SQLite 파일을 지우지 못하므로 임시 폴더 정리 실패는 무시한다
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         db = Path(tmp) / "session.db"
         client = TestClient(create_app(db, serve_web=False, llm_factory=lambda: FakeLLM(policy)))
         ds = client.post("/domains/dispatch/datasets", json={"seed": seed, "faults": faults}).json()

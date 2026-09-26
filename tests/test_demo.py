@@ -64,7 +64,7 @@ def build_session(tmp_path, files):
     client.post(f"/proposals/{spec['id']}/simulate", json={"confirm": True, "level": "L1", "scope": scope[:3]})
     wait(client, f"/proposals/{spec['id']}")
     client.post(f"/proposals/{ok['id']}/approve", json={"note": "원본 세션 승인"})
-    assert yaml.safe_load((files / "params.yaml").read_text())["version"] == 2   # 세션의 작업 파일은 v2
+    assert yaml.safe_load((files / "params.yaml").read_text(encoding="utf-8"))["version"] == 2   # 세션의 작업 파일은 v2
     return ds, scope
 
 
@@ -77,12 +77,28 @@ def bundle(tmp_path, source_files):
     return out, manifest, ds, scope
 
 
+LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
+
 @pytest.fixture
 def offline(monkeypatch):
-    def refuse(*args, **kwargs):
-        raise AssertionError("시연 모드에서 네트워크 연결 시도")
-    monkeypatch.setattr(socket.socket, "connect", refuse)
-    monkeypatch.setattr(socket, "create_connection", refuse)
+    """외부 연결은 막고 루프백만 허용한다 (윈도우 asyncio는 이벤트 루프를 만들 때 127.0.0.1 소켓쌍을 쓴다)."""
+    connect, create_connection = socket.socket.connect, socket.create_connection
+
+    def guarded_connect(sock, address, *args, **kwargs):
+        if isinstance(address, tuple) and address[0] in LOOPBACK:
+            return connect(sock, address, *args, **kwargs)
+        raise AssertionError(f"시연 모드에서 네트워크 연결 시도: {address}")
+
+    def guarded_create_connection(address, *args, **kwargs):
+        if address[0] in LOOPBACK:
+            return create_connection(address, *args, **kwargs)
+        raise AssertionError(f"시연 모드에서 네트워크 연결 시도: {address}")
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    monkeypatch.setattr(socket, "create_connection", guarded_create_connection)
+    with pytest.raises(AssertionError):                       # 외부 주소는 실제로 막힌다
+        socket.create_connection(("203.0.113.1", 443), timeout=0.1)
 
 
 def forbidden_llm():
@@ -98,7 +114,7 @@ def test_export_resets_decisions_and_snapshots_committed_files(bundle):
     out, manifest, _ds, _scope = bundle
     assert manifest["counts"]["ai_runs"] >= 2 and manifest["counts"]["reports"] == 1
     # 세션에서 v2로 승인했지만, 번들은 git HEAD(커밋된 v1)에서 시작한다
-    assert yaml.safe_load((out / "domains/dispatch/params.yaml").read_text())["version"] == 1
+    assert yaml.safe_load((out / "domains/dispatch/params.yaml").read_text(encoding="utf-8"))["version"] == 1
     assert manifest["domain_file_sources"]["dispatch/params.yaml"] == "git:HEAD"
     db = sqlite3.connect(out / "harness.db")
     statuses = sorted(r[0] for r in db.execute("SELECT status FROM proposals"))
@@ -110,8 +126,8 @@ def test_export_resets_decisions_and_snapshots_committed_files(bundle):
 
 def test_demo_runs_full_flow_offline(bundle, tmp_path, offline):
     out, _manifest, ds, scope = bundle
-    before_bundle = (out / "domains/dispatch/params.yaml").read_text()
-    before_repo = REPO_PARAMS.read_text()
+    before_bundle = (out / "domains/dispatch/params.yaml").read_text(encoding="utf-8")
+    before_repo = REPO_PARAMS.read_text(encoding="utf-8")
     try:
         client = open_demo(out, tmp_path)
         info = client.get("/demo").json()
@@ -157,15 +173,15 @@ def test_demo_runs_full_flow_offline(bundle, tmp_path, offline):
         approved = client.post(f"/proposals/{ok['id']}/approve", json={"note": "시연 승인"}).json()
         assert approved["decision"]["params_version_after"] == 2
         work_params = Path(info["work_dir"]) / "domains/dispatch/params.yaml"
-        assert yaml.safe_load(work_params.read_text())["version"] == 2
+        assert yaml.safe_load(work_params.read_text(encoding="utf-8"))["version"] == 2
         rule2 = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
         assert rule2["params_version"] == 2 and rule2["metrics"]["assignment_rate"] > rule["metrics"]["assignment_rate"]
         assert [h["round"] for h in client.get("/history").json()] == [1]
     finally:
         set_domain_files_root(None)
 
-    assert (out / "domains/dispatch/params.yaml").read_text() == before_bundle   # 번들은 그대로
-    assert REPO_PARAMS.read_text() == before_repo                                # 레포 파일도 그대로
+    assert (out / "domains/dispatch/params.yaml").read_text(encoding="utf-8") == before_bundle   # 번들은 그대로
+    assert REPO_PARAMS.read_text(encoding="utf-8") == before_repo                                # 레포 파일도 그대로
 
     # 다시 열면 처음 상태
     try:
