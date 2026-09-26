@@ -163,3 +163,15 @@ def test_domain_definition_hides_answers_by_default(client):
     full = client.get("/domains/dispatch/definition?answers=true").json()
     assert all({"generation", "answer"} <= set(f) for f in full["faults"])
     assert client.get("/domains/nope/definition").status_code == 404
+
+
+def test_domain_definition_lists_tools_without_handlers(client):
+    tools = client.get("/domains/dispatch/definition").json()["tools"]
+    assert tools and all(set(t) == {"name", "description"} for t in tools)   # handler·input_schema 없음
+    assert all(t["name"] and t["description"] for t in tools)
+    assert "submit_decision" not in {t["name"] for t in tools}               # 결정 제출은 코어 도구
+
+
+def test_harness_levels_include_llm_call_limit(client):
+    llm = client.get("/harness/levels").json()["llm"]
+    assert isinstance(llm["max_llm_calls_per_item"], int) and llm["max_llm_calls_per_item"] > 0
