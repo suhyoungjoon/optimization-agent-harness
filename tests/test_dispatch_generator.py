@@ -36,7 +36,7 @@ def test_scale(base):
 
 def test_base_orders_inside_own_branch(base):
     inst, _ = base
-    assert all(inst.distance_outside(o.branch, o.x) == 0 for o in inst.orders)
+    assert all(inst.distance_outside(o.branch, o.x, o.y) == 0 for o in inst.orders)
 
 
 def test_fault_leaves_other_data_untouched(base):
@@ -81,7 +81,7 @@ def test_p3_shifts_availability():
 
 def test_p4_moves_orders_outside_jurisdiction():
     inst, truth = generate(SEED, ["P4"])
-    outside = [o for o in inst.orders if inst.distance_outside(o.branch, o.x) > 0]
+    outside = [o for o in inst.orders if inst.distance_outside(o.branch, o.x, o.y) > 0]
     assert len(outside) / len(inst.orders) > 0.1
     assert {o.id for o in outside} <= set(truth["faults"]["P4"]["affected_items"])
     assert all(inst.area_zone(o) == "boundary" for o in outside)

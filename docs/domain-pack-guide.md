@@ -151,7 +151,7 @@ dispatch에서 쓴 네 패턴은 대부분의 배정·스케줄링 도메인으�
 
 | 필드 | 내용 |
 |---|---|
-| `ResultView` | 인스턴스와 결정 목록을 그리는 컴포넌트 (dispatch는 지점별 격자 지도). `highlight`로 분석 발견 구간을 강조한다 |
+| `ResultView` | 인스턴스와 결정 목록을 그리는 컴포넌트 (dispatch는 서울 강남3구 지도 위 관할 구역·지시서·동선). `highlight`로 분석 발견 구간을 강조한다 |
 | `metrics` | `metrics()` 키별 라벨·형식(pct, min 등). `headline: true`인 지표가 비교표·개선 추이에 쓰인다 |
 | `scopes(instance, itemIds)` | 실행 범위 후보. AI는 비용 때문에 일부만 돌리므로 "시범 10건" 같은 작은 범위를 첫 번째로 둔다 |
 

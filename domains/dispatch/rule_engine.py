@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from core.interfaces import DecisionRecord, Violation
 from core.params import apply_overrides
 
-from .models import Instance, Order, Worker, grid_distance, hhmm_to_min, min_to_hhmm
+from .models import Instance, Order, Worker, hhmm_to_min, min_to_hhmm, road_distance
 
 # 난이도 → 필요한 자격. 난이도 값과 자격 이름이 같다 (outdoor, none은 자격 불필요).
 REQUIRED_CERT = {"pole": "pole", "high_risk": "high_risk"}
@@ -27,7 +27,8 @@ def duration_min(order: Order, params: dict) -> int:
 
 
 def travel_min(x1: float, y1: float, x2: float, y2: float, params: dict) -> int:
-    return math.ceil(grid_distance(x1, y1, x2, y2) / params["travel"]["avg_speed_kmh"] * 60)
+    t = params["travel"]
+    return math.ceil(road_distance(x1, y1, x2, y2, t["detour_factor"]) / t["avg_speed_kmh"] * 60)
 
 
 def dims_of(inst: Instance, order: Order) -> dict[str, str]:
@@ -164,7 +165,7 @@ def stage_slots(inst: Instance, order: Order, stage: int, certified: list[Worker
     window = params["matching"]["time_window_min"][stage - 1]
     ext = params["matching"]["area_extension_km"][stage - 1]
     dur = duration_min(order, params)
-    in_area = [w for w in certified if inst.distance_outside(w.branch, order.x) <= ext]
+    in_area = [w for w in certified if inst.distance_outside(w.branch, order.x, order.y) <= ext]
     lo, hi = order.desired - window, order.desired + window
     return [s for w in in_area if (s := _best_slot(w, order, dur, lo, hi, jobs_of(w), params))]
 
@@ -178,7 +179,7 @@ def pick(slots: list[Slot], params: dict) -> Slot:
 def actual_stage(inst: Instance, order: Order, worker: Worker, start: int, params: dict) -> int | None:
     """배정이 실제로 해당하는 가장 엄격한 매칭 단계. 3단계 범위도 벗어나면 None."""
     m = effective_params(inst, order, params)["matching"]
-    outside = inst.distance_outside(worker.branch, order.x)
+    outside = inst.distance_outside(worker.branch, order.x, order.y)
     for stage, (window, ext) in enumerate(zip(m["time_window_min"], m["area_extension_km"]), start=1):
         if abs(start - order.desired) <= window and outside <= ext:
             return stage
@@ -209,7 +210,7 @@ def _assign_one(inst: Instance, order: Order, params: dict,
     dur = duration_min(order, params)
     pool, skilled, certified = eligible_workers(inst, order)
     cert = REQUIRED_CERT.get(order.difficulty)
-    funnel = f"후보: {order.branch}지점 {len(pool)}명 → {order.media} 기술 {len(skilled)}명"
+    funnel = f"후보: {inst.branches[order.branch].name}지점({order.branch}) {len(pool)}명 → {order.media} 기술 {len(skilled)}명"
     if cert:
         funnel += f" → {cert} 자격 {len(certified)}명"
     if not skilled:
@@ -246,9 +247,9 @@ def _assign_one(inst: Instance, order: Order, params: dict,
 
     # 3단계까지 실패: 마지막 단계 기준으로 사유를 가린다
     window, ext = matching["time_window_min"][-1], matching["area_extension_km"][-1]
-    in_area = [w for w in certified if inst.distance_outside(w.branch, order.x) <= ext]
+    in_area = [w for w in certified if inst.distance_outside(w.branch, order.x, order.y) <= ext]
     if not in_area:
-        outside = inst.distance_outside(order.branch, order.x)
+        outside = inst.distance_outside(order.branch, order.x, order.y)
         return _fail(inst, order, "OUT_OF_AREA",
                      f"{funnel}. 관할 밖 {outside:.1f}km로 최대 완화(+{ext}km) 범위를 벗어남")
     lo, hi = order.desired - window, order.desired + window

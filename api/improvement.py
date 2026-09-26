@@ -112,10 +112,15 @@ def register(app: FastAPI, ctx: Context) -> None:
     def create_analysis(req: AnalysisRequest):
         run, *_ = _run_context(store, req.run_id)
         if ctx.replay or req.cached:
-            report = store.latest_report(equivalent_run_ids(store, run))
-            if report is None:
+            stored = store.latest_report(equivalent_run_ids(store, run))
+            if stored is None:
                 raise HTTPException(404, "같은 조건의 실행에 대한 저장된 분석 리포트가 없음")
-            return JSONResponse(status_code=202, content={"id": report["id"], "status": "done", "replayed": True})
+            # 요청한 실행에 붙인 사본을 만든다 (화면이 분석 대상 실행의 결과를 함께 보여주므로).
+            # 개선안 재생은 replayed_from으로 원본 리포트의 개선안을 찾는다.
+            source = stored["body"].get("replayed_from", stored["id"])
+            report_id = store.create_report(req.run_id)
+            store.finish_report(report_id, {**stored["body"], "replayed_from": source}, stored["score"])
+            return JSONResponse(status_code=202, content={"id": report_id, "status": "done", "replayed": True})
         llm = _llm_or_503(ctx)
         report_id = store.create_report(req.run_id)
         ctx.executor.submit(_analyze_job, report_id, req.run_id, llm)
@@ -151,7 +156,7 @@ def register(app: FastAPI, ctx: Context) -> None:
         if report["status"] != "done":
             raise HTTPException(400, "끝난 리포트로만 개선안을 만들 수 있음")
         if ctx.replay or req.cached:
-            batch = store.latest_batch(req.report_id)
+            batch = store.latest_batch((report["body"] or {}).get("replayed_from", req.report_id))
             if batch is None:
                 raise HTTPException(404, "이 리포트로 만든 저장된 개선안이 없음")
             return JSONResponse(status_code=202, content={"id": batch["id"], "status": "done", "replayed": True})

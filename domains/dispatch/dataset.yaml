@@ -1,11 +1,12 @@
 # 가상 데이터 규모와 분포 (generator 입력). 개선 루프가 바꾸는 대상이 아니다.
 # 시각은 모두 "HH:MM", 거리는 km.
 
-grid: {width_km: 30, height_km: 10}
-branches:                        # 가로로 나란히 놓인 세로 띠. x_range = 관할 구역
-  A: {x_range: [0, 10]}
-  B: {x_range: [10, 20]}
-  C: {x_range: [20, 30]}
+region:                          # 관할 구역 경계 (서울 강남3구, 통계청 2013 행정구역경계). 좌표는 km 평면으로 변환해 쓴다
+  geojson: geo/gangnam3.geojson
+branches:                        # 지점 ID → 표시 이름. 경계는 GeoJSON의 properties.branch로 찾는다
+  A: {name: 서초}
+  B: {name: 강남}
+  C: {name: 송파}
 boundary_zone_km: 1              # 다른 지점과 맞닿은 관할 경계에서 이 거리 이내면 area_zone=boundary
 
 days: 10

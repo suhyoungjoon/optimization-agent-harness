@@ -83,7 +83,7 @@ def build_tools(inst: Instance, params: dict) -> list[dict]:
             "desired_time": min_to_hhmm(o.desired), "x": o.x, "y": o.y,
             "duration_min": rule_engine.duration_min(o, params),
             "required_cert": rule_engine.REQUIRED_CERT.get(o.difficulty),
-            "outside_jurisdiction_km": round(inst.distance_outside(o.branch, o.x), 2),
+            "outside_jurisdiction_km": round(inst.distance_outside(o.branch, o.x, o.y), 2),
         }
 
     def find_candidates(args: dict, ctx: ToolContext):
