@@ -8,6 +8,7 @@
 - 첫 도메인은 출동 스케줄링(`dispatch`)이며 가상 데이터만 쓴다. 지역은 서울 강남3구(서초·강남·송파 지점)로, 실제 구 경계 안에 지시서와 작업자를 만든다. 데이터에 문제 패턴(P1~P4)을 심어 두고, 분석 agent의 탐지율을 정답표로 채점한다.
 
 전체 기획은 [docs/plan.md](docs/plan.md), 화면 사용법은 [docs/ui-guide.md](docs/ui-guide.md), 새 도메인 추가는 [docs/domain-pack-guide.md](docs/domain-pack-guide.md).
+분석·개선 루프가 도는 방식은 [docs/improvement-loop.md](docs/improvement-loop.md) (쉬운 설명: [docs/improvement-loop-easy.md](docs/improvement-loop-easy.md)).
 
 ## 화면
 
