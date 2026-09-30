@@ -17,7 +17,9 @@ def test_core_public_api_resolves():
 
 def test_dispatch_public_api_resolves():
     for name in dispatch.__all__:
-        assert getattr(dispatch, name) is not None
+        obj = getattr(dispatch, name)
+        module = getattr(obj, "__module__", None) or "domains.dispatch.pack"   # 상수(NAME)는 pack에 정의
+        assert getattr(importlib.import_module(module), name) is obj
     pack = dispatch.get_pack()
     assert isinstance(pack, dispatch.DispatchPack) and pack.name == dispatch.NAME == "dispatch"
     assert core.load_pack("dispatch").name == "dispatch"

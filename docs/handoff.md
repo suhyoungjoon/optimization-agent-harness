@@ -7,7 +7,8 @@
 
 ```bash
 pip install "optimization-agent-harness @ git+https://github.com/suhyoungjoon/optimization-agent-harness.git@<태그 또는 커밋>"
-python examples/reuse_quickstart.py        # 시나리오 생성 → solve → validate → metrics → 허용 범위 검사 → 시뮬레이션
+# 예제 스크립트는 패키지에 설치되지 않는다. 이 레포의 같은 태그·커밋에서 examples/reuse_quickstart.py 파일 하나를 받아 실행한다
+python reuse_quickstart.py        # 시나리오 생성 → solve → validate → metrics → 허용 범위 검사 → 시뮬레이션
 ```
 
 ```python
