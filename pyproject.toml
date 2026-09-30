@@ -23,7 +23,7 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["core*", "domains*", "api*", "scripts*"]
+include = ["core*", "domains*", "api*", "scripts*", "configs"]   # configs: 하네스 레벨·LLM 설정 (package-data로 yaml 포함)
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.md", "*.geojson"]
