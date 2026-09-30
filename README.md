@@ -9,6 +9,7 @@
 
 전체 기획은 [docs/plan.md](docs/plan.md), 화면 사용법은 [docs/ui-guide.md](docs/ui-guide.md), 새 도메인 추가는 [docs/domain-pack-guide.md](docs/domain-pack-guide.md).
 분석·개선 루프가 도는 방식은 [docs/improvement-loop.md](docs/improvement-loop.md) (쉬운 설명: [docs/improvement-loop-easy.md](docs/improvement-loop-easy.md)).
+다른 레포에서 코어를 패키지로 설치해 재사용하려면 [docs/handoff.md](docs/handoff.md)와 [examples/reuse_quickstart.py](examples/reuse_quickstart.py).
 
 ## 화면
 
@@ -146,6 +147,7 @@ configs/         하네스 레벨, LLM 설정
 api/             FastAPI (시연 재생 포함)
 web/             React + Vite 프런트엔드 (도메인별 결과 화면은 web/src/domains/)
 scripts/         데이터 생성, 시연 번들, 시연 녹화
+examples/        코어 재사용 예제 (설치된 패키지로 실행)
 tests/           계약 테스트, 코어·도메인 테스트 (가짜 LLM)
 docs/            기획서, AI 적용 경계, 도메인 팩 가이드
 ```

@@ -1,0 +1,46 @@
+"""공통 코어 공개 API. 다른 레포에서 재사용할 이름을 여기서 다시 내보낸다 (원래 모듈 경로도 그대로 쓸 수 있다).
+
+설명과 계약은 docs/handoff.md.
+"""
+
+from core.analysis.agent import analyze
+from core.analysis.aggregate_tools import Aggregator
+from core.evaluation.compare import compare, consistency
+from core.evaluation.fault_scorer import matches, score
+from core.evaluation.runner import create_ai_run, run_ai_agent, run_rule_agent
+from core.harness.levels import Level, get_level, load_levels
+from core.harness.runner import CORE_REASON_CODES, AbortRun, HarnessRunner, RunOutput
+from core.harness.tracer import Tracer
+from core.improvement.approval import write_params, write_spec
+from core.improvement.changes import apply_params, apply_spec, params_errors, spec_errors, spec_sections
+from core.improvement.proposer import finding_slices, propose
+from core.improvement.simulate import simulate_params
+from core.interfaces import DecisionRecord, DomainPack, ToolContext, TraceRecord, Violation
+from core.llm.client import AnthropicClient, LLMClient, LLMResponse, ResponseCache, Usage, load_config
+from core.llm.tool_loop import LoopResult, run_tool_loop, usage_dict
+from core.params import apply_overrides, check_params, get_path, parse_path, path_errors, set_path
+from core.registry import list_domains, list_faults, load_faults, load_pack, load_params
+from core.storage.store import Store, dataset_id, to_jsonable
+
+__all__ = [
+    # 계약 (core.interfaces)
+    "DecisionRecord", "DomainPack", "ToolContext", "TraceRecord", "Violation",
+    # 파라미터: 경로 접근, 구간 조건, 허용 범위 검사 (core.params)
+    "apply_overrides", "check_params", "get_path", "parse_path", "path_errors", "set_path",
+    # 도메인 팩 로딩 (core.registry)
+    "list_domains", "list_faults", "load_faults", "load_pack", "load_params",
+    # 하네스 (core.harness)
+    "CORE_REASON_CODES", "AbortRun", "HarnessRunner", "Level", "RunOutput", "Tracer", "get_level", "load_levels",
+    # LLM (core.llm)
+    "AnthropicClient", "LLMClient", "LLMResponse", "LoopResult", "ResponseCache", "Usage", "load_config",
+    "run_tool_loop", "usage_dict",
+    # 실행·비교·채점 (core.evaluation)
+    "compare", "consistency", "create_ai_run", "matches", "run_ai_agent", "run_rule_agent", "score",
+    # 분석 (core.analysis)
+    "Aggregator", "analyze",
+    # 개선 루프 (core.improvement)
+    "apply_params", "apply_spec", "finding_slices", "params_errors", "propose", "simulate_params",
+    "spec_errors", "spec_sections", "write_params", "write_spec",
+    # 저장소 (core.storage)
+    "Store", "dataset_id", "to_jsonable",
+]
