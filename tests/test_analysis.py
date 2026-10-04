@@ -169,3 +169,18 @@ def test_ideal_analyst_can_find_all_planted_faults():
     assert report["dropped"] == [], report["dropped"]
     result = score(report["findings"], truth["faults"])
     assert result["detected"] == 4 and result["unmatched_findings"] == []
+
+
+def test_report_schema_and_grounding_are_public():
+    """다른 분석 agent(관점별 agent 등)가 같은 리포트 형식·근거 검사를 쓰도록 공개한 이름."""
+    import core
+    from core.analysis import agent
+
+    assert core.report_submit_tool is agent.report_submit_tool is agent._submit_tool
+    assert core.grounding_problems is agent.grounding_problems is agent._problems
+    tool = core.report_submit_tool({"reason_codes": {"NO_CERT": "x"}}, ["assignment_rate"])
+    assert tool["name"] == "submit_report"
+    calls = {"t1": {"input": {}, "output": {"items": 40, "failed": 12}}}
+    assert core.grounding_problems({"title": "a", "description": "40건 중 12건", "cited_calls": ["t1"]}, calls) == []
+    assert core.grounding_problems({"title": "a", "description": "40건 중 13건", "cited_calls": ["t1"]}, calls)
+    assert core.grounding_problems({"title": "a", "description": "x", "cited_calls": []}, calls)
