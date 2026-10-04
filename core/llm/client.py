@@ -123,14 +123,16 @@ class ResponseCache:
 class AnthropicClient:
     """Anthropic Messages API 호출. thinking은 adaptive, 깊이는 effort로 조절한다."""
 
-    def __init__(self, config: dict | None = None, cache: ResponseCache | None = None, api: Any = None):
+    def __init__(self, config: dict | None = None, cache: ResponseCache | None = None, api: Any = None,
+                 env_path: str | Path | None = None):
+        """env_path: API 키를 읽을 .env 경로. 없으면 패키지 위치의 .env (설치해서 쓰는 다른 레포는 경로를 넘긴다)."""
         self.config = config or load_config()
         self.model = self.config["model"]
         self.cache = cache if cache is not None else (ResponseCache() if self.config.get("cache") else None)
         if api is None:
             import anthropic  # 실제 호출 때만 필요
 
-            load_dotenv()
+            load_dotenv(Path(env_path)) if env_path is not None else load_dotenv()
             api = anthropic.Anthropic()
         self.api = api
 

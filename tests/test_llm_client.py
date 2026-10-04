@@ -101,3 +101,17 @@ def test_load_dotenv(tmp_path, monkeypatch):
     assert os.environ["OAH_TEST_KEY"] == "abc" and os.environ["OAH_KEEP"] == "old"
     assert "OAH_EMPTY" not in os.environ
     monkeypatch.delenv("OAH_TEST_KEY")
+
+
+def test_env_path_reads_api_key_from_given_file(tmp_path, monkeypatch):
+    """설치해서 쓰는 다른 레포는 자기 .env 경로를 넘긴다 (기본값은 패키지 위치의 .env)."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    env = tmp_path / ".env"
+    env.write_text("ANTHROPIC_API_KEY=key-from-other-repo\n", encoding="utf-8")
+    import os
+    try:
+        client = AnthropicClient(config={**load_config(), "cache": False}, env_path=env)
+        assert os.environ["ANTHROPIC_API_KEY"] == "key-from-other-repo"
+        assert client.api is not None                   # 클라이언트 생성만 하고 API는 호출하지 않는다
+    finally:
+        os.environ.pop("ANTHROPIC_API_KEY", None)       # load_dotenv가 넣은 값이 다른 테스트로 새지 않게
