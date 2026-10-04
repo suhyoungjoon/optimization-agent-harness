@@ -122,3 +122,25 @@ def test_propose_with_trials_and_validation(pack, spec_text):
     assert any("허용 범위" in e for e in too_far["errors"])
     sim = next(c for c in out["calls"].values() if c["name"] == "simulate_params")["output"]
     assert sim["slices"]["F1"]["after"]["fail_rate"] < sim["slices"]["F1"]["before"]["fail_rate"]
+
+
+def test_propose_feedback_is_added_to_input_only_when_given(pack, spec_text):
+    inst, _ = generate(42, ["P4"])
+    report = {"summary": "경계", "findings": [{"id": "F1", "title": "경계 지역 실패", "description": "",
+                                             "slice": {"area_zone": ["boundary"]}}]}
+
+    def policy(item, n, messages, tools):
+        return tool_use("submit_proposals", {"proposals": [
+            {"title": "경계 지역만 +1km", "kind": "params", "rationale": "x", "target_findings": ["F1"],
+             "override_rules": [BOUNDARY_RULE]}]})
+
+    plain, with_feedback = FakeLLM(policy), FakeLLM(policy)
+    propose(get_pack, inst, pack.params, spec_text, pack.dimensions(), report, plain, load_config())
+    out = propose(get_pack, inst, pack.params, spec_text, pack.dimensions(), report, with_feedback, load_config(),
+                  feedback=["C1 경계 지역만 +1km: validation 평균 assignment_rate 개선 +0.0000"])
+    first_plain = plain.calls[0]["messages"][0]["content"]
+    first_feedback = with_feedback.calls[0]["messages"][0]["content"]
+    assert "이전 시도에서 탈락한 이유" not in first_plain
+    assert first_feedback.startswith(first_plain)                      # 기존 입력 뒤에만 붙는다
+    assert "validation 평균 assignment_rate 개선 +0.0000" in first_feedback
+    assert out["stop"] == "submitted"

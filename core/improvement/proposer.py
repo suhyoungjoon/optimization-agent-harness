@@ -66,7 +66,10 @@ def finding_slices(report: dict) -> dict[str, dict]:
 
 
 def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: dict, report: dict,
-            llm: LLMClient, llm_config: dict, salt: str = "", max_calls: int = 20) -> dict:
+            llm: LLMClient, llm_config: dict, salt: str = "", max_calls: int = 20,
+            feedback: list[str] | None = None) -> dict:
+    """feedback: 앞선 시도의 개선안이 탈락한 이유 (재시도할 때 같은 안을 다시 내지 않도록 입력에 붙인다).
+    없으면 입력은 이전과 같다 (LLM 캐시 키도 같다)."""
     slices = finding_slices(report)
     trials: list[dict] = []
 
@@ -99,6 +102,9 @@ def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: di
                                         ensure_ascii=False, indent=1)
             + "\n\n# 차원\n" + json.dumps({k: v.get("values") for k, v in dimensions.get("dimensions", {}).items()},
                                          ensure_ascii=False))
+    if feedback:
+        user += ("\n\n# 이전 시도에서 탈락한 이유\n" + "\n".join(f"- {f}" for f in feedback)
+                 + "\n같은 변경을 다시 제안하지 말고, 위 이유를 피하는 안을 제안하라.")
     result = run_tool_loop(llm, system=SYSTEM, user=user, tools=tools, submit_tool=_submit_tool(),
                            max_calls=max_calls, salt=salt)
 

@@ -3,7 +3,7 @@
 설명과 계약은 docs/handoff.md.
 """
 
-from core.analysis.agent import analyze
+from core.analysis.agent import analyze, grounding_problems, report_submit_tool
 from core.analysis.aggregate_tools import Aggregator
 from core.evaluation.compare import compare, consistency
 from core.evaluation.fault_scorer import matches, score
@@ -37,7 +37,7 @@ __all__ = [
     # 실행·비교·채점 (core.evaluation)
     "compare", "consistency", "create_ai_run", "matches", "run_ai_agent", "run_rule_agent", "score",
     # 분석 (core.analysis)
-    "Aggregator", "analyze",
+    "Aggregator", "analyze", "grounding_problems", "report_submit_tool",
     # 개선 루프 (core.improvement)
     "apply_params", "apply_spec", "finding_slices", "params_errors", "propose", "simulate_params",
     "spec_errors", "spec_sections", "write_params", "write_spec",

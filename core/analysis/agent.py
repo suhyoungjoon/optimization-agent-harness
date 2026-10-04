@@ -24,7 +24,8 @@ SYSTEM = """너는 최적화 결과 분석가다. 주어진 실행 결과에서 
 - 끝나면 submit_report 도구로 제출한다."""
 
 
-def _submit_tool(dimensions: dict, metric_names: list[str]) -> dict:
+def report_submit_tool(dimensions: dict, metric_names: list[str]) -> dict:
+    """분석 리포트 제출 도구 정의. 다른 분석 agent(예: 관점별 agent)도 같은 리포트 형식을 쓰도록 공개한다."""
     return {
         "name": SUBMIT,
         "description": "분석 리포트를 제출한다.",
@@ -56,7 +57,8 @@ def _submit_tool(dimensions: dict, metric_names: list[str]) -> dict:
     }
 
 
-def _problems(finding: dict, calls: dict) -> list[str]:
+def grounding_problems(finding: dict, calls: dict) -> list[str]:
+    """발견 하나의 근거 검사. 인용한 도구 호출이 없거나, 설명의 수치가 인용 결과에 없으면 문제 목록을 돌려준다."""
     cited = [c for c in finding.get("cited_calls") or [] if c in calls]
     if not cited:
         return ["인용한 도구 호출이 없거나 존재하지 않는 id"]
@@ -64,6 +66,11 @@ def _problems(finding: dict, calls: dict) -> list[str]:
     sources += numbers_in(finding.get("slice") or {})
     bad = unsupported_numbers(f"{finding.get('title', '')} {finding.get('description', '')}", sources)
     return [f"근거 없는 수치 {', '.join(bad)}"] if bad else []
+
+
+# 공개 전 이름 (하위 호환)
+_submit_tool = report_submit_tool
+_problems = grounding_problems
 
 
 def analyze(pack: DomainPack, instance, decisions: list[DecisionRecord], llm: LLMClient, llm_config: dict,
@@ -75,17 +82,17 @@ def analyze(pack: DomainPack, instance, decisions: list[DecisionRecord], llm: LL
     def check(submission: dict, calls: dict) -> list[str]:
         issues = []
         for i, f in enumerate(submission.get("findings") or []):
-            issues += [f"findings[{i}] '{f.get('title', '')}': {p}" for p in _problems(f, calls)]
+            issues += [f"findings[{i}] '{f.get('title', '')}': {p}" for p in grounding_problems(f, calls)]
         return issues
 
     user = ("실행 결과를 분석해 실패 패턴과 원인 가설을 찾아라. 먼저 overview로 전체와 차원을 확인하라.\n"
             f"분석 대상 항목 수: {len(decisions)}")
-    result = run_tool_loop(llm, system=SYSTEM, user=user, tools=tools, submit_tool=_submit_tool(dimensions, metric_names),
+    result = run_tool_loop(llm, system=SYSTEM, user=user, tools=tools, submit_tool=report_submit_tool(dimensions, metric_names),
                            max_calls=max_calls, salt=salt, check_submission=check)
 
     kept, dropped = [], []
     for f in (result.submission or {}).get("findings") or []:
-        problems = _problems(f, result.calls)
+        problems = grounding_problems(f, result.calls)
         if problems:
             dropped.append({"finding": f, "problems": problems})
         else:
