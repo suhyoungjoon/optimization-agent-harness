@@ -7,11 +7,12 @@ import DomainPanel from "./components/DomainPanel";
 import ImprovementPanel from "./components/ImprovementPanel";
 import TracePanel from "./components/TracePanel";
 import WorkflowPanel from "./components/WorkflowPanel";
+import AgentsPanel from "./components/AgentsPanel";
 import { adapters } from "./domains";
 import { CORE_REASON_NAMES, TERMS, tip, type TermKey } from "./terms";
 import type { CompareSummary, Dataset, DecisionRecord, DemoCatalogEntry, DomainInfo, HarnessInfo, Run, WorkflowRun } from "./types";
 
-type Tab = "domain" | "compare" | "trace" | "analysis" | "improve" | "workflow";
+type Tab = "domain" | "compare" | "trace" | "analysis" | "improve" | "workflow" | "agents";
 const TABS: { id: Tab; term: TermKey; milestone?: string }[] = [
   { id: "domain", term: "tabDomain" },
   { id: "compare", term: "tabCompare" },
@@ -19,6 +20,7 @@ const TABS: { id: Tab; term: TermKey; milestone?: string }[] = [
   { id: "analysis", term: "tabAnalysis" },
   { id: "improve", term: "tabImprove" },
   { id: "workflow", term: "tabWorkflow" },
+  { id: "agents", term: "tabAgents" },
 ];
 
 const sameScope = (a: string[] | null | undefined, b: string[] | null) =>
@@ -294,6 +296,9 @@ export default function App() {
         {domain && adapter && tab === "workflow" && (
           <WorkflowPanel domain={domain} adapter={adapter} harness={harness} seed={seed} faults={faults} level={level}
             onAdopt={adoptWorkflow} />
+        )}
+        {domain && adapter && tab === "agents" && (
+          <AgentsPanel domain={domain} adapter={adapter} harness={harness} seed={seed} faults={faults} level={level} />
         )}
         {domain && adapter && tab === "improve" && (
           <ImprovementPanel

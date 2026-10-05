@@ -513,7 +513,7 @@ M8-c 구현 메모: 문제 찾기는 결론 한 줄(심어둔 문제 N개 중 M�
 | API (추가) | `GET /workflow/graph`, `POST /workflow/runs`, `GET /workflow/runs/{id}`, `POST /workflow/runs/{id}/step` |
 | 범위 밖 | 시연 녹화 장면(사용자 결정으로 추가 안 함), 여러 레벨 병렬 실행·여러 바퀴 개선(확장 예로 문서에만) |
 
-**M10 LangGraph agents**
+**M10 LangGraph agents (완료)**
 
 M9가 기존 에이전트를 노드로 감싸 연결만 했다면, M10은 **에이전트 내부까지 LangGraph로** 만든 별도 탭(**LangGraph agents**)이다. 기존 탭·코어는 그대로다.
 
@@ -528,6 +528,7 @@ M9가 기존 에이전트를 노드로 감싸 연결만 했다면, M10은 **에�
 | 결과 | 탭 안에서만 (DB에 저장하지 않음). 승인 반영만 규칙 파일에 |
 | API (추가) | `GET /agents/graph?level=`, `POST /agents/runs`, `GET /agents/runs/{id}?after=`, `POST /agents/runs/{id}/step` |
 | 단계 | M10-a 백엔드·테스트, M10-b 화면·문서 (사용자 결정으로 2단계) |
+| 화면 (M10-b) | 왼쪽 상위 그래프(단계별 결과 한 줄), 오른쪽 고른 에이전트의 내부 그래프(지금 노드 강조, 노드별 지나간 횟수, 실시간 진행 기록). 레벨을 바꾸면 배정 에이전트 그림이 바로 바뀐다. AI(가짜/Claude)·속도 선택. 상세: [docs/langgraph-agents.md](langgraph-agents.md) |
 
 # 부록. 구현 명세
 
@@ -818,7 +819,7 @@ GitHub 마일스톤을 주차별로 만들고, 아래 항목을 이슈로 등록
 | M8 화면 쉽게 보기 (추가) | M8-a 화면 용어를 쉬운 말로 (원래 용어는 마우스 올림·상세보기), 탭 이름·레벨 버튼 이름 | B |
 | M8 화면 쉽게 보기 (추가) | M8-b 요약 먼저·상세는 펼쳐서: 비교, 개선 제안 / M8-c 문제 찾기, 결정 과정, 상단 | B |
 | M9 Agent workflow (추가) | 화면 단계를 LangGraph 그래프 하나로: 단계마다 멈추고 사람이 진행, 사람 승인(interrupt), 조건부 연결, 노드 추가로 확장 (`workflow/`, 선택 설치) | B |
-| M10 LangGraph agents (추가) | M10-a 배정·분석·개선 제안 에이전트를 모두 LangGraph 하위 그래프로 + 상위 그래프 + API (완료) / M10-b 'LangGraph agents' 탭 화면·문서 | B |
+| M10 LangGraph agents (추가) | M10-a 배정·분석·개선 제안 에이전트를 모두 LangGraph 하위 그래프로 + 상위 그래프 + API (완료) / M10-b 'LangGraph agents' 탭 화면·문서 (완료) | B |
 | 선택 (도전) | 두 번째 도메인 팩 (예: 교대 근무표) 최소 구현, 계약 테스트 통과 | A·B |
 
 **완료 기준(각 마일스톤)**: M2는 규칙 agent 결과가 지도에 표시되고 위반 0건, M3은 UI에서 L0~L5 전환 시 지표가 갱신됨, M4는 탐지율과 개선 전후 수치가 화면에 나옴, M5는 네트워크 없이 캐시 모드로 전체 시연 가능, M6-a는 규칙 agent가 쓰는 규칙·데이터를 코드를 열지 않고 화면에서 확인 가능.

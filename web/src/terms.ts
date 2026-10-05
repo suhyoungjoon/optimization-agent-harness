@@ -18,6 +18,7 @@ export const TERMS = {
   tabTrace: t("결정 과정", "트레이스 탭"),
   tabAnalysis: t("문제 찾기", "분석 탭"),
   tabImprove: t("개선 제안", "개선 탭"),
+  tabAgents: t("LangGraph agents", "LangGraph 에이전트 탭 (M10): 배정·분석·개선 제안 에이전트 내부까지 LangGraph 하위 그래프"),
   tabWorkflow: t("Agent workflow (Langgraph version)", "LangGraph 워크플로우 탭 (M9): 위 단계를 그래프 하나로 한 단계씩 실행"),
   // 두 방식
   rule: t("규칙 방식", "규칙 agent (기준선)"),

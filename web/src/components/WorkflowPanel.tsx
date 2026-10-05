@@ -202,29 +202,33 @@ g.add_edge("review_agent", "simulate")`}</pre>
   );
 }
 
-function StepBar({
+export function StepBar({
   run,
   nextLabel,
   currentLabel,
   note,
   setNote,
   onStep,
+  idleText = "입력을 고르고 [워크플로우 준비]를 누르면 첫 단계 앞에서 멈춥니다.",
+  doneText = "결과는 각 단계의 [탭에서 보기]로 자세히 봅니다.",
 }: {
-  run: WorkflowRun | null;
+  run: Pick<WorkflowRun, "status" | "steps" | "waiting" | "error" | "current"> | null;   // M9·M10 공통
   nextLabel: string | null;
   currentLabel: string | null;
   note: string;
   setNote: (s: string) => void;
   onStep: (action: "next" | "approve" | "reject") => void;
+  idleText?: string;
+  doneText?: string;
 }) {
   if (!run) {
-    return <div className="verdict wf-bar"><span className="muted">입력을 고르고 [워크플로우 준비]를 누르면 첫 단계 앞에서 멈춥니다.</span></div>;
+    return <div className="verdict wf-bar"><span className="muted">{idleText}</span></div>;
   }
   if (run.status === "running") {
     return <div className="verdict wf-bar" role="status"><span>실행 중: <strong>{currentLabel ?? nextLabel}</strong>…</span></div>;
   }
   if (run.status === "done") {
-    return <div className="verdict wf-bar" role="status"><span className="good-text">✓ 끝 ({run.steps.length}단계)</span><span className="muted">결과는 각 단계의 [탭에서 보기]로 자세히 봅니다.</span></div>;
+    return <div className="verdict wf-bar" role="status"><span className="good-text">✓ 끝 ({run.steps.length}단계)</span><span className="muted">{doneText}</span></div>;
   }
   if (run.waiting === "approval") {
     const sim = [...run.steps].reverse().find((s) => s.node === "simulate");

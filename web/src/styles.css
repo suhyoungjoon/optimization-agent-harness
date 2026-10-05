@@ -436,3 +436,18 @@ details.more > .more-body { margin-top: 8px; }
 .wf-chip { display: inline-block; font-size: 11px; border-left: 4px solid var(--axis); padding: 0 6px; background: var(--surface); border-radius: 4px; }
 .wf-chip.wf-ai { border-left-color: var(--series-1); }
 .wf-chip.wf-human { border-left-color: var(--series-3); }
+
+/* LangGraph agents (M10) */
+.wf-node.wf-shown { outline: 2px dashed var(--series-1); outline-offset: 2px; }
+.wf-inner { position: sticky; top: 8px; }
+.wf-inner .panel { max-height: calc(100vh - 24px); overflow-y: auto; }
+.inner-nodes { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 6px; }
+.inner-node { border: 1px solid var(--border); border-left: 4px solid var(--axis); border-radius: 6px; padding: 4px 8px; background: var(--surface); opacity: 0.75; }
+.inner-node.wf-ai { border-left-color: var(--series-1); }
+.inner-node.wf-check { border-left-color: var(--warning); }
+.inner-node.inner-visited { opacity: 1; }
+.inner-node.inner-active { box-shadow: 0 0 0 2px var(--series-1); opacity: 1; }
+.inner-edges { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 2px; }
+.event-log { list-style: none; margin: 0; padding: 6px 8px; max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--page); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.event-log li { padding: 1px 0; }
+.wf-node.wf-check { border-left-color: var(--warning); }
