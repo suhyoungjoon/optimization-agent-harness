@@ -27,6 +27,7 @@ from core.llm.client import AnthropicClient, LLMClient, load_config
 from core.registry import list_domains, list_faults, load_faults, load_pack, load_params, set_domain_files_root
 from core.storage.store import Store, to_jsonable
 
+from workflow.agents.api import register as register_agents
 from workflow.api import register as register_workflow
 
 from . import improvement
@@ -282,6 +283,7 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
 
     improvement.register(app, improvement.Context(store, executor, make_llm, llm_config, replay=bool(demo)))
     register_workflow(app)   # LangGraph가 없으면 /workflow/graph가 이유만 돌려준다
+    register_agents(app, demo=bool(demo))   # M10: 모든 에이전트를 LangGraph로 (시연 모드는 가짜 AI)
 
     if serve_web and WEB_DIST.is_dir():   # 정적 파일은 모든 API 경로 뒤에 붙인다
         app.mount("/", StaticFiles(directory=WEB_DIST, html=True), name="web")
