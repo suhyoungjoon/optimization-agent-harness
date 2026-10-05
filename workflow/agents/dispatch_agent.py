@@ -70,7 +70,7 @@ def build_dispatch_agent(ctx: AgentContext, level: Level, llm=None, spec_text: s
         idx = state.get("idx", -1) + 1
         items = state["items"]
         if idx >= len(items):
-            ctx.emit(agent, "next_item", f"모든 지시서 처리 ({len(items)}건)")
+            ctx.emit(agent, "next_item", f"모두 처리 ({len(items)}건)")
             return {"idx": idx}
         item = items[idx]
         r = runner()
@@ -79,7 +79,7 @@ def build_dispatch_agent(ctx: AgentContext, level: Level, llm=None, spec_text: s
             block = {"type": "text", "text": "# 인스턴스 데이터\n" + json.dumps(to_jsonable(instance()), ensure_ascii=False),
                      "cache_control": {"type": "ephemeral"}}
         first = r._first_user_message(instance(), item, state.get("placed") or [], block)
-        ctx.emit(agent, "next_item", f"지시서 {item} ({idx + 1}/{len(items)})")
+        ctx.emit(agent, "next_item", f"{item} ({idx + 1}/{len(items)})")
         return {"idx": idx, "item": item, "messages": [first], "calls": 0, "retries": 0, "nudged": False,
                 "pending": [], "submit_id": None, "record": None, "violations": [], "fail": None}
 
@@ -94,7 +94,7 @@ def build_dispatch_agent(ctx: AgentContext, level: Level, llm=None, spec_text: s
         state["usage"].add(resp)
         calls = state["calls"] + 1
         uses = [b for b in resp.content if b.get("type") == "tool_use"]
-        ctx.emit(agent, "ai", f"AI 응답 {calls}: " + (", ".join(u["name"] for u in uses) or "글로만 답함"))
+        ctx.emit(agent, "ai", f"{calls}번째: " + (", ".join(u["name"] for u in uses) or "글로만 답함"))
         out = {"calls": calls, "messages": state["messages"] + [{"role": "assistant", "content": resp.content}]}
         if resp.stop_reason == "refusal":
             out["fail"] = ("LLM_REFUSAL", "LLM이 요청을 거절함")
@@ -142,7 +142,7 @@ def build_dispatch_agent(ctx: AgentContext, level: Level, llm=None, spec_text: s
     def submit(state: DispatchState):
         use = next(u for u in last_uses(state) if u["name"] == SUBMIT_TOOL)
         record = runner()._to_record(instance(), state["item"], use.get("input") or {}, state["calls"], state["retries"])
-        ctx.emit(agent, "submit", f"제출: {_decision_text(record)}")
+        ctx.emit(agent, "submit", _decision_text(record))
         return {"record": record, "submit_id": use["id"]}
 
     def validate(state: DispatchState):
@@ -158,7 +158,7 @@ def build_dispatch_agent(ctx: AgentContext, level: Level, llm=None, spec_text: s
         text = validator_loop.feedback(state["violations"])
         results = (state.get("pending") or []) + [{"type": "tool_result", "tool_use_id": state["submit_id"],
                                                    "content": text, "is_error": True}]
-        ctx.emit(agent, "retry", f"다시 시도 {state['retries'] + 1}/{level.max_retries}: 위반 사유를 AI에게 돌려줌")
+        ctx.emit(agent, "retry", f"{state['retries'] + 1}/{level.max_retries}: 위반 사유를 AI에게 돌려줌")
         return {"retries": state["retries"] + 1, "pending": [], "submit_id": None, "record": None,
                 "messages": state["messages"] + [{"role": "user", "content": results}]}
 
@@ -174,7 +174,7 @@ def build_dispatch_agent(ctx: AgentContext, level: Level, llm=None, spec_text: s
         return {"record": record}
 
     def nudge(state: DispatchState):
-        ctx.emit(agent, "nudge", "submit_decision 도구로 결정을 제출하라고 재촉")
+        ctx.emit(agent, "nudge", "submit_decision 도구로 결정을 제출하라고 다시 요청")
         return {"nudged": True,
                 "messages": state["messages"] + [{"role": "user", "content": "submit_decision 도구로 결정을 제출하라."}]}
 
@@ -191,7 +191,7 @@ def build_dispatch_agent(ctx: AgentContext, level: Level, llm=None, spec_text: s
         placed = list(state.get("placed") or [])
         if record.status in ("success", "pending_approval"):
             placed.append(record)
-        ctx.emit(agent, "record", f"기록 {state['item']}: {_decision_text(record)}")
+        ctx.emit(agent, "record", f"{state['item']}: {_decision_text(record)}")
         return {"placed": placed, "decisions": (state.get("decisions") or []) + [record]}
 
     def trace(state: DispatchState):
@@ -199,26 +199,27 @@ def build_dispatch_agent(ctx: AgentContext, level: Level, llm=None, spec_text: s
         steps = [e for e in ctx.recent(limit=None) if e["agent"] == agent]
         start = max((i for i, e in enumerate(steps) if e["node"] == "next_item" and item in e["text"]), default=0)
         ctx.data.setdefault("traces", {})[item] = steps[start:]
-        ctx.emit(agent, "trace", f"과정 저장 {item} ({len(steps) - start}단계)")
+        ctx.emit(agent, "trace", f"{item} ({len(steps) - start}단계)")
         return {}
 
     g = StateGraph(DispatchState)
     meta = lambda label, kind: {"label": label, "kind": kind}   # noqa: E731
+    # 흐름 순서대로 넣는다 (그림이 이 순서로 나온다)
     g.add_node("next_item", next_item, metadata=meta("다음 지시서", "tool"))
     g.add_node("ai", ai, metadata=meta("AI 응답", "ai"))
-    g.add_node("submit", submit, metadata=meta("결정 읽기", "tool"))
-    g.add_node("nudge", nudge, metadata=meta("재촉", "tool"))
-    g.add_node("fail", fail, metadata=meta("실패 기록", "tool"))
-    g.add_node("record", record_node, metadata=meta("기록", "tool"))
     if level.tools:
         g.add_node("tools", tools_node, metadata=meta("조회 도구", "tool"))
+    g.add_node("submit", submit, metadata=meta("결정 읽기", "tool"))
     if level.validate_loop:
         g.add_node("validate", validate, metadata=meta("자동 검사", "check"))
         g.add_node("retry", retry, metadata=meta("다시 시도", "check"))
     if level.guardrail:
         g.add_node("guardrail", guard, metadata=meta("위험 결정 막기", "check"))
+    g.add_node("record", record_node, metadata=meta("기록", "tool"))
     if level.trace == "full":
         g.add_node("trace", trace, metadata=meta("과정 저장", "tool"))
+    g.add_node("nudge", nudge, metadata=meta("재촉", "tool"))
+    g.add_node("fail", fail, metadata=meta("실패 기록", "tool"))
 
     g.add_edge(START, "next_item")
     g.add_conditional_edges("next_item", after_next, {NEXT: "ai", ALL_DONE: END})

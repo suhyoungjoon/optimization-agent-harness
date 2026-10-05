@@ -56,7 +56,7 @@ def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, to
         n = state.get("llm_calls", 0) + 1
         uses = [b for b in resp.content if b.get("type") == "tool_use"]
         names = ", ".join(u["name"] for u in uses) or "글로만 답함"
-        ctx.emit(agent, "ai", f"AI 응답 {n}: {names}")
+        ctx.emit(agent, "ai", f"{n}번째: {names}")
         if resp.stop_reason == "refusal":
             return {"llm_calls": n, "stop": "refusal"}
         return {"llm_calls": n, "messages": state["messages"] + [{"role": "assistant", "content": resp.content}]}
@@ -108,20 +108,20 @@ def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, to
         problems = check(submission, state.get("calls") or {}) if check else []
         rounds = state.get("feedback_rounds", 0)
         if problems and feedback and rounds < max_feedback:
-            ctx.emit(agent, "check", f"✕ {check_label}: {problems[0]}" + (f" 외 {len(problems) - 1}건" if len(problems) > 1 else ""))
+            ctx.emit(agent, "check", f"✕ {problems[0]}" + (f" 외 {len(problems) - 1}건" if len(problems) > 1 else ""))
             results = (state.get("pending") or []) + [{
                 "type": "tool_result", "tool_use_id": use["id"], "is_error": True,
                 "content": "제출을 반려한다. 아래를 고쳐 다시 제출하라.\n- " + "\n- ".join(problems)}]
             return {"feedback_rounds": rounds + 1, "problems": problems, "pending": [], "submit_id": None,
                     "messages": state["messages"] + [{"role": "user", "content": results}]}
-        ctx.emit(agent, "check", f"✓ {check_label} 통과" if not problems else f"{check_label}: 문제 {len(problems)}건 기록")
+        ctx.emit(agent, "check", "✓ 통과" if not problems else f"문제 {len(problems)}건 기록 (적용 불가로 표시)")
         return {"submission": submission, "problems": problems, "stop": "submitted"}
 
     def after_check(state: ToolAgentState) -> str:
         return PASS if state.get("stop") == "submitted" else REJECT
 
     def nudge(state: ToolAgentState):
-        ctx.emit(agent, "nudge", f"{submit_name} 도구로 제출하라고 재촉")
+        ctx.emit(agent, "nudge", f"{submit_name} 도구로 제출하라고 다시 요청")
         return {"nudged": True,
                 "messages": state["messages"] + [{"role": "user", "content": f"{submit_name} 도구로 결과를 제출하라."}]}
 

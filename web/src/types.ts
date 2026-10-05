@@ -318,3 +318,31 @@ export interface WorkflowRun {
   ids: Partial<Record<"dataset_id" | "rule_run_id" | "ai_run_id" | "full_rule_run_id" | "report_id" | "batch_id" | "proposal_id", string>>;
   inputs: { domain?: string; seed?: number; faults?: string[]; items?: number; level?: string; scope?: string[] };
 }
+
+// --- LangGraph agents (M10) ---
+export interface AgentsGraph {
+  available: boolean;
+  reason?: string;
+  demo?: boolean;
+  level?: string;
+  top: { nodes: (WorkflowNode & { agent?: boolean })[]; edges: WorkflowEdge[] };
+  agents: Record<string, { nodes: WorkflowNode[]; edges: WorkflowEdge[] }>;
+}
+
+export interface AgentEvent {
+  i: number;
+  agent: string;
+  node: string;
+  text: string;
+  at: number;
+}
+
+export interface AgentsRun extends Omit<WorkflowRun, "ids" | "inputs" | "approval"> {
+  llm: "fake" | "claude";
+  approval: { proposal: number; title: string; question: string } | null;
+  events: AgentEvent[];
+  counts: Record<string, Record<string, number>>;
+  last_event: AgentEvent | null;
+  proposals: { title: string; kind: string; status: string; errors: string[] }[];
+  inputs: { domain?: string; seed?: number; faults?: string[]; items?: number; level?: string };
+}

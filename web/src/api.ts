@@ -1,6 +1,6 @@
 import type {
   CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DomainDefinition, DecisionRecord, DomainInfo, HarnessInfo, HistoryRow, Proposal, ProposalBatch, Report, Run,
-  SpecEstimate, TraceRecord, WorkflowGraph, WorkflowRun,
+  SpecEstimate, TraceRecord, WorkflowGraph, WorkflowRun, AgentsGraph, AgentsRun,
 } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -24,6 +24,12 @@ export interface RunOptions {
 }
 
 export const api = {
+  agentsGraph: (level: string) => request<AgentsGraph>(`/agents/graph?level=${level}`),
+  agentsStart: (body: { domain: string; seed: number; faults: string[]; items: number; level: string; metrics: unknown[];
+    llm: "fake" | "claude"; pace: number }) => request<AgentsRun>("/agents/runs", { method: "POST", body: JSON.stringify(body) }),
+  agentsGet: (id: string, after = -1) => request<AgentsRun>(`/agents/runs/${id}?after=${after}`),
+  agentsStep: (id: string, action: "next" | "approve" | "reject", note = "") =>
+    request<AgentsRun>(`/agents/runs/${id}/step`, { method: "POST", body: JSON.stringify({ action, note }) }),
   workflowGraph: () => request<WorkflowGraph>("/workflow/graph"),
   workflowStart: (body: { domain: string; seed: number; faults: string[]; items: number; level: string; metrics: unknown[] }) =>
     request<WorkflowRun>("/workflow/runs", { method: "POST", body: JSON.stringify(body) }),
