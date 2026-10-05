@@ -2,13 +2,17 @@ import L from "leaflet";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DecisionRecord } from "../../types";
 import type { ResultViewProps } from "../types";
-import { branchColor, hhmm, slot, useDistrictMap, type Instance, type Order, type Worker } from "./districtMap";
+import { branchColor, hhmm, slot, useDistrictMap, valueLabel, type Instance, type Order, type Worker } from "./districtMap";
 
 type Hover =
   | { kind: "order"; order: Order; record?: DecisionRecord; x: number; y: number }
   | { kind: "worker"; worker: Worker; jobs: number; x: number; y: number };
 
-export default function DispatchMap({ instance, decisions, reasonLabels, selected, onSelect, highlight }: ResultViewProps) {
+// 매칭 단계 → 쉬운 말 (params.yaml의 matching: 단계가 올라갈수록 시간·지역 조건을 완화)
+const STAGE_NAMES: Record<string, string> = { "1": "조건 그대로", "2": "조금 완화", "3": "많이 완화" };
+const stageName = (stage: unknown) => STAGE_NAMES[String(stage)] ?? `${String(stage)}단계`;
+
+export default function DispatchMap({ instance, decisions, reasonLabels, reasonDetails = {}, selected, onSelect, highlight }: ResultViewProps) {
   const inst = instance as Instance;
   const records = useMemo(() => new Map(decisions.map((d) => [d.item_id, d])), [decisions]);
   // 실행 범위에 들어 있는 날짜만 고를 수 있다
@@ -127,7 +131,7 @@ export default function DispatchMap({ instance, decisions, reasonLabels, selecte
           </select>
         </label>
         <span className="muted">
-          지시서 {orders.length}건 · 배정 {orders.length - failed}건 · <span className="critical-text">미할당 {failed}건</span>
+          지시서 {orders.length}건 · 배정 {orders.length - failed}건 · <span className="critical-text">미배정 {failed}건</span>
           {lit && <> · 강조 {orders.filter((o) => lit.has(o.id)).length}건</>}
           {held > 0 && <> (차단·승인 대기 {held}건 포함)</>}
         </span>
@@ -141,7 +145,7 @@ export default function DispatchMap({ instance, decisions, reasonLabels, selecte
         {hover && (
           <div className="tooltip" style={{ left: hover.x + 12, top: hover.y + 12 }}>
             {hover.kind === "order" ? (
-              <OrderSummary order={hover.order} record={hover.record} reasons={reasonLabels} branchName={branchName} />
+              <OrderSummary order={hover.order} record={hover.record} reasons={reasonLabels} details={reasonDetails} branchName={branchName} />
             ) : (
               <>
                 <strong>
@@ -167,7 +171,7 @@ export default function DispatchMap({ instance, decisions, reasonLabels, selecte
         ))}
         <span>▪ 작업자</span>
         <span>● 배정된 지시서</span>
-        <span className="critical-text">✕ 미할당·차단</span>
+        <span className="critical-text">✕ 미배정·차단</span>
         <span className="warning-text">◯ 승인 대기</span>
         <span>— 작업자 동선</span>
       </div>
@@ -175,7 +179,8 @@ export default function DispatchMap({ instance, decisions, reasonLabels, selecte
       <div className="detail">
         {selectedOrder ? (
           <>
-            <OrderSummary order={selectedOrder} record={selectedRecord} reasons={reasonLabels} branchName={branchName} />
+            <OrderSummary order={selectedOrder} record={selectedRecord} reasons={reasonLabels} details={reasonDetails}
+              branchName={branchName} />
             <p className="evidence">{selectedRecord?.evidence}</p>
           </>
         ) : (
@@ -190,11 +195,13 @@ function OrderSummary({
   order,
   record,
   reasons,
+  details,
   branchName,
 }: {
   order: Order;
   record?: DecisionRecord;
   reasons: Record<string, string>;
+  details: Record<string, string>;
   branchName: (b: string) => string;
 }) {
   const d = record?.decision;
@@ -204,12 +211,12 @@ function OrderSummary({
         {order.id} · {branchName(order.branch)}
       </strong>
       <div>
-        {order.work_type === "install" ? "개통" : "장애"} · {order.media} · {order.difficulty} · {order.building_type}
+        {valueLabel(order.work_type)} · {order.media} · {valueLabel(order.difficulty)} · {valueLabel(order.building_type)}
       </div>
       <div>희망 {hhmm(order.desired)}</div>
       {record?.status === "success" && d ? (
         <div>
-          → {String(d.worker_id)} {String(d.start_time)} ({String(d.matching_stage)}단계)
+          → {String(d.worker_id)} {String(d.start_time)} <span title={`매칭 ${String(d.matching_stage)}단계`}>({stageName(d.matching_stage)})</span>
         </div>
       ) : (record?.status === "blocked" || record?.status === "pending_approval") && d ? (
         <div className="critical-text">
@@ -217,7 +224,10 @@ function OrderSummary({
         </div>
       ) : (
         <div className="critical-text">
-          ✕ 미할당 {record?.reason_code}: {record?.reason_code ? reasons[record.reason_code] : ""}
+          ✕ 미배정
+          {record?.reason_code && (
+            <span title={`${details[record.reason_code] ?? ""} (${record.reason_code})`}>: {reasons[record.reason_code] ?? record.reason_code}</span>
+          )}
         </div>
       )}
     </>

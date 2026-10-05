@@ -6,15 +6,16 @@ import DomainPanel from "./components/DomainPanel";
 import ImprovementPanel from "./components/ImprovementPanel";
 import TracePanel from "./components/TracePanel";
 import { adapters } from "./domains";
+import { CORE_REASON_NAMES, TERMS, tip, type TermKey } from "./terms";
 import type { CompareSummary, Dataset, DecisionRecord, DemoCatalogEntry, DomainInfo, HarnessInfo, Run } from "./types";
 
 type Tab = "domain" | "compare" | "trace" | "analysis" | "improve";
-const TABS: { id: Tab; label: string; milestone?: string }[] = [
-  { id: "domain", label: "도메인" },
-  { id: "compare", label: "비교" },
-  { id: "trace", label: "트레이스" },
-  { id: "analysis", label: "분석" },
-  { id: "improve", label: "개선" },
+const TABS: { id: Tab; term: TermKey; milestone?: string }[] = [
+  { id: "domain", term: "tabDomain" },
+  { id: "compare", term: "tabCompare" },
+  { id: "trace", term: "tabTrace" },
+  { id: "analysis", term: "tabAnalysis" },
+  { id: "improve", term: "tabImprove" },
 ];
 
 const sameScope = (a: string[] | null | undefined, b: string[] | null) =>
@@ -60,9 +61,14 @@ export default function App() {
 
   const domain = domains.find((d) => d.name === domainName);
   const adapter = domain ? adapters[domain.name] : undefined;
-  const reasonLabels = useMemo(
+  // 사유 코드: 화면에는 짧은 이름, 마우스를 올리면 설명 문장
+  const reasonDetails = useMemo(
     () => ({ ...(domain?.core_reason_codes ?? {}), ...(domain?.dimensions.reason_codes ?? {}) }),
     [domain],
+  );
+  const reasonLabels = useMemo(
+    () => ({ ...reasonDetails, ...CORE_REASON_NAMES, ...(adapter?.reasonNames ?? {}) }),
+    [reasonDetails, adapter],
   );
   const scopes = useMemo(
     () => (dataset && adapter ? adapter.scopes(dataset.instance, dataset.item_ids ?? []) : []),
@@ -121,7 +127,7 @@ export default function App() {
     upsert(run);
   };
 
-  const onRunRule = () => guard("규칙 agent 실행 중", runRule);
+  const onRunRule = () => guard(`${TERMS.rule.label} 실행 중`, runRule);
 
   // 분석 탭: 결함 패턴이 가장 잘 드러나는 전체(10일치) 규칙 agent 실행
   const runFullRule = async () => {
@@ -132,7 +138,7 @@ export default function App() {
   };
 
   const onRunAi = () =>
-    guard("AI agent 실행 요청 중", async () => {
+    guard(`${TERMS.ai.label} 실행 요청 중`, async () => {
       if (!dataset) return;
       if (!ruleRun) await runRule(); // 같은 범위의 기준선
       const { runs: created } = await api.aiRuns(dataset.id, { level, repeats, scope: scopeItems ?? undefined });
@@ -164,7 +170,7 @@ export default function App() {
             ))}
           </select>
         ) : (
-          domainName && <span className="muted">도메인: {domainName}</span>
+          domainName && <span className="muted" title={tip("domain")}>{TERMS.domain.label}: {domainName}</span>
         )}
       </header>
       {harness?.demo && <DemoBanner manifest={harness.demo} catalog={demoCatalog} />}
@@ -175,16 +181,16 @@ export default function App() {
             role="tab"
             aria-selected={tab === t.id}
             disabled={!!t.milestone}
-            title={t.milestone ? `${t.milestone}에서 추가` : undefined}
+            title={t.milestone ? `${t.milestone}에서 추가` : tip(t.term)}
             onClick={() => !t.milestone && setTab(t.id)}
           >
-            {t.label}
+            {TERMS[t.term].label}
             {t.milestone && <span className="badge">{t.milestone}</span>}
           </button>
         ))}
       </nav>
       <main>
-        {fatal && <p className="critical-text">✕ API에 연결할 수 없습니다: {fatal}</p>}
+        {fatal && <p className="critical-text">✕ 서버에 연결할 수 없습니다: {fatal}</p>}
         {domain && adapter && tab === "domain" && (
           <DomainPanel domainName={domain.name} adapter={adapter} dataset={dataset} busy={busy} onGenerate={generate} />
         )}
@@ -194,6 +200,7 @@ export default function App() {
             adapter={adapter}
             harness={harness}
             reasonLabels={reasonLabels}
+            reasonDetails={reasonDetails}
             seed={seed}
             setSeed={setSeed}
             faults={faults}
@@ -229,6 +236,7 @@ export default function App() {
             selectedItem={selectedItem}
             onSelectItem={selectItem}
             reasonLabels={reasonLabels}
+            reasonDetails={reasonDetails}
           />
         )}
         {domain && adapter && tab === "analysis" && (
@@ -236,6 +244,7 @@ export default function App() {
             domain={domain}
             adapter={adapter}
             reasonLabels={reasonLabels}
+            reasonDetails={reasonDetails}
             dataset={dataset}
             runs={runs.filter((r) => r.dataset_id === dataset?.id)}
             decisionsOf={(id) => decisions[id]}
@@ -267,18 +276,19 @@ export default function App() {
 function DemoBanner({ manifest, catalog }: { manifest: NonNullable<HarnessInfo["demo"]>; catalog: DemoCatalogEntry[] }) {
   return (
     <div className="demo-banner" role="note">
-      <strong>시연 모드</strong>
+      <strong title={tip("demo")}>{TERMS.demo.label}</strong>
       <span>
-        AI 결과는 저장된 실행을 재생합니다 (LLM 호출·네트워크 없음). 규칙 agent와 시뮬레이션은 실제로 계산하고, 승인은 작업 복사본에만 반영됩니다.
+        AI 결과는 미리 저장해 둔 결과를 다시 보여줍니다 (AI 호출·인터넷 없음). {TERMS.rule.label}과 {TERMS.simulate.label}는 실제로 계산하고,
+        승인은 임시 사본에만 반영됩니다.
       </span>
       <span className="muted small">
-        번들 {manifest.created_at}
+        저장 시각 {manifest.created_at}
         {manifest.git_commit && ` · ${manifest.git_ref} ${manifest.git_commit.slice(0, 7)}`}
         {manifest.note && ` · ${manifest.note}`}
       </span>
       {catalog.length > 0 && (
         <span className="muted small">
-          재생 가능한 AI 실행:{" "}
+          다시 볼 수 있는 AI 실행:{" "}
           {catalog.map((c) => `${c.dataset_id} ${c.level} ${c.items}건 ×${c.runs}`).join(" · ")}
         </span>
       )}

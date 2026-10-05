@@ -6,7 +6,8 @@ export interface ResultViewProps {
   instance: unknown;
   decisions: DecisionRecord[];
   dimensions: Dimensions;
-  reasonLabels: Record<string, string>;
+  reasonLabels: Record<string, string>;   // 사유 코드 → 화면 이름 (짧은 쉬운 말)
+  reasonDetails?: Record<string, string>; // [M8 추가] 사유 코드 → 설명 문장 (마우스 올림)
   selected?: string | null;
   onSelect?: (itemId: string) => void;
   highlight?: string[] | null; // 강조할 항목 (나머지는 흐리게)
@@ -17,6 +18,7 @@ export interface MetricSpec {
   label: string;
   format: "pct" | "min";
   headline?: boolean; // 비교표에 넣을 지표
+  tech?: string;      // [M8 추가] 원래 용어·계산 방식 (마우스 올림)
 }
 
 export interface Scope {
@@ -39,6 +41,7 @@ export interface DataViewProps {
 export interface DomainData {
   // 인스턴스 JSON에서 표로 보여줄 필드: 레코드 배열이거나 {ID: 레코드} 객체. idField는 행 ID 필드 (객체면 키)
   tables: { key: string; label: string; idField: string }[];
+  fieldLabels?: Record<string, string>;                               // [M8 추가] 필드 이름 → 화면 이름 (머리글·필터)
   hidden?: string[];                                                   // 표에서 숨길 필드 (예: 긴 좌표 배열)
   format?: (table: string, field: string, value: unknown) => string | undefined; // 표시 형식 (없으면 기본)
   View?: ComponentType<DataViewProps>;                                 // 선택한 행을 보여주는 지도 등
@@ -50,4 +53,5 @@ export interface DomainAdapter {
   // 실행 범위 후보 (비용 때문에 AI는 일부만 돌린다). itemIds는 처리 순서
   scopes: (instance: unknown, itemIds: string[]) => Scope[];
   data?: DomainData; // [M6 추가]
+  reasonNames?: Record<string, string>; // [M8 추가] 도메인 사유 코드 → 짧은 쉬운 이름 (없으면 dimensions.yaml 설명 문장)
 }

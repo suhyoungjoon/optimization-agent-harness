@@ -5,12 +5,14 @@ import CompareTable from "./CompareTable";
 import HarnessPipeline from "./HarnessPipeline";
 import HarnessToggle from "./HarnessToggle";
 import MetricsPanel from "./MetricsPanel";
+import { TERMS, tip } from "../terms";
 
 export interface CompareProps {
   domain: DomainInfo;
   adapter: DomainAdapter;
   harness: HarnessInfo | null;
   reasonLabels: Record<string, string>;
+  reasonDetails: Record<string, string>;
   seed: number;
   setSeed: (n: number) => void;
   faults: string[];
@@ -50,21 +52,23 @@ export default function ComparePanel(p: CompareProps) {
         decisions={decisions}
         dimensions={p.domain.dimensions}
         reasonLabels={p.reasonLabels}
+        reasonDetails={p.reasonDetails}
         selected={p.selectedItem}
         onSelect={p.onSelectItem}
       />
-      <MetricsPanel run={run} decisions={decisions} specs={p.adapter.metrics} reasonLabels={p.reasonLabels} />
+      <MetricsPanel run={run} decisions={decisions} specs={p.adapter.metrics} reasonLabels={p.reasonLabels}
+        reasonDetails={p.reasonDetails} />
     </>
   );
 
   return (
     <section className="compare">
       <div className="controls">
-        <label>
-          seed <input type="number" value={p.seed} onChange={(e) => p.setSeed(Number(e.target.value))} />
+        <label title={tip("seed")}>
+          {TERMS.seed.label} <input type="number" value={p.seed} onChange={(e) => p.setSeed(Number(e.target.value))} />
         </label>
         <fieldset>
-          <legend className="muted">결함 패턴</legend>
+          <legend className="muted" title={tip("faults")}>{TERMS.faults.label}</legend>
           {p.domain.faults.map((f) => (
             <label key={f.id} title={f.name}>
               <input type="checkbox" checked={p.faults.includes(f.id)} onChange={() => p.toggleFault(f.id)} />
@@ -74,8 +78,8 @@ export default function ComparePanel(p: CompareProps) {
         </fieldset>
         <button onClick={p.onGenerate} disabled={!!p.busy}>데이터 생성</button>
         {p.dataset && (
-          <label>
-            실행 범위{" "}
+          <label title={tip("scope")}>
+            {TERMS.scope.label}{" "}
             <select value={p.scopeId} onChange={(e) => p.setScopeId(e.target.value)} disabled={!!p.busy}>
               {p.scopes.map((s) => (
                 <option key={s.id} value={s.id}>{s.label}</option>
@@ -83,7 +87,7 @@ export default function ComparePanel(p: CompareProps) {
             </select>
           </label>
         )}
-        <button onClick={p.onRunRule} disabled={!!p.busy || !p.dataset}>규칙 agent 실행</button>
+        <button onClick={p.onRunRule} disabled={!!p.busy || !p.dataset} title={tip("rule")}>{TERMS.rule.label} 실행</button>
       </div>
 
       <div className="controls ai-controls">
@@ -99,13 +103,13 @@ export default function ComparePanel(p: CompareProps) {
             {[1, 2, 3].map((n) => <option key={n} value={n}>{n}회</option>)}
           </select>
         </label>
-        <button className="primary" onClick={p.onRunAi} disabled={!!p.busy || !p.dataset}>
-          AI agent 실행 ({p.level})
+        <button className="primary" onClick={p.onRunAi} disabled={!!p.busy || !p.dataset} title={tip("ai")}>
+          {TERMS.ai.label} 실행 ({p.level})
         </button>
         {p.harness && (
-          <span className="muted small">
-            {p.harness.llm.model} · effort {p.harness.llm.effort}
-            {p.harness.llm.cache ? " · 응답 캐시 켬" : ""}
+          <span className="muted small" title="원래 용어: 모델 · effort · 응답 캐시 (configs/llm.yaml)">
+            {p.harness.llm.model} · 생각 깊이 {p.harness.llm.effort}
+            {p.harness.llm.cache ? " · 같은 요청은 저장된 응답 재사용" : ""}
           </span>
         )}
       </div>
@@ -120,25 +124,27 @@ export default function ComparePanel(p: CompareProps) {
         {p.error && <span className="critical-text">✕ {p.error}</span>}
         {p.dataset && !p.busy && (
           <span className="muted">
-            데이터셋 {p.dataset.id} · 범위 {scope?.label ?? "–"}
+            {TERMS.dataset.label} {p.dataset.id} · {scope?.label ?? "–"}
           </span>
         )}
       </div>
 
       <div className="split">
         <article className="panel">
-          <h2>규칙 agent</h2>
+          <h2 title={tip("rule")}>{TERMS.rule.label}</h2>
           {p.dataset?.instance && p.ruleRun && ruleDecisions ? (
             view(p.ruleRun, ruleDecisions)
           ) : (
             <p className="muted empty">
-              {p.dataset ? "규칙 agent를 실행하면 배정 결과가 표시됩니다." : "seed와 결함 패턴을 고르고 데이터를 생성하세요."}
+              {p.dataset
+                ? `${TERMS.rule.label}을 실행하면 배정 결과가 표시됩니다.`
+                : `${TERMS.seed.label}와 ${TERMS.faults.label}를 고르고 데이터를 생성하세요.`}
             </p>
           )}
         </article>
         <article className="panel">
           <div className="panel-head">
-            <h2>AI agent</h2>
+            <h2 title={tip("ai")}>{TERMS.ai.label}</h2>
             {p.aiRuns.length > 0 && (
               <select value={p.shownAiRun?.run_id ?? ""} onChange={(e) => p.setShownAiRun(e.target.value)}
                 aria-label="표시할 AI 실행">
@@ -158,7 +164,9 @@ export default function ComparePanel(p: CompareProps) {
             view(p.shownAiRun, aiDecisions)
           ) : (
             p.aiRuns.length === 0 && (
-              <p className="muted empty">하네스 레벨을 고르고 AI agent를 실행하세요. 같은 범위에서 규칙 agent도 함께 실행됩니다.</p>
+              <p className="muted empty">
+                하네스 레벨을 고르고 {TERMS.ai.label}을 실행하세요. 같은 건수로 {TERMS.rule.label}도 함께 실행됩니다.
+              </p>
             )
           )}
         </article>
