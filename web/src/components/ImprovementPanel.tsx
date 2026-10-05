@@ -6,6 +6,7 @@ import type { HarnessInfo, HistoryRow, Proposal, ProposalBatch, SpecEstimate } f
 import { fmtMetric, fmtSeconds, fmtUsd } from "./MetricsPanel";
 import { usePoll } from "./usePoll";
 import { TERMS, tip } from "../terms";
+import Details from "./Details";
 
 const STATUS_LABEL: Record<Proposal["status"], string> = {
   proposed: "제안됨",
@@ -137,6 +138,11 @@ export default function ImprovementPanel({
         )}
       </div>
 
+      <p className="small muted">
+        <span title={tip("history")}>반영 {approved.length}회 · 반려 {history.length - approved.length}건</span>
+        {lastCycle && <> · 마지막 개선 한 바퀴 {fmtUsd(lastCycle.llm_cost_usd)}{cycleSeconds != null && ` · ${fmtSeconds(cycleSeconds)}`}</>}
+      </p>
+      <Details summary="상세보기 (개선 한 바퀴 비용·시간, 사람이 할 때와 비교)">
       <div className="tiles">
         <div className="tile tile-cost">
           <div className="tile-label">개선 한 바퀴 (AI: 분석+제안+미리 돌려보기)</div>
@@ -161,6 +167,7 @@ export default function ImprovementPanel({
           <div className="tile-note">반려 {history.length - approved.length}건</div>
         </div>
       </div>
+      </Details>
 
       <div className="proposal-list">
         {batch?.proposals.map((p) => (
@@ -228,6 +235,45 @@ export default function ImprovementPanel({
   );
 }
 
+const fmtDelta = (d: number, f: MetricSpec["format"]) =>
+  `${d > 0 ? "+" : d < 0 ? "−" : ""}${f === "pct" ? `${Math.abs(d * 100).toFixed(1)}%p` : `${Math.abs(d).toFixed(1)}분`}`;
+
+// 제안 한 줄 요약 (M8-b): 핵심 효과 · 나빠진 지표(부작용) · 규칙 위반
+function Gist({ proposal: p, specs }: { proposal: Proposal; specs: MetricSpec[] }) {
+  const sim = p.simulation;
+  if (p.status === "invalid") return null;
+  if (!sim || sim.error || !sim.before || !sim.after) {
+    return <p className="gist muted">{p.status === "simulating" ? "미리 돌려보는 중…" : `아직 ${TERMS.simulate.label}를 하지 않았습니다`}</p>;
+  }
+  const before = sim.before, after = sim.after;
+  const has = (s: MetricSpec) => s.key in before && s.key in after;
+  const worse = specs.filter((s) => s.better && has(s)).filter((s) => {
+    const d = after[s.key] - before[s.key];
+    return Math.abs(d) > 1e-9 && (s.better === "up" ? d < 0 : d > 0);
+  });
+  const v = sim.violations_after ?? 0;
+  return (
+    <p className="gist">
+      {specs.filter((s) => s.primary && has(s)).map((s) => {
+        const d = after[s.key] - before[s.key];
+        const good = s.better ? (s.better === "up" ? d > 0 : d < 0) : false;
+        return (
+          <span key={s.key} title={s.tech}>
+            {s.label} {fmtMetric(before[s.key], s.format)} → <strong>{fmtMetric(after[s.key], s.format)}</strong>{" "}
+            <span className={good ? "better" : d !== 0 ? "worse" : undefined}>({fmtDelta(d, s.format)})</span>
+          </span>
+        );
+      })}
+      <span className={worse.length ? "worse" : "muted"}>
+        {worse.length
+          ? `나빠진 지표: ${worse.map((s) => `${s.label} ${fmtDelta(after[s.key] - before[s.key], s.format)}`).join(", ")}`
+          : "나빠진 지표 없음"}
+      </span>
+      <span className={v ? "worse" : "better"} title={tip("violations")}>{TERMS.violations.label} {v}건</span>
+    </p>
+  );
+}
+
 function ProposalCard({
   proposal: p,
   current,
@@ -278,76 +324,12 @@ function ProposalCard({
           {STATUS_LABEL[p.status]}
         </span>
       </header>
-      <p>{p.body.rationale}</p>
-      {p.body.expected_effect && <p className="muted">기대 효과: {p.body.expected_effect}</p>}
-      <p className="muted small">해결하려는 문제: {p.body.target_findings.join(", ") || "–"}</p>
-
-      <div className="diff">
-        {(p.body.params_changes ?? []).map((c, i) => (
-          <div key={i}>
-            <code>{c.path}</code>: <span className="old">{JSON.stringify(current ? getPath(current.params, c.path) : "?")}</span> →{" "}
-            <span className="new">{JSON.stringify(c.value)}</span>
-          </div>
-        ))}
-        {(p.body.override_rules ?? []).map((r, i) => (
-          <div key={i}>
-            <span title={tip("overrides")}>{TERMS.overrides.label}</span>: <code>{JSON.stringify(r.when)}</code> 이면{" "}
-            <code>{JSON.stringify(r.set)}</code>
-          </div>
-        ))}
-        {(p.body.spec_edits ?? []).map((e, i) => (
-          <details key={i}>
-            <summary>{TERMS.spec.label}의 “{e.section}” 부분 수정</summary>
-            <div className="spec-compare">
-              <div><div className="tile-label">현재</div><pre>{current?.spec_sections[e.section] ?? ""}</pre></div>
-              <div><div className="tile-label">제안</div><pre>{e.text}</pre></div>
-            </div>
-          </details>
-        ))}
-      </div>
+      <Gist proposal={p} specs={specs} />
 
       {p.errors.length > 0 && (
         <ul className="critical-text small">
           {p.errors.map((e, i) => <li key={i}>✕ {e}</li>)}
         </ul>
-      )}
-
-      {sim && !sim.error && sim.before && sim.after && p.status !== "proposed" && (
-        <div className="sim">
-          <div className="tile-label">
-            미리 돌려본 결과 ({sim.kind === "spec" ? `${TERMS.ai.label}을 고치기 전·후 문서로 실행` : `${TERMS.rule.label}으로 다시 계산`} · {fmtSeconds(sim.seconds)}
-            {sim.cost_usd != null && ` · ${fmtUsd(sim.cost_usd)}`}
-            {sim.replayed && " · 저장된 결과"})
-          </div>
-          <table className="sim-table">
-            <thead><tr><th>지표</th><th className="num">전</th><th className="num">후</th><th className="num">변화</th></tr></thead>
-            <tbody>
-              {specs.filter((s) => s.key in (sim.before ?? {})).map((s) => {
-                const b = sim.before![s.key], a = sim.after![s.key];
-                const d = a - b;
-                return (
-                  <tr key={s.key}>
-                    <td title={s.tech}>{s.label}</td>
-                    <td className="num">{fmtMetric(b, s.format)}</td>
-                    <td className="num">{fmtMetric(a, s.format)}</td>
-                    <td className="num">{d === 0 ? "–" : `${d > 0 ? "+" : ""}${s.format === "pct" ? `${(d * 100).toFixed(1)}%p` : `${d.toFixed(1)}분`}`}</td>
-                  </tr>
-                );
-              })}
-              <tr>
-                <td title={tip("violations")}>{TERMS.violations.label}</td>
-                <td className="num">{sim.violations_before ?? 0}건</td>
-                <td className={`num ${sim.violations_after ? "critical-text" : ""}`}>{sim.violations_after ?? 0}건</td>
-                <td />
-              </tr>
-            </tbody>
-          </table>
-          {Object.entries(sim.slices ?? {}).map(([fid, s]) => (
-            <div key={fid} className="small">
-              {fid} 조건의 실패율 {(s.before.fail_rate * 100).toFixed(1)}% → {(s.after.fail_rate * 100).toFixed(1)}% ({s.after.items}건)
-            </div>
-          ))}
-        </div>
       )}
       {sim?.error && <p className="critical-text small">✕ 미리 돌려보기 실패: {sim.error}</p>}
 
@@ -393,6 +375,74 @@ function ProposalCard({
           <button disabled={busy} onClick={() => guard("반려 중", async () => void (await api.reject(p.id, note)))}>반려</button>
         </div>
       )}
+
+      <Details summary={`상세보기 (근거 · 바꿀 내용${sim && !sim.error && sim.before ? " · 전체 지표" : ""})`}>
+        <p>{p.body.rationale}</p>
+        {p.body.expected_effect && <p className="muted">기대 효과: {p.body.expected_effect}</p>}
+        <p className="muted small">해결하려는 문제: {p.body.target_findings.join(", ") || "–"}</p>
+
+        <div className="diff">
+          {(p.body.params_changes ?? []).map((c, i) => (
+            <div key={i}>
+              <code>{c.path}</code>: <span className="old">{JSON.stringify(current ? getPath(current.params, c.path) : "?")}</span> →{" "}
+              <span className="new">{JSON.stringify(c.value)}</span>
+            </div>
+          ))}
+          {(p.body.override_rules ?? []).map((r, i) => (
+            <div key={i}>
+              <span title={tip("overrides")}>{TERMS.overrides.label}</span>: <code>{JSON.stringify(r.when)}</code> 이면{" "}
+              <code>{JSON.stringify(r.set)}</code>
+            </div>
+          ))}
+          {(p.body.spec_edits ?? []).map((e, i) => (
+            <details key={i}>
+              <summary>{TERMS.spec.label}의 “{e.section}” 부분 수정</summary>
+              <div className="spec-compare">
+                <div><div className="tile-label">현재</div><pre>{current?.spec_sections[e.section] ?? ""}</pre></div>
+                <div><div className="tile-label">제안</div><pre>{e.text}</pre></div>
+              </div>
+            </details>
+          ))}
+        </div>
+
+        {sim && !sim.error && sim.before && sim.after && p.status !== "proposed" && (
+          <div className="sim">
+            <div className="tile-label">
+              미리 돌려본 결과 ({sim.kind === "spec" ? `${TERMS.ai.label}을 고치기 전·후 문서로 실행` : `${TERMS.rule.label}으로 다시 계산`} · {fmtSeconds(sim.seconds)}
+              {sim.cost_usd != null && ` · ${fmtUsd(sim.cost_usd)}`}
+              {sim.replayed && " · 저장된 결과"})
+            </div>
+            <table className="sim-table">
+              <thead><tr><th>지표</th><th className="num">전</th><th className="num">후</th><th className="num">변화</th></tr></thead>
+              <tbody>
+                {specs.filter((s) => s.key in (sim.before ?? {})).map((s) => {
+                  const b = sim.before![s.key], a = sim.after![s.key];
+                  const d = a - b;
+                  return (
+                    <tr key={s.key}>
+                      <td title={s.tech}>{s.label}</td>
+                      <td className="num">{fmtMetric(b, s.format)}</td>
+                      <td className="num">{fmtMetric(a, s.format)}</td>
+                      <td className="num">{d === 0 ? "–" : `${d > 0 ? "+" : ""}${s.format === "pct" ? `${(d * 100).toFixed(1)}%p` : `${d.toFixed(1)}분`}`}</td>
+                    </tr>
+                  );
+                })}
+                <tr>
+                  <td title={tip("violations")}>{TERMS.violations.label}</td>
+                  <td className="num">{sim.violations_before ?? 0}건</td>
+                  <td className={`num ${sim.violations_after ? "critical-text" : ""}`}>{sim.violations_after ?? 0}건</td>
+                  <td />
+                </tr>
+              </tbody>
+            </table>
+            {Object.entries(sim.slices ?? {}).map(([fid, s]) => (
+              <div key={fid} className="small">
+                {fid} 조건의 실패율 {(s.before.fail_rate * 100).toFixed(1)}% → {(s.after.fail_rate * 100).toFixed(1)}% ({s.after.items}건)
+              </div>
+            ))}
+          </div>
+        )}
+      </Details>
     </article>
   );
 }

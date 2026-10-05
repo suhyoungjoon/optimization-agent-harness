@@ -172,9 +172,13 @@ const scenes = {
     await pause(page, 3000);
     await proposal.getByRole("button", { name: "미리 돌려보기", exact: true }).click();
     const simulated = page.locator(".proposal-simulated").first();
-    await simulated.locator(".sim-table").waitFor({ timeout: TIMEOUT });
+    await simulated.locator("p.gist:not(.muted)").waitFor({ timeout: TIMEOUT });
     await simulated.scrollIntoViewIfNeeded();
-    await caption(page, "미리 돌려보기: 바꾸기 전·후 지표 비교");
+    await caption(page, "미리 돌려보기: 요약 한 줄로 핵심 지표 변화와 나빠진 지표를 먼저 보여준다");
+    await pause(page, 3500);
+    await simulated.locator("details.more > summary").first().click();
+    await simulated.locator(".sim-table").waitFor({ timeout: TIMEOUT });
+    await caption(page, "상세보기를 펼치면 근거, 바꿀 내용, 전·후 전체 지표");
     await pause(page, 4500);
     await simulated.getByRole("button", { name: "승인", exact: true }).click();
     await page.locator(".history").waitFor({ timeout: TIMEOUT });

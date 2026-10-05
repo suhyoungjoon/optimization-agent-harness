@@ -19,6 +19,8 @@ export interface MetricSpec {
   format: "pct" | "min";
   headline?: boolean; // 비교표에 넣을 지표
   tech?: string;      // [M8 추가] 원래 용어·계산 방식 (마우스 올림)
+  primary?: boolean;  // [M8 추가] 요약에 항상 보일 지표 (나머지는 상세보기). 규칙 위반·건당 비용은 공통 항목이라 따로 보인다
+  better?: "up" | "down"; // [M8 추가] 좋은 방향. 개선 제안의 부작용(나빠진 지표) 판정에 쓴다. 없으면 판정에서 뺀다
 }
 
 export interface Scope {

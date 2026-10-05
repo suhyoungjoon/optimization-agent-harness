@@ -2,6 +2,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import type { DecisionRecord, Run } from "../types";
 import type { MetricSpec } from "../domains/types";
 import { TERMS, tip } from "../terms";
+import Details from "./Details";
 
 export const fmtMetric = (v: number | null | undefined, f: MetricSpec["format"]) =>
   v === undefined || v === null ? "–" : f === "pct" ? `${(v * 100).toFixed(1)}%` : `${v.toFixed(1)}분`;
@@ -38,8 +39,20 @@ export default function MetricsPanel({
     .map(([code, count]) => ({ code, count, name: reasonLabels[code] ?? code, detail: reasonDetails[code] ?? "" }))
     .sort((a, b) => b.count - a.count);
 
+  const primary = specs.filter((s) => s.primary);
+  const rest = specs.filter((s) => !s.primary);
+  const metricTile = (s: MetricSpec) => (
+    <div className="tile" key={s.key}>
+      <div className="tile-label" title={s.tech}>{s.label}</div>
+      <div className="tile-value">{fmtMetric(run.metrics?.[s.key], s.format)}</div>
+    </div>
+  );
+  const moreLabel = [`지표 ${rest.length + 1}개 더`, reasons.length ? TERMS.reasons.label : "", violations.length ? `어긴 내용 ${violations.length}건` : ""]
+    .filter(Boolean).join(" · ");
+
   return (
     <div className="metrics">
+      {/* 요약: 규칙 위반(공통) · 도메인 핵심 지표 · 건당 비용(공통) */}
       <div className="tiles">
         <div className={`tile ${violations.length ? "tile-critical" : "tile-good"}`}>
           <div className="tile-label" title={tip("violations")}>{TERMS.violations.label}</div>
@@ -47,12 +60,7 @@ export default function MetricsPanel({
             <span aria-hidden>{violations.length ? "!" : "✓"}</span> {violations.length}건
           </div>
         </div>
-        {specs.map((s) => (
-          <div className="tile" key={s.key}>
-            <div className="tile-label" title={s.tech}>{s.label}</div>
-            <div className="tile-value">{fmtMetric(run.metrics?.[s.key], s.format)}</div>
-          </div>
-        ))}
+        {primary.map(metricTile)}
         <div className="tile tile-cost">
           <div className="tile-label">건당 비용</div>
           <div className="tile-value">{run.agent === "rule" ? "$0" : fmtUsd(cost != null && items ? cost / items : cost)}</div>
@@ -63,6 +71,11 @@ export default function MetricsPanel({
             </div>
           )}
         </div>
+      </div>
+
+      <Details summary={`상세보기 (${moreLabel})`}>
+      <div className="tiles">
+        {rest.map(metricTile)}
         <div className="tile tile-cost">
           <div className="tile-label">건당 처리 시간</div>
           <div className="tile-value">{fmtSeconds(seconds != null && items ? seconds / items : undefined)}</div>
@@ -111,6 +124,7 @@ export default function MetricsPanel({
           </tbody>
         </table>
       )}
+      </Details>
     </div>
   );
 }
