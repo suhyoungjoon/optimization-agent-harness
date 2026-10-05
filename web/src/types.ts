@@ -275,3 +275,46 @@ export interface HistoryRow {
   after: Record<string, number> | null;
   cycle: { analysis_seconds?: number; proposal_seconds?: number; simulation_seconds?: number; llm_cost_usd: number | null };
 }
+
+// --- Agent workflow (LangGraph, M9) ---
+export interface WorkflowNode {
+  id: string;
+  label?: string;
+  kind?: "rule" | "ai" | "human";
+  tab?: string;
+  description?: string;
+}
+
+export interface WorkflowEdge {
+  source: string;
+  target: string;
+  label: string | null;
+  conditional: boolean;
+}
+
+export interface WorkflowGraph {
+  available: boolean;
+  reason?: string;
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+}
+
+export interface WorkflowStep {
+  node: string;
+  lines: string[];
+  data: Record<string, unknown>;
+  at: number;
+}
+
+export interface WorkflowRun {
+  id: string;
+  status: "paused" | "running" | "done";
+  current: string | null;
+  error: string | null;
+  next: string[];
+  waiting: "next" | "approval" | null;
+  approval: { proposal_id: string; question: string } | null;
+  steps: WorkflowStep[];
+  ids: Partial<Record<"dataset_id" | "rule_run_id" | "ai_run_id" | "full_rule_run_id" | "report_id" | "batch_id" | "proposal_id", string>>;
+  inputs: { domain?: string; seed?: number; faults?: string[]; items?: number; level?: string; scope?: string[] };
+}

@@ -6,17 +6,19 @@ import Details, { ExpandAllContext, readExpandAll, saveExpandAll } from "./compo
 import DomainPanel from "./components/DomainPanel";
 import ImprovementPanel from "./components/ImprovementPanel";
 import TracePanel from "./components/TracePanel";
+import WorkflowPanel from "./components/WorkflowPanel";
 import { adapters } from "./domains";
 import { CORE_REASON_NAMES, TERMS, tip, type TermKey } from "./terms";
-import type { CompareSummary, Dataset, DecisionRecord, DemoCatalogEntry, DomainInfo, HarnessInfo, Run } from "./types";
+import type { CompareSummary, Dataset, DecisionRecord, DemoCatalogEntry, DomainInfo, HarnessInfo, Run, WorkflowRun } from "./types";
 
-type Tab = "domain" | "compare" | "trace" | "analysis" | "improve";
+type Tab = "domain" | "compare" | "trace" | "analysis" | "improve" | "workflow";
 const TABS: { id: Tab; term: TermKey; milestone?: string }[] = [
   { id: "domain", term: "tabDomain" },
   { id: "compare", term: "tabCompare" },
   { id: "trace", term: "tabTrace" },
   { id: "analysis", term: "tabAnalysis" },
   { id: "improve", term: "tabImprove" },
+  { id: "workflow", term: "tabWorkflow" },
 ];
 
 const sameScope = (a: string[] | null | undefined, b: string[] | null) =>
@@ -161,6 +163,30 @@ export default function App() {
 
   const selectItem = (id: string) => setSelectedItem(id);
 
+  // Agent workflow 탭의 결과를 다른 탭이 이어받는다 (같은 데이터·실행·분석·제안을 그 탭에서 자세히 본다)
+  const adoptWorkflow = (flow: WorkflowRun, target: string) =>
+    guard("워크플로우 결과 불러오는 중", async () => {
+      if (!domain || !adapter || !flow.ids.dataset_id) return;
+      const full = await api.dataset(domain.name, flow.ids.dataset_id);
+      setSeed(full.seed);
+      setFaults(full.faults);
+      setDataset(full);
+      const scopeKey = JSON.stringify(flow.inputs.scope ?? null);
+      const options = adapter.scopes(full.instance, full.item_ids ?? []);
+      setScopeId((options.find((s) => JSON.stringify(s.items) === scopeKey) ?? options[0])?.id ?? "");
+      if (flow.inputs.level) setLevel(flow.inputs.level);
+      for (const id of [flow.ids.rule_run_id, flow.ids.ai_run_id, flow.ids.full_rule_run_id]) {
+        if (!id) continue;
+        await loadDecisions(id);
+        upsert(await api.run(id));
+      }
+      if (flow.ids.ai_run_id) setShownAiRunId(flow.ids.ai_run_id);
+      if (flow.ids.report_id) setReportId(flow.ids.report_id);
+      if (flow.ids.batch_id) setBatchId(flow.ids.batch_id);
+      setSelectedItem(null);
+      setTab(target as Tab);
+    });
+
   return (
     <ExpandAllContext.Provider value={expandAll}>
     <div className="app">
@@ -264,6 +290,10 @@ export default function App() {
               setBatchId(null);
             }}
           />
+        )}
+        {domain && adapter && tab === "workflow" && (
+          <WorkflowPanel domain={domain} adapter={adapter} harness={harness} seed={seed} faults={faults} level={level}
+            onAdopt={adoptWorkflow} />
         )}
         {domain && adapter && tab === "improve" && (
           <ImprovementPanel

@@ -27,6 +27,8 @@ from core.llm.client import AnthropicClient, LLMClient, load_config
 from core.registry import list_domains, list_faults, load_faults, load_pack, load_params, set_domain_files_root
 from core.storage.store import Store, to_jsonable
 
+from workflow.api import register as register_workflow
+
 from . import improvement
 from .replay import REPLAY_SECONDS, DemoBundle, ReplayClock
 
@@ -279,6 +281,7 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
         return compare(store, run_ids)
 
     improvement.register(app, improvement.Context(store, executor, make_llm, llm_config, replay=bool(demo)))
+    register_workflow(app)   # LangGraph가 없으면 /workflow/graph가 이유만 돌려준다
 
     if serve_web and WEB_DIST.is_dir():   # 정적 파일은 모든 API 경로 뒤에 붙인다
         app.mount("/", StaticFiles(directory=WEB_DIST, html=True), name="web")

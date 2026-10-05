@@ -13,7 +13,7 @@
 
 ## 화면
 
-자세한 사용법과 캡처는 [화면 매뉴얼](docs/ui-guide.md). 화면은 쉬운 말을 쓰고 원래 용어는 마우스를 올리면 보인다(대응표: [화면 매뉴얼 9. 용어표](docs/ui-guide.md#9-용어표)). 모든 탭은 요약(예: 비교 탭은 규칙 위반·배정 성공률·건당 비용, 문제 찾기는 찾은 개수, 결정 과정은 결론 카드)을 먼저 보여주고 나머지는 **상세보기**로 펼친다(오른쪽 위 **모두 펼치기**로 한 번에).
+자세한 사용법과 캡처는 [화면 매뉴얼](docs/ui-guide.md). 화면은 쉬운 말을 쓰고 원래 용어는 마우스를 올리면 보인다(대응표: [화면 매뉴얼 10. 용어표](docs/ui-guide.md#10-용어표)). 모든 탭은 요약(예: 비교 탭은 규칙 위반·배정 성공률·건당 비용, 문제 찾기는 찾은 개수, 결정 과정은 결론 카드)을 먼저 보여주고 나머지는 **상세보기**로 펼친다(오른쪽 위 **모두 펼치기**로 한 번에).
 
 | 탭 (원래 이름) | 내용 |
 |---|---|
@@ -22,6 +22,7 @@
 | 결정 과정 (트레이스) | AI 방식이 지시서 하나를 결정한 과정(AI 응답, 조회, 자동 검사, 다시 시도, 위험 결정 막기)과 같은 지시서의 규칙 방식 판단 |
 | 문제 찾기 (분석) | AI 분석 결과: 찾은 문제마다 근거 데이터, 정답 대조로 찾아낸 비율, 정답에 없는 문제의 사람 확인(맞는 문제/잘못 짚음) |
 | 개선 제안 (개선) | 개선 제안(규칙 설정값 변경, 특정 조건에만 적용, 업무 규칙 문서 수정) → 미리 돌려보기로 전후 비교 → 승인·반려, 반영 이력 |
+| Agent workflow (Langgraph version) | 위 단계를 LangGraph 그래프 하나로 묶어 한 단계(에이전트)씩 실행. 단계마다 멈추고 사람이 [다음 실행]·[승인]으로 진행. 노드 추가로 확장 ([docs/workflow.md](docs/workflow.md), 선택 설치 `.[workflow]`) |
 
 ## 하네스 레벨
 
@@ -49,7 +50,7 @@ macOS / Linux:
 git clone https://github.com/suhyoungjoon/optimization-agent-harness.git
 cd optimization-agent-harness
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,workflow]"   # workflow: Agent workflow 탭 (LangGraph, 선택)
 pytest                                  # 테스트 (LLM 호출 없음)
 (cd web && npm ci && npm run build)     # 프런트엔드 빌드 → web/dist
 python -m api.main                      # http://127.0.0.1:8000 (API + 화면)
@@ -64,7 +65,7 @@ git clone https://github.com/suhyoungjoon/optimization-agent-harness.git
 cd optimization-agent-harness
 py -3.11 -m venv .venv
 .venv\Scripts\Activate.ps1                              # 막히면: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-pip install -e ".[dev]"
+pip install -e ".[dev,workflow]"
 pytest
 cd web; npm ci; npm run build; cd ..
 python -m api.main                                     # http://127.0.0.1:8000
@@ -145,6 +146,7 @@ core/            도메인을 모르는 공통 코어
 domains/dispatch/ 출동 스케줄링 도메인 팩 (생성기, 규칙 엔진, 도구, 명세, 파라미터, 정답표)
 configs/         하네스 레벨, LLM 설정
 api/             FastAPI (시연 재생 포함)
+workflow/        LangGraph 워크플로우 (화면 단계를 그래프 하나로, 선택 설치)
 web/             React + Vite 프런트엔드 (도메인별 결과 화면은 web/src/domains/)
 scripts/         데이터 생성, 시연 번들, 시연 녹화
 examples/        코어 재사용 예제 (설치된 패키지로 실행)

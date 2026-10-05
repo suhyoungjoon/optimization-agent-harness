@@ -1,6 +1,6 @@
 import type {
   CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DomainDefinition, DecisionRecord, DomainInfo, HarnessInfo, HistoryRow, Proposal, ProposalBatch, Report, Run,
-  SpecEstimate, TraceRecord,
+  SpecEstimate, TraceRecord, WorkflowGraph, WorkflowRun,
 } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -24,6 +24,12 @@ export interface RunOptions {
 }
 
 export const api = {
+  workflowGraph: () => request<WorkflowGraph>("/workflow/graph"),
+  workflowStart: (body: { domain: string; seed: number; faults: string[]; items: number; level: string; metrics: unknown[] }) =>
+    request<WorkflowRun>("/workflow/runs", { method: "POST", body: JSON.stringify(body) }),
+  workflowGet: (id: string) => request<WorkflowRun>(`/workflow/runs/${id}`),
+  workflowStep: (id: string, action: "next" | "approve" | "reject", note = "") =>
+    request<WorkflowRun>(`/workflow/runs/${id}/step`, { method: "POST", body: JSON.stringify({ action, note }) }),
   domains: () => request<DomainInfo[]>("/domains"),
   harness: () => request<HarnessInfo>("/harness/levels"),
   demo: () =>

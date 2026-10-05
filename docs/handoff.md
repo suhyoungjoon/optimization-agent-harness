@@ -489,8 +489,8 @@ pip install -e "/path/to/optimization-agent-harness[dev]"  # 편집 모드 + 테
 테스트 (이 레포에서):
 
 ```bash
-pip install -e ".[dev]"
-pytest                                   # 167개, LLM·네트워크 없음 (약 50초)
+pip install -e ".[dev,workflow]"         # workflow: LangGraph 화면 (재사용 대상 아님, 선택)
+pytest                                   # 171개, LLM·네트워크 없음 (약 50초). LangGraph가 없으면 4개는 건너뜀
 python examples/reuse_quickstart.py      # 재사용 확인
 (cd web && npm ci && npm run build)      # 프런트엔드 (재사용 대상 아님)
 ```
