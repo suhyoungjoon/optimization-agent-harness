@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import AnalysisPanel from "./components/AnalysisPanel";
 import ComparePanel from "./components/ComparePanel";
@@ -6,11 +6,13 @@ import Details, { ExpandAllContext, readExpandAll, saveExpandAll } from "./compo
 import DomainPanel from "./components/DomainPanel";
 import ImprovementPanel from "./components/ImprovementPanel";
 import TracePanel from "./components/TracePanel";
-import WorkflowPanel from "./components/WorkflowPanel";
-import AgentsPanel from "./components/AgentsPanel";
 import { adapters } from "./domains";
 import { CORE_REASON_NAMES, TERMS, tip, type TermKey } from "./terms";
 import type { CompareSummary, Dataset, DecisionRecord, DemoCatalogEntry, DomainInfo, HarnessInfo, Run, WorkflowRun } from "./types";
+
+// LangGraph 탭 두 개는 탭을 열 때 불러온다 (그래프 라이브러리 React Flow가 커서 첫 화면을 가볍게)
+const WorkflowPanel = lazy(() => import("./components/WorkflowPanel"));
+const AgentsPanel = lazy(() => import("./components/AgentsPanel"));
 
 type Tab = "domain" | "compare" | "trace" | "analysis" | "improve" | "workflow" | "agents";
 const TABS: { id: Tab; term: TermKey; milestone?: string }[] = [
@@ -294,11 +296,15 @@ export default function App() {
           />
         )}
         {domain && adapter && tab === "workflow" && (
-          <WorkflowPanel domain={domain} adapter={adapter} harness={harness} seed={seed} faults={faults} level={level}
+          <Suspense fallback={<p className="muted">불러오는 중…</p>}>
+            <WorkflowPanel domain={domain} adapter={adapter} harness={harness} seed={seed} faults={faults} level={level}
             onAdopt={adoptWorkflow} />
+          </Suspense>
         )}
         {domain && adapter && tab === "agents" && (
-          <AgentsPanel domain={domain} adapter={adapter} harness={harness} seed={seed} faults={faults} level={level} />
+          <Suspense fallback={<p className="muted">그래프 화면 불러오는 중…</p>}>
+            <AgentsPanel domain={domain} adapter={adapter} harness={harness} seed={seed} faults={faults} level={level} />
+          </Suspense>
         )}
         {domain && adapter && tab === "improve" && (
           <ImprovementPanel
