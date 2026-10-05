@@ -6,6 +6,7 @@ import HarnessPipeline from "./HarnessPipeline";
 import HarnessToggle from "./HarnessToggle";
 import MetricsPanel, { fmtMetric, fmtUsd } from "./MetricsPanel";
 import { TERMS, tip } from "../terms";
+import Details from "./Details";
 
 export interface CompareProps {
   domain: DomainInfo;
@@ -67,15 +68,19 @@ export default function ComparePanel(p: CompareProps) {
         <label title={tip("seed")}>
           {TERMS.seed.label} <input type="number" value={p.seed} onChange={(e) => p.setSeed(Number(e.target.value))} />
         </label>
-        <fieldset>
-          <legend className="muted" title={tip("faults")}>{TERMS.faults.label}</legend>
-          {p.domain.faults.map((f) => (
-            <label key={f.id} title={f.name}>
-              <input type="checkbox" checked={p.faults.includes(f.id)} onChange={() => p.toggleFault(f.id)} />
-              {f.id} {f.name}
-            </label>
-          ))}
-        </fieldset>
+        <Details className="chip-details" summary={
+          <span title={tip("faults")}>{TERMS.faults.label}: {p.faults.length ? p.faults.join("·") : "없음"}</span>
+        }>
+          <fieldset>
+            <legend className="muted" title={tip("faults")}>{TERMS.faults.label}</legend>
+            {p.domain.faults.map((f) => (
+              <label key={f.id} title={f.name}>
+                <input type="checkbox" checked={p.faults.includes(f.id)} onChange={() => p.toggleFault(f.id)} />
+                {f.id} {f.name}
+              </label>
+            ))}
+          </fieldset>
+        </Details>
         <button onClick={p.onGenerate} disabled={!!p.busy}>데이터 생성</button>
         {p.dataset && (
           <label title={tip("scope")}>
@@ -97,21 +102,23 @@ export default function ComparePanel(p: CompareProps) {
             {explain ? "▾" : "▸"} 하네스 설명
           </button>
         )}
-        <label>
-          반복{" "}
-          <select value={p.repeats} onChange={(e) => p.setRepeats(Number(e.target.value))}>
-            {[1, 2, 3].map((n) => <option key={n} value={n}>{n}회</option>)}
-          </select>
-        </label>
         <button className="primary" onClick={p.onRunAi} disabled={!!p.busy || !p.dataset} title={tip("ai")}>
           {TERMS.ai.label} 실행 ({p.level})
         </button>
-        {p.harness && (
-          <span className="muted small" title="원래 용어: 모델 · effort · 응답 캐시 (configs/llm.yaml)">
-            {p.harness.llm.model} · 생각 깊이 {p.harness.llm.effort}
-            {p.harness.llm.cache ? " · 같은 요청은 저장된 응답 재사용" : ""}
-          </span>
-        )}
+        <Details className="chip-details" summary={<span title="실행 설정: 반복 횟수, 모델·생각 깊이">반복 {p.repeats}회</span>}>
+          <label>
+            반복{" "}
+            <select value={p.repeats} onChange={(e) => p.setRepeats(Number(e.target.value))}>
+              {[1, 2, 3].map((n) => <option key={n} value={n}>{n}회</option>)}
+            </select>
+          </label>
+          {p.harness && (
+            <span className="muted small" title="원래 용어: 모델 · effort · 응답 캐시 (configs/llm.yaml)">
+              {p.harness.llm.model} · 생각 깊이 {p.harness.llm.effort}
+              {p.harness.llm.cache ? " · 같은 요청은 저장된 응답 재사용" : ""}
+            </span>
+          )}
+        </Details>
       </div>
 
       {explain && p.harness && (

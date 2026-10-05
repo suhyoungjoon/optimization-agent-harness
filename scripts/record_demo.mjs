@@ -78,6 +78,10 @@ async function openApp(page) {
 async function generate(page) {
   await page.locator("label:has-text('데이터 번호') input").fill(opts.seed);
   const wanted = new Set(opts.faults.split(",").filter(Boolean));
+  // 심어둔 문제 체크박스는 접힌 칩 안에 있다 (M8-c): 펼친 뒤 고른다
+  const faults = page.locator(".controls details.chip-details").first();
+  if (!(await faults.evaluate((el) => el.open))) await faults.locator("summary").click();
+  await faults.locator("fieldset label").first().waitFor({ timeout: TIMEOUT }); // 펼친 내용은 열린 뒤에 그려진다
   for (const box of await page.locator("fieldset label").all()) {
     const id = (await box.innerText()).trim().split(/\s+/)[0];
     await box.locator("input").setChecked(wanted.has(id));
@@ -134,7 +138,11 @@ const scenes = {
     if (!(await retried.innerText()).includes("(0)")) await retried.click();
     await pause(page, 1000);
     await page.getByRole("list", { name: "항목" }).getByRole("button").first().click();
-    await caption(page, "AI 응답 → 조회 → 자동 검사 → 다시 시도: 단계별 기록");
+    await page.locator(".trace .verdict").waitFor({ timeout: TIMEOUT });
+    await caption(page, "결론 카드: AI 결정이 규칙 방식과 같은지, 몇 번 다시 시도했는지. 아래는 단계 흐름 한 줄");
+    await pause(page, 3500);
+    await page.locator(".trace details.more > summary").first().click();
+    await caption(page, "상세보기: AI 응답 → 조회 → 자동 검사 → 다시 시도 단계별 기록");
     await pause(page, 3000);
     await page.locator(".trace").evaluate((el) => el.scrollIntoView({ block: "start" }));
     await page.mouse.wheel(0, 500);
@@ -153,8 +161,8 @@ const scenes = {
     await page.getByRole("button", { name: "규칙 방식 전체 실행" }).click();
     await page.locator(".analysis select option").filter({ hasText: "전체" }).first().waitFor({ state: "attached", timeout: TIMEOUT });
     await page.getByRole("button", { name: "AI 분석 실행" }).click();
-    await page.locator(".analysis .tiles").waitFor({ timeout: TIMEOUT });
-    await caption(page, "심어둔 문제를 몇 개 찾았는지 정답과 대조. 찾은 문제마다 근거 데이터가 붙는다");
+    await page.locator(".analysis .verdict").waitFor({ timeout: TIMEOUT });
+    await caption(page, "결론 한 줄: 심어둔 문제를 몇 개 찾았는지 정답과 대조. 찾은 문제는 제목과 조건만 먼저 보인다");
     await pause(page, 3500);
     const first = page.locator(".finding-title").first();
     await first.click();

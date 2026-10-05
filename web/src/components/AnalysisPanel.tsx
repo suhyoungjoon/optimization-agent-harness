@@ -5,6 +5,7 @@ import type { Dataset, DecisionRecord, DomainInfo, Finding, Report, Run, ToolCal
 import { fmtSeconds, fmtUsd } from "./MetricsPanel";
 import { usePoll } from "./usePoll";
 import { TERMS, tip } from "../terms";
+import Details from "./Details";
 
 export default function AnalysisPanel({
   domain,
@@ -100,43 +101,37 @@ export default function AnalysisPanel({
 
       {current?.status === "done" && current.body && current.score && (
         <>
-          <div className="tiles">
-            <div className="tile">
-              <div className="tile-label" title={tip("detection")}>{TERMS.detection.label} (정답 대조)</div>
-              <div className="tile-value">
-                {current.score.detected}/{current.score.total}
-                {current.score.detection_rate != null && ` · ${(current.score.detection_rate * 100).toFixed(0)}%`}
-              </div>
-            </div>
-            <div className="tile">
-              <div className="tile-label" title={tip("unmatched")}>{TERMS.unmatched.label}</div>
-              <div className="tile-value">{current.score.unmatched_findings.length}건</div>
-              <div className="tile-note">사람 확인 대기 {current.score.unlabeled} · {TERMS.validFinding.label} {current.score.valid_unmatched}</div>
-            </div>
-            <div className={`tile ${current.score.false_positives ? "tile-critical" : ""}`}>
-              <div className="tile-label" title={tip("falsePositive")}>{TERMS.falsePositive.label} (사람 확인)</div>
-              <div className="tile-value">{current.score.false_positives}건</div>
-            </div>
-            <div className="tile tile-cost">
-              <div className="tile-label">분석 비용·시간</div>
-              <div className="tile-value">{fmtUsd(current.body.usage.cost_usd)}</div>
-              <div className="tile-note">
-                {fmtSeconds(current.body.usage.seconds)} · {TERMS.llm.label} {current.body.usage.llm_calls ?? 0}회 · 집계 {Object.keys(current.body.calls).length}회
-              </div>
-            </div>
-          </div>
-
-          <div className="fault-list" aria-label="심어둔 문제별 찾은 결과">
-            {Object.entries(current.score.faults).map(([fid, f]) => (
-              <span key={fid} className={f.detected ? "good-text" : "critical-text"}>
-                {f.detected ? "✓" : "✕"} {fid} {f.name}
-                {f.matched_findings.length > 0 && <span className="muted"> ({f.matched_findings.join(", ")})</span>}
-              </span>
-            ))}
-            <span className="muted small">정답은 채점에만 쓰며 {TERMS.aiAnalysis.label}은 보지 못합니다.</span>
-          </div>
-
+          <AnalysisVerdict report={current} />
           {current.body.summary && <p className="summary">{current.body.summary}</p>}
+
+          <Details summary="상세보기 (정답 대조 · 분석 비용·시간)">
+            <div className="tiles">
+              <div className="tile">
+                <div className="tile-label" title={tip("detection")}>{TERMS.detection.label} (정답 대조)</div>
+                <div className="tile-value">
+                  {current.score.detected}/{current.score.total}
+                  {current.score.detection_rate != null && ` · ${(current.score.detection_rate * 100).toFixed(0)}%`}
+                </div>
+              </div>
+              <div className="tile">
+                <div className="tile-label" title={tip("unmatched")}>{TERMS.unmatched.label}</div>
+                <div className="tile-value">{current.score.unmatched_findings.length}건</div>
+                <div className="tile-note">사람 확인 대기 {current.score.unlabeled} · {TERMS.validFinding.label} {current.score.valid_unmatched}</div>
+              </div>
+              <div className={`tile ${current.score.false_positives ? "tile-critical" : ""}`}>
+                <div className="tile-label" title={tip("falsePositive")}>{TERMS.falsePositive.label} (사람 확인)</div>
+                <div className="tile-value">{current.score.false_positives}건</div>
+              </div>
+              <div className="tile tile-cost">
+                <div className="tile-label">분석 비용·시간</div>
+                <div className="tile-value">{fmtUsd(current.body.usage.cost_usd)}</div>
+                <div className="tile-note">
+                  {fmtSeconds(current.body.usage.seconds)} · {TERMS.llm.label} {current.body.usage.llm_calls ?? 0}회 · 집계 {Object.keys(current.body.calls).length}회
+                </div>
+              </div>
+            </div>
+            <p className="muted small">정답은 채점에만 쓰며 {TERMS.aiAnalysis.label}은 보지 못합니다.</p>
+          </Details>
 
           <div className="analysis-split">
             <div className="finding-list">
@@ -149,6 +144,7 @@ export default function AnalysisPanel({
                   reasonDetails={reasonDetails}
                   metricLabels={Object.fromEntries(adapter.metrics.map((m) => [m.key, m.label]))}
                   dimensionLabels={Object.fromEntries(Object.entries(domain.dimensions.dimensions).map(([k, v]) => [k, v.label]))}
+                  valueNames={adapter.valueNames ?? {}}
                   matched={Object.entries(current.score!.faults).filter(([, s]) => s.matched_findings.includes(f.id)).map(([fid]) => fid)}
                   label={current.score!.labels[f.id]}
                   onLabel={(label) => guard("판정 저장 중", async () => setLabelled(await api.label(current.id, f.id, label)))}
@@ -190,6 +186,29 @@ export default function AnalysisPanel({
   );
 }
 
+// 결론 한 줄 (M8-c): 심어둔 문제 중 몇 개를 찾았는지, 사람이 확인할 것이 남았는지
+function AnalysisVerdict({ report }: { report: Report }) {
+  const score = report.score!;
+  const pending = score.unlabeled;
+  return (
+    <div className="verdict" role="status" aria-label="결론">
+      <span>
+        <strong title={tip("detection")}>{TERMS.faults.label} {score.total}개 중 {score.detected}개 찾음</strong>
+        {score.detection_rate != null && ` (${(score.detection_rate * 100).toFixed(0)}%)`}
+      </span>
+      {Object.entries(score.faults).map(([fid, f]) => (
+        <span key={fid} className={f.detected ? "good-text" : "critical-text"} title={f.matched_findings.join(", ") || "찾지 못함"}>
+          {f.detected ? "✓" : "✕"} {fid} {f.name}
+        </span>
+      ))}
+      <span className={pending ? "warning-text" : "muted"} title={tip("unmatched")}>
+        {pending ? `사람 확인 대기 ${pending}건` : "사람 확인 대기 없음"}
+      </span>
+      {score.false_positives > 0 && <span className="critical-text">{TERMS.falsePositive.label} {score.false_positives}건</span>}
+    </div>
+  );
+}
+
 function itemsInSlice(decisions: DecisionRecord[], slice: Record<string, string[]>) {
   return decisions
     .filter((d) => Object.entries(slice).every(([dim, values]) => values.map(String).includes(String(d.dims[dim]))))
@@ -203,6 +222,7 @@ function FindingCard({
   reasonDetails,
   metricLabels,
   dimensionLabels,
+  valueNames,
   matched,
   label,
   onLabel,
@@ -215,6 +235,7 @@ function FindingCard({
   reasonDetails: Record<string, string>;
   metricLabels: Record<string, string>;
   dimensionLabels: Record<string, string>;
+  valueNames: Record<string, string>;
   matched: string[];
   label?: "valid" | "false_positive";
   onLabel: (label: "valid" | "false_positive" | null) => void;
@@ -243,11 +264,11 @@ function FindingCard({
           </span>
         )}
       </header>
-      <p>{finding.description}</p>
-      {finding.hypothesis && <p className="muted">추정 원인: {finding.hypothesis}</p>}
       <div className="chips">
         {Object.entries(finding.slice ?? {}).map(([dim, values]) => (
-          <span key={dim} className="chip">{dimensionLabels[dim] ?? dim}: {values.join(", ")}</span>
+          <span key={dim} className="chip" title={`${dim}: ${values.join(", ")}`}>
+            {dimensionLabels[dim] ?? dim}: {values.map((v) => valueNames[String(v)] ?? v).join(", ")}
+          </span>
         ))}
         {(finding.reason_codes ?? []).map((c) => (
           <span key={c} className="chip" title={`${reasonDetails[c] ?? ""} (${c})`}>{reasonLabels[c] ?? c}</span>
@@ -258,7 +279,11 @@ function FindingCard({
           </span>
         )}
       </div>
-      {finding.cited_calls.map((id) => calls[id] && <Evidence key={id} call={calls[id]} />)}
+      <Details summary={`상세보기 (설명${finding.hypothesis ? " · 추정 원인" : ""} · ${TERMS.evidence.label} ${finding.cited_calls.length}건)`}>
+        <p>{finding.description}</p>
+        {finding.hypothesis && <p className="muted">추정 원인: {finding.hypothesis}</p>}
+        {finding.cited_calls.map((id) => calls[id] && <Evidence key={id} call={calls[id]} />)}
+      </Details>
     </article>
   );
 }

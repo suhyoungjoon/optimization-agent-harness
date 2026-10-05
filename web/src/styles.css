@@ -227,7 +227,6 @@ code.json { color: var(--text-secondary); word-break: break-all; }
 
 /* --- M4: 분석 탭 --- */
 .analysis .tiles, .improvement .tiles { margin-bottom: 12px; }
-.fault-list { display: flex; flex-wrap: wrap; gap: 14px; align-items: baseline; margin: 4px 0 12px; font-size: 13px; }
 .summary { color: var(--text-secondary); margin: 0 0 12px; }
 .analysis-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 @media (max-width: 1000px) { .analysis-split { grid-template-columns: 1fr; } }
@@ -398,3 +397,10 @@ details.more > .more-body { margin-top: 8px; }
 .proposal .gist { font-size: 13px; margin: 6px 0; display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .proposal .gist .worse { color: var(--critical); }
 .proposal .gist .better { color: var(--good-text); }
+.step-flow { margin: 0 0 4px; line-height: 1.7; }
+.controls details.more { margin-top: 0; }
+.controls details.more > .more-body { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 0 8px; }
+.controls details.more[open] { display: inline-flex; align-items: center; }
+.demo-banner details.more { margin-top: 0; flex-basis: 100%; }
+.demo-banner details.more > .more-body { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.controls details.chip-details > summary { border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; color: var(--text); font-size: 13px; }

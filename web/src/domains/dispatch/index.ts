@@ -1,6 +1,6 @@
 import type { DomainAdapter, Scope } from "../types";
 import DispatchDataMap from "./DispatchDataMap";
-import DispatchMap from "./DispatchMap";
+import DispatchMap, { stageName } from "./DispatchMap";
 import { VALUE_LABELS as LABELS, hhmm } from "./districtMap";
 
 export const dispatchAdapter: DomainAdapter = {
@@ -40,6 +40,8 @@ export const dispatchAdapter: DomainAdapter = {
     { key: "stage_2_share", label: "조금 완화해 배정", format: "pct", tech: "2단계 매칭 비율 (시간·지역 조건을 한 단계 완화)" },
     { key: "stage_3_share", label: "많이 완화해 배정", format: "pct", tech: "3단계 매칭 비율 (시간·지역 조건을 최대로 완화)" },
   ],
+  valueNames: LABELS,
+  decisionText: (d) => `${String(d.worker_id)} ${String(d.start_time)} (${stageName(d.matching_stage)})`,
   reasonNames: {
     NO_SKILL: "기술 보유자 없음",
     NO_CERT: "자격 보유자 없음",
