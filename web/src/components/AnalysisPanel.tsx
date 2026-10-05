@@ -4,11 +4,13 @@ import type { DomainAdapter } from "../domains/types";
 import type { Dataset, DecisionRecord, DomainInfo, Finding, Report, Run, ToolCall } from "../types";
 import { fmtSeconds, fmtUsd } from "./MetricsPanel";
 import { usePoll } from "./usePoll";
+import { TERMS, tip } from "../terms";
 
 export default function AnalysisPanel({
   domain,
   adapter,
   reasonLabels,
+  reasonDetails = {},
   dataset,
   runs,
   decisionsOf,
@@ -20,6 +22,7 @@ export default function AnalysisPanel({
   domain: DomainInfo;
   adapter: DomainAdapter;
   reasonLabels: Record<string, string>;
+  reasonDetails?: Record<string, string>;
   dataset: Dataset | null;
   runs: Run[];
   decisionsOf: (runId: string) => DecisionRecord[] | undefined;
@@ -70,28 +73,28 @@ export default function AnalysisPanel({
     <section className="analysis">
       <div className="controls">
         <label>
-          분석할 실행{" "}
+          분석할 결과{" "}
           <select value={run?.run_id ?? ""} onChange={(e) => setRunId(e.target.value)} disabled={!!busy}>
             {done.length === 0 && <option value="">(실행 없음)</option>}
             {done.map((r) => (
               <option key={r.run_id} value={r.run_id}>
-                {r.agent === "rule" ? "규칙 agent" : `AI ${r.level}`} · {r.scope ? `${r.scope.length}건` : "전체"} · {r.run_id}
+                {r.agent === "rule" ? TERMS.rule.label : `AI ${r.level}`} · {r.scope ? `${r.scope.length}건` : "전체"} · {r.run_id}
               </option>
             ))}
           </select>
         </label>
-        <button onClick={() => guard("규칙 agent 전체 실행 중", onRunFullRule)} disabled={!!busy}>
-          규칙 agent 전체 실행
+        <button onClick={() => guard(`${TERMS.rule.label} 전체 실행 중`, onRunFullRule)} disabled={!!busy} title={tip("rule")}>
+          {TERMS.rule.label} 전체 실행
         </button>
-        <button className="primary" disabled={!!busy || !run}
+        <button className="primary" disabled={!!busy || !run} title={tip("aiAnalysis")}
           onClick={() => guard("분석 요청 중", async () => setReportId((await api.analyze(run!.run_id)).id))}>
-          분석 agent 실행
+          {TERMS.aiAnalysis.label} 실행
         </button>
       </div>
       <div className="status-line" aria-live="polite">
         {busy && <span className="muted">{busy}…</span>}
         {error && <span className="critical-text">✕ {error}</span>}
-        {current?.status === "running" && <span className="muted">분석 중… (집계 도구를 호출하고 있습니다)</span>}
+        {current?.status === "running" && <span className="muted">분석 중… (AI가 결과를 여러 조건으로 집계해 보고 있습니다)</span>}
         {current?.status === "error" && <span className="critical-text">✕ 분석 실패: {current.error}</span>}
       </div>
 
@@ -99,38 +102,38 @@ export default function AnalysisPanel({
         <>
           <div className="tiles">
             <div className="tile">
-              <div className="tile-label">패턴 탐지율 (정답표 채점)</div>
+              <div className="tile-label" title={tip("detection")}>{TERMS.detection.label} (정답 대조)</div>
               <div className="tile-value">
                 {current.score.detected}/{current.score.total}
                 {current.score.detection_rate != null && ` · ${(current.score.detection_rate * 100).toFixed(0)}%`}
               </div>
             </div>
             <div className="tile">
-              <div className="tile-label">정답과 매칭 안 된 발견</div>
+              <div className="tile-label" title={tip("unmatched")}>{TERMS.unmatched.label}</div>
               <div className="tile-value">{current.score.unmatched_findings.length}건</div>
-              <div className="tile-note">판정 대기 {current.score.unlabeled} · 정당한 발견 {current.score.valid_unmatched}</div>
+              <div className="tile-note">사람 확인 대기 {current.score.unlabeled} · {TERMS.validFinding.label} {current.score.valid_unmatched}</div>
             </div>
             <div className={`tile ${current.score.false_positives ? "tile-critical" : ""}`}>
-              <div className="tile-label">오탐 (사람 판정)</div>
+              <div className="tile-label" title={tip("falsePositive")}>{TERMS.falsePositive.label} (사람 확인)</div>
               <div className="tile-value">{current.score.false_positives}건</div>
             </div>
             <div className="tile tile-cost">
               <div className="tile-label">분석 비용·시간</div>
               <div className="tile-value">{fmtUsd(current.body.usage.cost_usd)}</div>
               <div className="tile-note">
-                {fmtSeconds(current.body.usage.seconds)} · LLM {current.body.usage.llm_calls ?? 0}회 · 도구 {Object.keys(current.body.calls).length}회
+                {fmtSeconds(current.body.usage.seconds)} · {TERMS.llm.label} {current.body.usage.llm_calls ?? 0}회 · 집계 {Object.keys(current.body.calls).length}회
               </div>
             </div>
           </div>
 
-          <div className="fault-list" aria-label="심은 패턴별 탐지 결과">
+          <div className="fault-list" aria-label="심어둔 문제별 찾은 결과">
             {Object.entries(current.score.faults).map(([fid, f]) => (
               <span key={fid} className={f.detected ? "good-text" : "critical-text"}>
                 {f.detected ? "✓" : "✕"} {fid} {f.name}
                 {f.matched_findings.length > 0 && <span className="muted"> ({f.matched_findings.join(", ")})</span>}
               </span>
             ))}
-            <span className="muted small">정답표는 채점에만 쓰며 분석 agent는 보지 못합니다.</span>
+            <span className="muted small">정답은 채점에만 쓰며 {TERMS.aiAnalysis.label}은 보지 못합니다.</span>
           </div>
 
           {current.body.summary && <p className="summary">{current.body.summary}</p>}
@@ -143,6 +146,8 @@ export default function AnalysisPanel({
                   finding={f}
                   calls={current.body!.calls}
                   reasonLabels={reasonLabels}
+                  reasonDetails={reasonDetails}
+                  metricLabels={Object.fromEntries(adapter.metrics.map((m) => [m.key, m.label]))}
                   dimensionLabels={Object.fromEntries(Object.entries(domain.dimensions.dimensions).map(([k, v]) => [k, v.label]))}
                   matched={Object.entries(current.score!.faults).filter(([, s]) => s.matched_findings.includes(f.id)).map(([fid]) => fid)}
                   label={current.score!.labels[f.id]}
@@ -153,7 +158,7 @@ export default function AnalysisPanel({
               ))}
               {current.body.dropped.length > 0 && (
                 <details className="dropped">
-                  <summary>근거 없는 수치로 제외된 발견 {current.body.dropped.length}건</summary>
+                  <summary>근거 숫자가 확인되지 않아 뺀 {TERMS.finding.label} {current.body.dropped.length}건</summary>
                   <ul>
                     {current.body.dropped.map((d, i) => (
                       <li key={i}><strong>{d.finding.title}</strong> — {d.problems.join("; ")}</li>
@@ -163,21 +168,22 @@ export default function AnalysisPanel({
               )}
             </div>
             <div className="panel map-side">
-              <h2>{focused ? `${focused.id} 구간` : "분석한 실행 결과"}</h2>
+              <h2>{focused ? `${focused.id} ${TERMS.slice.label}` : "분석한 결과"}</h2>
               {dataset.instance && decisions.length > 0 && analyzedRun ? (
                 <adapter.ResultView instance={dataset.instance} decisions={decisions} dimensions={domain.dimensions}
-                  reasonLabels={reasonLabels} highlight={highlight} />
+                  reasonLabels={reasonLabels} reasonDetails={reasonDetails} highlight={highlight} />
               ) : (
                 <p className="muted">결과를 불러오는 중…</p>
               )}
-              {focused && !focused.slice && <p className="muted small">이 발견은 구간이 아닌 지표 패턴이라 지도 강조가 없습니다.</p>}
+              {focused && !focused.slice && <p className="muted small">이 문제는 특정 조건이 아니라 지표 전체의 패턴이라 지도에 강조할 곳이 없습니다.</p>}
             </div>
           </div>
         </>
       )}
       {!current && (
         <p className="muted empty">
-          실행을 고르고 분석 agent를 실행하세요. 결함 패턴(P1~P4)을 켠 데이터의 규칙 agent 전체 실행을 분석하면 탐지율을 채점할 수 있습니다.
+          분석할 결과를 고르고 {TERMS.aiAnalysis.label}을 실행하세요. {TERMS.faults.label}(P1~P4)를 켠 데이터로 {TERMS.rule.label}을 전체 실행한 결과를
+          분석하면 {TERMS.detection.label}을 정답과 대조해 볼 수 있습니다.
         </p>
       )}
     </section>
@@ -194,6 +200,8 @@ function FindingCard({
   finding,
   calls,
   reasonLabels,
+  reasonDetails,
+  metricLabels,
   dimensionLabels,
   matched,
   label,
@@ -204,6 +212,8 @@ function FindingCard({
   finding: Finding;
   calls: Record<string, ToolCall>;
   reasonLabels: Record<string, string>;
+  reasonDetails: Record<string, string>;
+  metricLabels: Record<string, string>;
   dimensionLabels: Record<string, string>;
   matched: string[];
   label?: "valid" | "false_positive";
@@ -218,30 +228,35 @@ function FindingCard({
           <span className="finding-id">{finding.id}</span> {finding.title}
         </button>
         {matched.length > 0 ? (
-          <span className="badge good-text">✓ {matched.join(", ")} 매칭</span>
+          <span className="badge good-text">✓ 정답 {matched.join(", ")}과 일치</span>
         ) : (
           <span className="label-buttons">
-            <span className="muted small">정답표 미매칭:</span>
-            <button className={label === "valid" ? "selected" : undefined} onClick={() => onLabel(label === "valid" ? null : "valid")}>
-              정당한 발견
+            <span className="muted small" title={tip("unmatched")}>정답에 없음 · 사람 확인:</span>
+            <button className={label === "valid" ? "selected" : undefined} onClick={() => onLabel(label === "valid" ? null : "valid")}
+              title={tip("validFinding")}>
+              {TERMS.validFinding.label}
             </button>
             <button className={label === "false_positive" ? "selected danger" : undefined}
-              onClick={() => onLabel(label === "false_positive" ? null : "false_positive")}>
-              오탐
+              onClick={() => onLabel(label === "false_positive" ? null : "false_positive")} title={tip("falsePositive")}>
+              {TERMS.falsePositive.label}
             </button>
           </span>
         )}
       </header>
       <p>{finding.description}</p>
-      {finding.hypothesis && <p className="muted">가설: {finding.hypothesis}</p>}
+      {finding.hypothesis && <p className="muted">추정 원인: {finding.hypothesis}</p>}
       <div className="chips">
         {Object.entries(finding.slice ?? {}).map(([dim, values]) => (
           <span key={dim} className="chip">{dimensionLabels[dim] ?? dim}: {values.join(", ")}</span>
         ))}
         {(finding.reason_codes ?? []).map((c) => (
-          <span key={c} className="chip" title={reasonLabels[c]}>{c}</span>
+          <span key={c} className="chip" title={`${reasonDetails[c] ?? ""} (${c})`}>{reasonLabels[c] ?? c}</span>
         ))}
-        {finding.metric && <span className="chip">{finding.metric.name} {finding.metric.direction === "low" ? "낮음" : "높음"}</span>}
+        {finding.metric && (
+          <span className="chip" title={finding.metric.name}>
+            {metricLabels[finding.metric.name] ?? finding.metric.name} {finding.metric.direction === "low" ? "낮음" : "높음"}
+          </span>
+        )}
       </div>
       {finding.cited_calls.map((id) => calls[id] && <Evidence key={id} call={calls[id]} />)}
     </article>
@@ -255,7 +270,7 @@ function Evidence({ call }: { call: ToolCall }) {
   return (
     <details className="evidence-call">
       <summary>
-        근거: <code>{call.name}</code> <code className="json">{JSON.stringify(call.input)}</code>
+        {TERMS.evidence.label}: <code>{call.name}</code> <code className="json">{JSON.stringify(call.input)}</code>
       </summary>
       {rows ? (
         <div className="table-scroll">

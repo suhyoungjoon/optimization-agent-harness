@@ -378,3 +378,7 @@ code.json { color: var(--text-secondary); word-break: break-all; }
   .retry-loop span { transform: none; }
   .stage-detail dl { grid-template-columns: 1fr; }
 }
+
+/* 하네스 레벨 버튼의 짧은 이름 (M8-a: 설정 플래그에서 만든 설명) */
+.harness-levels .level-short { font-size: 11px; color: var(--text-muted); }
+.harness-levels button.selected .level-short { color: inherit; opacity: 0.85; }

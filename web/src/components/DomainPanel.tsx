@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { DataFocus, DomainAdapter, DomainData } from "../domains/types";
+import { CORE_REASON_NAMES, TERMS, tip, type TermKey } from "../terms";
 import type { Dataset, DomainDefinition, DomainFault, HistoryRow } from "../types";
 
 type Section = "overview" | "params" | "rules" | "spec" | "data" | "faults";
-const SECTIONS: { id: Section; label: string }[] = [
+const SECTIONS: { id: Section; label: string; term?: TermKey }[] = [
   { id: "overview", label: "개요" },
-  { id: "params", label: "규칙 파라미터" },
-  { id: "rules", label: "필수조건·사유코드·차원" },
-  { id: "spec", label: "명세" },
+  { id: "params", label: TERMS.params.label, term: "params" },
+  { id: "rules", label: `${TERMS.violationRules.label}·${TERMS.reasons.label}·${TERMS.dimensions.label}` },
+  { id: "spec", label: TERMS.spec.label, term: "spec" },
   { id: "data", label: "데이터" },
-  { id: "faults", label: "결함 패턴" },
+  { id: "faults", label: TERMS.faults.label, term: "faults" },
 ];
 const META = new Set(["bounds", "docs"]);
 
@@ -43,22 +44,22 @@ export default function DomainPanel({
 
   return (
     <section className="domain">
-      <nav className="chips section-nav" role="tablist" aria-label="도메인 섹션">
+      <nav className="chips section-nav" role="tablist" aria-label="규칙·데이터 섹션">
         {SECTIONS.map((s) => (
           <button key={s.id} role="tab" aria-selected={section === s.id} className={section === s.id ? "selected" : undefined}
-            onClick={() => setSection(s.id)}>
+            onClick={() => setSection(s.id)} title={s.term ? tip(s.term) : undefined}>
             {s.label}
           </button>
         ))}
-        <span className="muted small">읽기 전용 · 규칙은 개선 탭의 개선안과 승인으로만 바뀝니다</span>
+        <span className="muted small">읽기 전용 · 규칙은 개선 제안 탭에서 제안을 승인해야만 바뀝니다</span>
       </nav>
       {section === "overview" && <Overview def={def} dataset={dataset} busy={busy} onGenerate={onGenerate} />}
       {section === "params" && <Params def={def} history={history} />}
-      {section === "rules" && <Rules def={def} />}
+      {section === "rules" && <Rules def={def} adapter={adapter} />}
       {section === "spec" && <Spec def={def} />}
       {section === "data" && (
         adapter.data ? <DataTables data={adapter.data} dataset={dataset} busy={busy} onGenerate={onGenerate} />
-          : <p className="muted empty">이 도메인은 데이터 표를 제공하지 않습니다.</p>
+          : <p className="muted empty">이 업무는 데이터 표를 제공하지 않습니다.</p>
       )}
       {section === "faults" && <Faults domainName={domainName} faults={def.faults} />}
     </section>
@@ -75,17 +76,19 @@ function Overview({ def, dataset, busy, onGenerate }: {
   return (
     <div className="domain-grid">
       <div className="panel">
-        <h2>도메인 {def.domain}</h2>
+        <h2 title={tip("domain")}>{TERMS.domain.label}: {def.domain}</h2>
         <div className="tiles">
-          <Tile label="규칙 파라미터 버전" value={`v${String(def.params.version)}`} note={`섹션 ${sections.length}개 · 구간 조건 ${rules}개`} />
-          <Tile label="필수조건" value={`${Object.keys(def.dimensions.violation_rules).length}개`} note="validate()가 판정" />
-          <Tile label="분석 차원" value={`${Object.keys(def.dimensions.dimensions).length}개`}
-            note={`사유 코드 ${Object.keys(def.dimensions.reason_codes).length}개`} />
-          <Tile label="결함 패턴" value={`${def.faults.length}개`} note="데이터에 심는 문제" />
+          <Tile label={`${TERMS.params.label} 버전`} value={`v${String(def.params.version)}`}
+            note={`묶음 ${sections.length}개 · ${TERMS.overrides.label} ${rules}개`} tech={tip("params")} />
+          <Tile label={TERMS.violationRules.label} value={`${Object.keys(def.dimensions.violation_rules).length}개`} note="자동 검사로 판정"
+            tech={tip("violationRules")} />
+          <Tile label={TERMS.dimensions.label} value={`${Object.keys(def.dimensions.dimensions).length}개`}
+            note={`${TERMS.reasons.label} ${Object.keys(def.dimensions.reason_codes).length}개`} tech={tip("dimensions")} />
+          <Tile label={TERMS.faults.label} value={`${def.faults.length}개`} note="데이터에 일부러 심는 문제" tech={tip("faults")} />
         </div>
         <p className="muted small">
-          규칙 agent는 아래 파일을 읽어 동작하고, AI agent는 같은 규칙을 문장으로 옮긴 명세를 받습니다(L1 이상).
-          개선 루프가 바꾸는 대상은 규칙 파라미터와 명세 두 파일입니다.
+          {TERMS.rule.label}은 아래 파일을 읽어 동작하고, {TERMS.ai.label}은 같은 규칙을 문장으로 옮긴 {TERMS.spec.label}를 받습니다(L1 이상).
+          개선 제안이 바꾸는 대상은 {TERMS.params.label}과 {TERMS.spec.label} 두 파일입니다.
         </p>
       </div>
       <div className="panel">
@@ -97,9 +100,11 @@ function Overview({ def, dataset, busy, onGenerate }: {
             ))}
           </tbody>
         </table>
-        <h2 className="spaced">현재 데이터셋</h2>
+        <h2 className="spaced">현재 데이터</h2>
         {dataset ? (
-          <p>{dataset.id} · 항목 {dataset.items}건 · seed {dataset.seed} · 결함 {dataset.faults.join(", ") || "없음"}</p>
+          <p>
+            {dataset.id} · {dataset.items}건 · {TERMS.seed.label} {dataset.seed} · {TERMS.faults.label} {dataset.faults.join(", ") || "없음"}
+          </p>
         ) : (
           <p className="muted">
             데이터가 아직 없습니다.{" "}
@@ -112,16 +117,16 @@ function Overview({ def, dataset, busy, onGenerate }: {
 }
 
 const FILE_ROLE: Record<string, string> = {
-  "params.yaml": "규칙 파라미터 (값·허용 범위·설명·구간 조건)",
-  "domain-spec.md": "AI agent용 명세 (L1 이상 시스템 프롬프트)",
-  "dimensions.yaml": "분석 차원·사유 코드·필수조건",
-  "faults.yaml": "심을 결함 패턴과 정답표 (채점용)",
+  "params.yaml": `${TERMS.params.label} (값·${TERMS.bounds.label}·설명·${TERMS.overrides.label})`,
+  "domain-spec.md": `${TERMS.ai.label}이 읽는 ${TERMS.spec.label} (L1 이상)`,
+  "dimensions.yaml": `${TERMS.dimensions.label}·${TERMS.reasons.label}·${TERMS.violationRules.label}`,
+  "faults.yaml": `${TERMS.faults.label}와 정답 (채점용)`,
 };
 
-function Tile({ label, value, note }: { label: string; value: string; note?: string }) {
+function Tile({ label, value, note, tech }: { label: string; value: string; note?: string; tech?: string }) {
   return (
     <div className="tile">
-      <div className="tile-label">{label}</div>
+      <div className="tile-label" title={tech}>{label}</div>
       <div className="tile-value">{value}</div>
       {note && <div className="tile-note">{note}</div>}
     </div>
@@ -144,8 +149,8 @@ function Params({ def, history }: { def: DomainDefinition; history: HistoryRow[]
   return (
     <div className="domain-stack">
       <p className="muted small">
-        <code>{def.files["params.yaml"]}</code> · 버전 v{String(def.params.version)}. 개선안은 허용 범위 안에서만 값을 바꿀 수 있고,
-        허용 범위와 설명은 개선안으로 바꿀 수 없습니다. 허용 범위의 최솟값과 최댓값이 같으면 고정값입니다.
+        <code>{def.files["params.yaml"]}</code> · 버전 v{String(def.params.version)}. 개선 제안은 {TERMS.bounds.label} 안에서만 값을 바꿀 수 있고,
+        {TERMS.bounds.label}와 설명은 바꿀 수 없습니다. 범위의 최솟값과 최댓값이 같으면 고정값입니다.
       </p>
       {sections.map(([name, section]) => {
         const bounds = (section.bounds ?? {}) as Record<string, [number, number]>;
@@ -155,7 +160,7 @@ function Params({ def, history }: { def: DomainDefinition; history: HistoryRow[]
             <h2><code>{name}</code></h2>
             <table className="param-table fixed">
               <colgroup><col style={{ width: "20%" }} /><col style={{ width: "24%" }} /><col style={{ width: "11%" }} /><col /></colgroup>
-              <thead><tr><th>키</th><th>현재 값</th><th>허용 범위</th><th>설명</th></tr></thead>
+              <thead><tr><th>항목</th><th>현재 값</th><th title={tip("bounds")}>{TERMS.bounds.label}</th><th>설명</th></tr></thead>
               <tbody>
                 {Object.entries(section).filter(([k]) => !META.has(k)).map(([key, value]) => {
                   const b = bounds[key];
@@ -174,11 +179,13 @@ function Params({ def, history }: { def: DomainDefinition; history: HistoryRow[]
         );
       })}
       <div className="panel">
-        <h2>구간 조건 (overrides)</h2>
-        <p className="muted small">조건(when)의 분석 차원 값에 해당하는 지시서에만 값(set)을 바꿔 적용합니다. 바꿀 수 있는 섹션: {(overrides.allowed_sections ?? []).join(", ") || "없음"}</p>
+        <h2 title={tip("overrides")}>{TERMS.overrides.label}</h2>
+        <p className="muted small">
+          조건에 해당하는 지시서에만 값을 바꿔 적용합니다. 이렇게 바꿀 수 있는 묶음: {(overrides.allowed_sections ?? []).join(", ") || "없음"}
+        </p>
         {(overrides.rules ?? []).length ? (
           <table className="param-table">
-            <thead><tr><th>#</th><th>조건 (when)</th><th>적용 (set)</th></tr></thead>
+            <thead><tr><th>#</th><th title="원래 용어: when">조건</th><th title="원래 용어: set">바꿀 값</th></tr></thead>
             <tbody>
               {overrides.rules!.map((r, i) => (
                 <tr key={i}><td>{i + 1}</td><td><code>{JSON.stringify(r.when)}</code></td><td><code>{JSON.stringify(r.set)}</code></td></tr>
@@ -191,7 +198,7 @@ function Params({ def, history }: { def: DomainDefinition; history: HistoryRow[]
         <h2>승인 이력</h2>
         {approved.length ? (
           <table className="param-table">
-            <thead><tr><th>회차</th><th>개선안</th><th>버전</th><th>메모</th></tr></thead>
+            <thead><tr><th>회차</th><th>{TERMS.proposal.label}</th><th>버전</th><th>메모</th></tr></thead>
             <tbody>
               {approved.map((h) => (
                 <tr key={h.proposal_id}>
@@ -203,7 +210,7 @@ function Params({ def, history }: { def: DomainDefinition; history: HistoryRow[]
               ))}
             </tbody>
           </table>
-        ) : <p className="muted">승인된 규칙 파라미터 개선안이 아직 없습니다.</p>}
+        ) : <p className="muted">승인된 {TERMS.params.label} 변경이 아직 없습니다.</p>}
       </div>
     </div>
   );
@@ -211,24 +218,36 @@ function Params({ def, history }: { def: DomainDefinition; history: HistoryRow[]
 
 // --- 필수조건·사유코드·차원 -------------------------------------------------------------
 
-function Rules({ def }: { def: DomainDefinition }) {
+// 사유: 쉬운 이름이 있으면 "이름 — 설명", 코어 사유는 화면용 이름만 (서버 설명에 기술 용어가 있어서)
+function reasonText(code: string, text: string, names?: Record<string, string>) {
+  if (code in CORE_REASON_NAMES) return CORE_REASON_NAMES[code];
+  return names?.[code] ? `${names[code]} — ${text}` : text;
+}
+
+function Rules({ def, adapter }: { def: DomainDefinition; adapter: DomainAdapter }) {
   const d = def.dimensions;
   return (
     <div className="domain-grid">
       <div className="panel">
-        <h2>필수조건 (violation_rules)</h2>
-        <p className="muted small">하나라도 어기면 배정이 무효입니다. 판정은 도메인의 validate() 한 곳에서만 합니다.</p>
+        <h2 title={tip("violationRules")}>{TERMS.violationRules.label}</h2>
+        <p className="muted small" title="원래 용어: 도메인 팩의 validate()">하나라도 어기면 배정이 무효입니다. 판정은 업무별 검사 한 곳에서만 합니다.</p>
         <KV rows={Object.entries(d.violation_rules)} />
       </div>
       <div className="panel">
-        <h2>미할당 사유 코드</h2>
-        <KV rows={[...Object.entries(d.reason_codes), ...Object.entries(def.core_reason_codes).map(([k, v]) => [k, `${v} (코어)`] as [string, string])]} />
+        <h2 title={tip("reasons")}>{TERMS.reasons.label}</h2>
+        <KV rows={[
+          ...Object.entries(d.reason_codes).map(([k, v]) => [k, reasonText(k, v, adapter.reasonNames)] as [string, string]),
+          ...Object.entries(def.core_reason_codes).filter(([k]) => !(k in d.reason_codes))
+            .map(([k, v]) => [k, `${reasonText(k, v, adapter.reasonNames)} (공통)`] as [string, string]),
+        ]} />
       </div>
       <div className="panel wide">
-        <h2>분석 차원</h2>
-        <p className="muted small">결과를 집계·분석하는 기준입니다. 분석 agent의 발견과 구간 조건(when)이 이 차원으로 표현됩니다.</p>
+        <h2 title={tip("dimensions")}>{TERMS.dimensions.label}</h2>
+        <p className="muted small">
+          결과를 나눠서 집계하는 기준입니다. {TERMS.aiAnalysis.label}이 찾은 문제의 조건과, 특정 조건에만 적용하는 규칙의 조건이 이 기준으로 표현됩니다.
+        </p>
         <table className="param-table">
-          <thead><tr><th>차원</th><th>이름</th><th>값</th></tr></thead>
+          <thead><tr><th>코드</th><th>이름</th><th>값</th></tr></thead>
           <tbody>
             {Object.entries(d.dimensions).map(([k, v]) => (
               <tr key={k}><td><code>{k}</code></td><td>{v.label}</td><td>{v.values?.join(", ") ?? v.format ?? "–"}</td></tr>
@@ -254,8 +273,8 @@ function Spec({ def }: { def: DomainDefinition }) {
   return (
     <div className="domain-stack">
       <p className="muted small">
-        <code>{def.files["domain-spec.md"]}</code> · 하네스 L1 이상에서 AI agent의 시스템 프롬프트로 이 문장이 그대로 들어갑니다.
-        수치는 문장에 적지 않고 규칙 파라미터의 키로 참조합니다. 명세 개선안은 섹션 단위로 바꿉니다.
+        <code>{def.files["domain-spec.md"]}</code> · 하네스 L1 이상에서 {TERMS.ai.label}에게 이 문장이 그대로 전달됩니다.
+        숫자는 문장에 적지 않고 {TERMS.params.label}의 항목 이름으로 가리킵니다. 이 문서를 고치는 제안은 아래 부분(절) 단위로 바꿉니다.
       </p>
       {Object.entries(def.spec_sections).map(([title, text], i) => (
         <details key={title} className="panel spec-section" open={i === 0}>
@@ -357,8 +376,8 @@ function DataTables({ data, dataset, busy, onGenerate }: {
         {facets.length > 0 && (
           <div className="controls facets">
             {facets.map(({ field, values }) => (
-              <label key={field} className="small">
-                {field}{" "}
+              <label key={field} className="small" title={field}>
+                {data.fieldLabels?.[field] ?? field}{" "}
                 <select value={filters[field] ?? ""} onChange={(e) => { setFilters((f) => ({ ...f, [field]: e.target.value })); setLimit(PAGE); }}>
                   <option value="">전체</option>
                   {values.map((v) => <option key={v} value={v}>{table ? cell(field, rows.find((r) => String(r[field]) === v)?.[field]) : v}</option>)}
@@ -374,8 +393,8 @@ function DataTables({ data, dataset, busy, onGenerate }: {
               <tr>
                 {fields.map((f) => (
                   <th key={f} onClick={() => setSort((s) => (s?.field === f ? { field: f, desc: !s.desc } : { field: f, desc: false }))}
-                    aria-sort={sort?.field === f ? (sort.desc ? "descending" : "ascending") : undefined}>
-                    {f}{sort?.field === f ? (sort.desc ? " ▼" : " ▲") : ""}
+                    aria-sort={sort?.field === f ? (sort.desc ? "descending" : "ascending") : undefined} title={f}>
+                    {data.fieldLabels?.[f] ?? f}{sort?.field === f ? (sort.desc ? " ▼" : " ▲") : ""}
                   </th>
                 ))}
               </tr>
@@ -417,23 +436,23 @@ function Faults({ domainName, faults }: { domainName: string; faults: DomainFaul
     <div className="domain-stack">
       <div className="controls">
         <p className="muted small">
-          가상 데이터에 일부러 심는 문제 패턴입니다. 분석 agent는 이 정답을 보지 못하며, 정답은 분석 결과를 채점할 때만 씁니다.
+          가상 데이터에 일부러 심는 문제입니다. {TERMS.aiAnalysis.label}은 이 정답을 보지 못하며, 정답은 분석 결과를 채점할 때만 씁니다.
         </p>
         {full ? (
           <button onClick={() => setFull(null)}>정답 가리기</button>
         ) : (
-          <button onClick={reveal} title="발표 중 분석 장면 전에는 열지 마세요">정답 보기 (주입 방식·채점 기준)</button>
+          <button onClick={reveal} title="발표 중 분석 장면 전에는 열지 마세요">정답 보기 (심는 방법·채점 기준)</button>
         )}
         {error && <span className="critical-text">✕ {error}</span>}
       </div>
       {shown.map((f) => (
         <div key={f.id} className="panel">
           <h2><span className="finding-id">{f.id}</span> {f.name}</h2>
-          {f.expected && <p>기대 현상: {f.expected}</p>}
+          {f.expected && <p>결과에 나타날 현상: {f.expected}</p>}
           {full && (
             <div className="spec-compare">
-              <div><div className="tile-label">주입 방식 (generation)</div><pre>{yamlish(f.generation)}</pre></div>
-              <div><div className="tile-label">채점 기준 (answer)</div><pre>{yamlish(f.answer)}</pre></div>
+              <div><div className="tile-label" title="원래 용어: generation">심는 방법</div><pre>{yamlish(f.generation)}</pre></div>
+              <div><div className="tile-label" title="원래 용어: answer">채점 기준</div><pre>{yamlish(f.answer)}</pre></div>
             </div>
           )}
         </div>

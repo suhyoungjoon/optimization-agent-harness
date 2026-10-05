@@ -67,6 +67,8 @@ async function caption(page, text) {
 async function openApp(page) {
   await page.goto(opts.url);
   await page.getByRole("tab", { name: "비교" }).waitFor({ timeout: TIMEOUT });
+  // 시연 배너는 서버 설정(/harness/levels)을 받은 뒤에 그려진다. 같은 응답으로 그려지는 레벨 버튼을 기다린 뒤 확인한다
+  await page.getByRole("radiogroup", { name: "하네스 레벨" }).waitFor({ timeout: TIMEOUT });
   const demo = await page.locator(".demo-banner").count();
   if (!demo && !opts.allowLive) {
     throw new Error("시연 모드 서버가 아님: 실제 LLM을 호출해 비용이 든다. 의도했다면 --allow-live");
@@ -74,27 +76,28 @@ async function openApp(page) {
 }
 
 async function generate(page) {
-  await page.locator("label:has-text('seed') input").fill(opts.seed);
+  await page.locator("label:has-text('데이터 번호') input").fill(opts.seed);
   const wanted = new Set(opts.faults.split(",").filter(Boolean));
   for (const box of await page.locator("fieldset label").all()) {
     const id = (await box.innerText()).trim().split(/\s+/)[0];
     await box.locator("input").setChecked(wanted.has(id));
   }
   await page.getByRole("button", { name: "데이터 생성" }).click();
-  const scope = page.locator("label:has-text('실행 범위') select");
+  const scope = page.locator("label:has-text('처리할 건수') select");
   await scope.waitFor({ timeout: TIMEOUT });
   await scope.selectOption(opts.scope);
 }
 
 async function runAi(page, level) {
-  await page.getByRole("radiogroup", { name: "하네스 레벨" }).getByRole("radio", { name: level, exact: true }).click();
-  await page.getByRole("button", { name: /AI agent 실행/ }).click();
+  // 레벨 버튼 이름은 "L3 +자동 검사"처럼 짧은 설명이 붙는다
+  await page.getByRole("radiogroup", { name: "하네스 레벨" }).getByRole("radio", { name: new RegExp(`^${level}( |$)`) }).click();
+  await page.getByRole("button", { name: /AI 방식 실행/ }).click();
   const error = page.locator(".compare .status-line .critical-text");
   const done = page.locator(".progress-list");
   await page.waitForTimeout(500);
   if (await error.count()) throw new Error(`${level} 실행 실패: ${await error.innerText()}`);
   await done.waitFor({ state: "detached", timeout: TIMEOUT });
-  await page.getByText("AI agent", { exact: true }).locator("xpath=ancestor::article").locator("svg").first()
+  await page.getByText("AI 방식", { exact: true }).locator("xpath=ancestor::article").locator("svg").first()
     .waitFor({ timeout: TIMEOUT });
 }
 
@@ -105,78 +108,78 @@ const scenes = {
     await caption(page, `장면 1 · 하네스 레벨 ${opts.from} → ${opts.to}`);
     await generate(page);
     await pause(page, 1500);
-    await caption(page, `${opts.from}: 명세·도구·검증 없이 AI agent 실행`);
+    await caption(page, `${opts.from}: 업무 규칙 문서·조회 기능·자동 검사 없이 AI 방식 실행`);
     await runAi(page, opts.from);
     await page.locator(".compare .split").scrollIntoViewIfNeeded();
     await pause(page, 4000);
-    await caption(page, `${opts.to}: 명세 + 도구 + 검증 루프 (위반이면 사유를 돌려주고 재시도)`);
+    await caption(page, `${opts.to}: 업무 규칙 문서 + 조회 기능 + 자동 검사 (규칙을 어기면 이유를 돌려주고 다시 시도)`);
     await runAi(page, opts.to);
     await pause(page, 4000);
-    await caption(page, "레벨별 비교: 필수조건 위반과 할당성공률, 건당 비용");
+    await caption(page, "레벨별 비교: 규칙 위반과 배정 성공률, 건당 비용");
     await page.locator(".compare-table").scrollIntoViewIfNeeded();
     await pause(page, 5000);
   },
 
-  // 장면 2: 트레이스. 재시도가 있었던 지시서 하나의 AI 판단 과정과 규칙 agent 판단 비교
+  // 장면 2: 결정 과정(트레이스). 다시 시도한 지시서 하나의 AI 판단 과정과 규칙 방식 판단 비교
   // (단계 기록은 트레이스를 켠 레벨에만 있다: harness_levels.yaml의 trace)
   async 2(page) {
     await openApp(page);
-    await caption(page, "장면 2 · 지시서 하나의 AI agent 트레이스");
+    await caption(page, "장면 2 · 지시서 하나를 AI가 결정한 과정");
     await generate(page);
     await runAi(page, opts["trace-level"]);
-    await page.getByRole("tab", { name: "트레이스" }).click();
+    await page.getByRole("tab", { name: "결정 과정" }).click();
     const filters = page.getByRole("radiogroup", { name: "항목 필터" });
     await filters.waitFor({ timeout: TIMEOUT });
-    const retried = filters.getByRole("radio", { name: /재시도 있음/ });
+    const retried = filters.getByRole("radio", { name: /다시 시도한 건/ });
     if (!(await retried.innerText()).includes("(0)")) await retried.click();
     await pause(page, 1000);
     await page.getByRole("list", { name: "항목" }).getByRole("button").first().click();
-    await caption(page, "LLM 응답 → 도구 호출 → 검증 → 재시도: 단계별 기록");
+    await caption(page, "AI 응답 → 조회 → 자동 검사 → 다시 시도: 단계별 기록");
     await pause(page, 3000);
     await page.locator(".trace").evaluate((el) => el.scrollIntoView({ block: "start" }));
     await page.mouse.wheel(0, 500);
     await pause(page, 3000);
-    await caption(page, "같은 지시서의 규칙 agent 판단과 나란히 비교");
-    await page.getByText("규칙 agent", { exact: true }).first().scrollIntoViewIfNeeded();
+    await caption(page, "같은 지시서의 규칙 방식 판단과 나란히 비교");
+    await page.getByText("규칙 방식", { exact: true }).first().scrollIntoViewIfNeeded();
     await pause(page, 4000);
   },
 
-  // 장면 3: 분석 agent가 심어둔 문제를 찾고, 개선안 시뮬레이션으로 할당성공률이 오르는 모습
+  // 장면 3: AI 분석이 심어둔 문제를 찾고, 개선 제안을 미리 돌려봐 배정 성공률이 오르는 모습
   async 3(page) {
     await openApp(page);
-    await caption(page, "장면 3 · 분석 agent와 개선 루프");
+    await caption(page, "장면 3 · AI 분석과 개선 제안");
     await generate(page);
-    await page.getByRole("tab", { name: "분석" }).click();
-    await page.getByRole("button", { name: "규칙 agent 전체 실행" }).click();
+    await page.getByRole("tab", { name: "문제 찾기" }).click();
+    await page.getByRole("button", { name: "규칙 방식 전체 실행" }).click();
     await page.locator(".analysis select option").filter({ hasText: "전체" }).first().waitFor({ state: "attached", timeout: TIMEOUT });
-    await page.getByRole("button", { name: "분석 agent 실행" }).click();
+    await page.getByRole("button", { name: "AI 분석 실행" }).click();
     await page.locator(".analysis .tiles").waitFor({ timeout: TIMEOUT });
-    await caption(page, "정답표(심어둔 패턴)와 매칭한 탐지율. 발견마다 근거 집계가 붙는다");
+    await caption(page, "심어둔 문제를 몇 개 찾았는지 정답과 대조. 찾은 문제마다 근거 데이터가 붙는다");
     await pause(page, 3500);
     const first = page.locator(".finding-title").first();
     await first.click();
-    await caption(page, "발견을 누르면 해당 구간이 지도에 강조된다");
+    await caption(page, "찾은 문제를 누르면 해당 조건의 지시서가 지도에 강조된다");
     await pause(page, 4000);
 
-    await page.getByRole("tab", { name: "개선" }).click();
-    await page.getByRole("button", { name: "개선안 생성" }).click();
+    await page.getByRole("tab", { name: "개선 제안" }).click();
+    await page.getByRole("button", { name: "개선 제안 만들기" }).click();
     await page.locator(".proposal").first().waitFor({ timeout: TIMEOUT });
-    const proposal = page.locator(".proposal-proposed").filter({ hasText: "규칙 파라미터" }).first();
+    const proposal = page.locator(".proposal-proposed").filter({ hasText: "규칙 설정값" }).first();
     if (!(await proposal.count())) {
-      throw new Error("결정 전 규칙 파라미터 개선안이 없음. 이미 승인했다면 시연 서버를 다시 시작하세요 (작업 복사본 초기화)");
+      throw new Error("결정 전 규칙 설정값 개선 제안이 없음. 이미 승인했다면 시연 서버를 다시 시작하세요 (임시 사본 초기화)");
     }
-    await caption(page, "개선안: params.yaml 변경 또는 domain-spec.md 수정 (범위 검증 포함)");
+    await caption(page, "개선 제안: 규칙 설정값 또는 업무 규칙 문서 수정 (바꿀 수 있는 범위 검사 포함)");
     await pause(page, 3000);
-    await proposal.getByRole("button", { name: "시뮬레이션" }).click();
+    await proposal.getByRole("button", { name: "미리 돌려보기", exact: true }).click();
     const simulated = page.locator(".proposal-simulated").first();
     await simulated.locator(".sim-table").waitFor({ timeout: TIMEOUT });
     await simulated.scrollIntoViewIfNeeded();
-    await caption(page, "시뮬레이션: 개선 전·후 지표 비교");
+    await caption(page, "미리 돌려보기: 바꾸기 전·후 지표 비교");
     await pause(page, 4500);
     await simulated.getByRole("button", { name: "승인", exact: true }).click();
     await page.locator(".history").waitFor({ timeout: TIMEOUT });
     await page.locator(".history").scrollIntoViewIfNeeded();
-    await caption(page, "승인하면 params 버전이 오르고 개선 이력에 남는다 (git 커밋은 사람이)");
+    await caption(page, "승인하면 규칙 설정값 버전이 오르고 반영 이력에 남는다 (git 커밋은 사람이)");
     await pause(page, 5000);
   },
 };

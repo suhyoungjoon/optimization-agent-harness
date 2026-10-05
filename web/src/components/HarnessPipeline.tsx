@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
+import { TERMS, levelShortName, tip, type TermKey } from "../terms";
 import type { DomainDefinition, HarnessInfo, HarnessLevel } from "../types";
 
 // 하네스 파이프라인 그림 (M7-a). 단계 구조와 설명은 코어 개념이라 도메인과 무관하고,
@@ -42,6 +43,7 @@ export default function HarnessPipeline({
   const since = (flag: Flag) => names.find((n) => isOn(harness.levels[n], flag));
   const off = (flag: Flag) => (isOn(lv, flag) ? "" : " off");
   const offNote = (flag: Flag) => !isOn(lv, flag) && <span className="stage-off">꺼짐 · {since(flag)}부터</span>;
+  const term = (k: TermKey) => ({ title: TERMS[k].label, tech: tip(k) });
   const maxCalls = harness.llm.max_llm_calls_per_item;
   const toolCount = def?.tools.length;
   const ruleCount = def ? Object.keys(def.dimensions.violation_rules ?? {}).length : undefined;
@@ -50,46 +52,46 @@ export default function HarnessPipeline({
   const docs: Record<StageId, StageDoc> = {
     input: {
       what:
-        "항목 하나를 처리할 때 LLM에 보내는 입력. 기본 지시(결정 하나를 submit_decision으로 제출하라)는 항상 들어간다. " +
-        "명세가 켜지면 domain-spec.md 전체를 시스템 프롬프트에 붙인다. 데이터는 도구가 꺼져 있으면 인스턴스 전체 JSON과 " +
-        "지금까지 확정된 결정을 프롬프트에 넣고, 켜지면 JSON 없이 도메인 조회 도구로 필요한 것만 묻게 한다.",
+        "지시서 하나를 처리할 때 AI에게 보내는 내용. 기본 지시(결정 하나를 정해진 형식으로 제출하라)는 항상 들어간다. " +
+        "업무 규칙 문서가 켜지면 문서 전체를 함께 보낸다. 조회 기능이 꺼져 있으면 데이터 전체와 지금까지 정한 결정을 통째로 보내고, " +
+        "켜지면 데이터 대신 조회 기능을 주어 AI가 필요한 것만 묻게 한다.",
       config: "configs/harness_levels.yaml의 spec·tools, 명세 내용은 domain-spec.md, 도구는 도메인 팩의 tools()",
-      shows: "지표의 입력 토큰·비용(인스턴스 JSON이 들어가는 L0·L1은 입력이 크다), 트레이스의 도구 호출(L5)",
+      shows: "건당 비용(데이터를 통째로 보내는 L0·L1은 입력이 커서 비싸다), 결정 과정 탭의 조회 기록(과정 기록이 켜진 레벨)",
     },
     llm: {
       what:
-        `항목마다 LLM을 호출하고, 도구 호출이 있으면 결과를 돌려주며 다시 호출한다. 재시도도 호출 수에 포함되며, ` +
-        `한 항목에서 ${maxCalls}회 안에 결정이 나지 않으면 끊는다.`,
+        `지시서마다 AI를 호출하고, AI가 조회를 요청하면 결과를 돌려주며 다시 호출한다. 다시 시도한 횟수도 포함해 ` +
+        `한 지시서에서 ${maxCalls}회 안에 결정이 나지 않으면 멈춘다.`,
       config: "configs/llm.yaml의 model·effort·max_llm_calls_per_item",
-      shows: "상한에 걸리면 사유 LLM_MAX_TURNS로 미배정, 결정 기록의 LLM 호출 수, 트레이스의 LLM 응답(L5)",
+      shows: "횟수를 넘기면 미배정(사유: AI 호출 횟수 초과), 결정 과정 탭의 AI 응답(과정 기록이 켜진 레벨)",
     },
     submit: {
       what:
-        "모든 레벨에서 결정은 submit_decision 도구로만 받는다(출력 형식 통일). 배정이면 결정 내용, 미배정이면 사유 코드, " +
-        "그리고 판단 근거 한두 문장. 도구 플래그가 켜는 것은 도메인 조회 도구이고 submit_decision은 항상 있다.",
+        "모든 레벨에서 결정은 정해진 제출 형식(submit_decision)으로만 받는다. 배정이면 결정 내용, 미배정이면 사유, " +
+        "그리고 판단 근거 한두 문장. 조회 기능을 끄고 켜는 것과 상관없이 제출 형식은 항상 있다.",
       config: "코어(core/harness/runner.py). 결정 형식은 도메인 팩의 decision_schema(), 사유 코드는 dimensions.yaml",
-      shows: "결과 화면의 배정·미배정, 사유 코드, 판단 근거",
+      shows: "결과 화면의 배정·미배정, 미배정 사유, 판단 근거",
     },
     validate: {
       what:
-        `제출한 결정을 도메인 validate()로 바로 검사한다. 위반이 있으면 위반 사유를 LLM에 돌려주고 다시 결정하게 한다` +
-        `(항목당 최대 ${retries ?? "–"}회). 재시도를 다 써도 위반이면 그대로 다음 단계로 간다.` +
-        (ruleCount !== undefined ? ` 이 도메인의 필수조건은 ${ruleCount}개.` : ""),
+        `제출한 결정이 지켜야 할 규칙을 어기는지 바로 검사한다. 어기면 이유를 AI에게 돌려주고 다시 결정하게 한다` +
+        `(지시서당 최대 ${retries ?? "–"}회). 다시 시도를 다 써도 어기면 그대로 다음 단계로 간다.` +
+        (ruleCount !== undefined ? ` 이 업무의 지켜야 할 규칙은 ${ruleCount}개.` : ""),
       config: "configs/harness_levels.yaml의 validate_loop·max_retries, 필수조건은 도메인 팩의 validate()",
-      shows: "결정 기록의 재시도 수, 트레이스의 검증·재시도 단계(L5), 비교표의 위반 건수 감소",
+      shows: "결정 과정 탭의 \"다시 시도한 건\", 비교표의 규칙 위반 감소",
     },
     guardrail: {
       what:
-        "위반이 남은 결정은 차단(blocked)하고, 위반이 없어도 도메인의 승인 필요 조건에 걸리면 승인 대기(pending_approval)로 둔다. " +
-        "나머지는 확정. 승인 필요 조건은 도메인이 판단한다(도메인 탭의 규칙 파라미터).",
+        "규칙을 어긴 채 남은 결정은 막고(차단), 어기지 않았어도 사람 승인이 필요한 조건이면 승인 대기로 둔다. " +
+        "나머지는 확정. 승인이 필요한 조건은 업무마다 다르다(규칙·데이터 탭의 규칙 설정값).",
       config: "configs/harness_levels.yaml의 guardrail, 승인 조건은 도메인 팩의 approval_reasons()와 params.yaml",
-      shows: "결과 화면의 차단·승인 대기 표시, 사유 BLOCKED_BY_GUARDRAIL·NEEDS_APPROVAL",
+      shows: "결과 화면의 차단·승인 대기 표시",
     },
     trace: {
       what:
-        "최종 결과만이면 항목마다 결정 기록 하나만 남는다. 모든 단계면 LLM 응답·도구 호출·검증·재시도·가드레일을 순서대로 남긴다.",
+        "최종 결과만이면 지시서마다 결정 하나만 남는다. 모든 단계면 AI 응답·조회·자동 검사·다시 시도·위험 결정 막기를 순서대로 남긴다.",
       config: "configs/harness_levels.yaml의 trace (minimal | full)",
-      shows: "트레이스 탭(모든 단계일 때만 단계 목록이 보인다)",
+      shows: "결정 과정 탭(모든 단계를 남긴 실행에서만 단계 목록이 보인다)",
     },
   };
 
@@ -102,55 +104,58 @@ export default function HarnessPipeline({
   return (
     <div className="pipeline-panel">
       <div className="pipeline" aria-label={`${level} 하네스 처리 흐름`}>
+        {/* 단계 이름은 쉬운 말, 원래 용어는 마우스 올림 (M8-a) */}
         <Stage {...stageProps("input")} num="①" title="입력">
           <span className="stage-row">기본 지시 <em>항상</em></span>
-          <span className={`stage-row${off("spec")}`}>
-            도메인 명세 <em>{isOn(lv, "spec") ? "켬" : `${since("spec")}부터`}</em>
+          <span className={`stage-row${off("spec")}`} title={tip("spec")}>
+            {TERMS.spec.label} <em>{isOn(lv, "spec") ? "켬" : `${since("spec")}부터`}</em>
           </span>
           <span className="stage-row data-mode">
-            <span className={lv.tools ? "mode" : "mode current"}>인스턴스 전체 JSON</span>
+            <span className={lv.tools ? "mode" : "mode current"} title="원래 용어: 인스턴스 전체 JSON">데이터 통째로</span>
             <span aria-hidden>→</span>
-            <span className={lv.tools ? "mode current" : "mode"}>조회 도구{toolCount !== undefined ? ` ${toolCount}개` : ""}</span>
+            <span className={lv.tools ? "mode current" : "mode"} title={tip("tools")}>
+              {TERMS.tools.label}{toolCount !== undefined ? ` ${toolCount}개` : ""}
+            </span>
           </span>
         </Stage>
-        <Stage {...stageProps("llm")} num="②" title="LLM 호출">
-          <span className="stage-row">항목당 최대 {maxCalls}회</span>
+        <Stage {...stageProps("llm")} num="②" {...term("llm")}>
+          <span className="stage-row">지시서당 최대 {maxCalls}회</span>
         </Stage>
         <Stage {...stageProps("submit")} num="③" title="결정 제출">
-          <span className="stage-row">submit_decision <em>항상</em></span>
+          <span className="stage-row">정해진 형식으로 <em>항상</em></span>
         </Stage>
-        <Stage {...stageProps("validate", "validate_loop")} num="④" title="검증">
-          <span className="stage-row">위반이면 ②로 재시도</span>
+        <Stage {...stageProps("validate", "validate_loop")} num="④" {...term("validateLoop")}>
+          <span className="stage-row">규칙을 어기면 ②로 다시 시도</span>
         </Stage>
-        <Stage {...stageProps("guardrail", "guardrail")} num="⑤" title="가드레일">
+        <Stage {...stageProps("guardrail", "guardrail")} num="⑤" {...term("guardrail")}>
           <span className="stage-row">확정 / 차단 / 승인 대기</span>
         </Stage>
-        <Stage {...stageProps("trace")} num="⑥" title="기록">
+        <Stage {...stageProps("trace")} num="⑥" {...term("trace")}>
           <span className="stage-row">{lv.trace === "full" ? "모든 단계" : "최종 결과만"}</span>
           {lv.trace !== "full" && <span className="stage-off">모든 단계는 {since("trace")}부터</span>}
         </Stage>
         <div className={`retry-loop${off("validate_loop")}`} aria-hidden>
-          <span>↺ 위반 사유를 돌려주고 ② 재호출 · 최대 {retries ?? "–"}회</span>
+          <span>↺ 어긴 이유를 돌려주고 ② 다시 호출 · 최대 {retries ?? "–"}회</span>
         </div>
       </div>
 
-      <div className="posthoc">
-        <strong>사후 채점</strong> 모든 레벨: 최종 결정을 validate()로 검사해 위반 건수를 센다. 결과를 바꾸지 않고 비교표의 위반 건수가 된다.
-        {ruleCount !== undefined && <span className="muted"> 필수조건 {ruleCount}개</span>}
+      <div className="posthoc" title={tip("violations")}>
+        <strong>마지막 규칙 검사</strong> 모든 레벨: 최종 결정이 규칙을 어겼는지 다시 검사해 센다. 결과는 바꾸지 않고 비교표의 {TERMS.violations.label} 건수가 된다.
+        {ruleCount !== undefined && <span className="muted"> {TERMS.violationRules.label} {ruleCount}개</span>}
       </div>
 
       <div className="stage-detail">
         <dl>
           <dt>하는 일</dt>
           <dd>{doc.what}</dd>
-          <dt>설정 위치</dt>
+          <dt>설정 위치 (파일)</dt>
           <dd>{doc.config}</dd>
           <dt>결과에서 보이는 곳</dt>
           <dd>{doc.shows}</dd>
         </dl>
         {stage === "input" && def && def.tools.length > 0 && (
           <div className="tool-list">
-            <span className="muted small">조회 도구 (도구가 켜진 레벨에서 제공)</span>
+            <span className="muted small">{TERMS.tools.label} (켜진 레벨에서 AI에게 제공)</span>
             <ul>
               {def.tools.map((t) => (
                 <li key={t.name}><code>{t.name}</code> {t.description}</li>
@@ -165,11 +170,11 @@ export default function HarnessPipeline({
         <thead>
           <tr>
             <th scope="col">레벨</th>
-            <th scope="col">명세</th>
+            <th scope="col" title={tip("spec")}>{TERMS.spec.label}</th>
             <th scope="col">데이터</th>
-            <th scope="col">검증 루프</th>
-            <th scope="col">가드레일</th>
-            <th scope="col">기록</th>
+            <th scope="col" title={tip("validateLoop")}>{TERMS.validateLoop.label}</th>
+            <th scope="col" title={tip("guardrail")}>{TERMS.guardrail.label}</th>
+            <th scope="col" title={tip("trace")}>{TERMS.trace.label}</th>
           </tr>
         </thead>
         <tbody>
@@ -184,9 +189,10 @@ export default function HarnessPipeline({
                     onClick={(e) => { e.stopPropagation(); onChange(n); }}>
                     {n}
                   </button>
+                  <span className="muted small"> {levelShortName(harness.levels, n)}</span>
                 </th>
                 <td>{dot(l.spec)}</td>
-                <td>{l.tools ? "도구" : "JSON"}</td>
+                <td>{l.tools ? TERMS.tools.label : "통째로"}</td>
                 <td>{dot(l.validate_loop)}{l.validate_loop && <span className="muted small"> {l.max_retries}회</span>}</td>
                 <td>{dot(l.guardrail)}</td>
                 <td>{l.trace === "full" ? "모든 단계" : "최종만"}</td>
@@ -199,13 +205,13 @@ export default function HarnessPipeline({
   );
 }
 
-function Stage({ id, num, title, current, dim, note, onSelect, children }: {
-  id: StageId; num: string; title: string; current: boolean; dim: boolean; note: ReactNode;
+function Stage({ id, num, title, tech, current, dim, note, onSelect, children }: {
+  id: StageId; num: string; title: string; tech?: string; current: boolean; dim: boolean; note: ReactNode;
   onSelect: (id: StageId) => void; children?: ReactNode;
 }) {
   return (
     <button type="button" className={`stage${dim ? " off" : ""}${current ? " current" : ""}`}
-      aria-pressed={current} onClick={() => onSelect(id)}>
+      aria-pressed={current} onClick={() => onSelect(id)} title={tech}>
       <span className="stage-title">{num} {title}</span>
       {note}
       {children}

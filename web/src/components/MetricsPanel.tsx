@@ -1,6 +1,7 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { DecisionRecord, Run } from "../types";
 import type { MetricSpec } from "../domains/types";
+import { TERMS, tip } from "../terms";
 
 export const fmtMetric = (v: number | null | undefined, f: MetricSpec["format"]) =>
   v === undefined || v === null ? "–" : f === "pct" ? `${(v * 100).toFixed(1)}%` : `${v.toFixed(1)}분`;
@@ -16,11 +17,13 @@ export default function MetricsPanel({
   decisions,
   specs,
   reasonLabels,
+  reasonDetails = {},
 }: {
   run: Run;
   decisions: DecisionRecord[];
   specs: MetricSpec[];
   reasonLabels: Record<string, string>;
+  reasonDetails?: Record<string, string>;
 }) {
   const violations = run.violations ?? [];
   const items = run.meta?.items ?? decisions.length;
@@ -32,21 +35,21 @@ export default function MetricsPanel({
       return acc;
     }, {}),
   )
-    .map(([code, count]) => ({ code, count, label: reasonLabels[code] ?? code }))
+    .map(([code, count]) => ({ code, count, name: reasonLabels[code] ?? code, detail: reasonDetails[code] ?? "" }))
     .sort((a, b) => b.count - a.count);
 
   return (
     <div className="metrics">
       <div className="tiles">
         <div className={`tile ${violations.length ? "tile-critical" : "tile-good"}`}>
-          <div className="tile-label">필수조건 위반 (사후 채점)</div>
+          <div className="tile-label" title={tip("violations")}>{TERMS.violations.label}</div>
           <div className="tile-value">
             <span aria-hidden>{violations.length ? "!" : "✓"}</span> {violations.length}건
           </div>
         </div>
         {specs.map((s) => (
           <div className="tile" key={s.key}>
-            <div className="tile-label">{s.label}</div>
+            <div className="tile-label" title={s.tech}>{s.label}</div>
             <div className="tile-value">{fmtMetric(run.metrics?.[s.key], s.format)}</div>
           </div>
         ))}
@@ -55,8 +58,8 @@ export default function MetricsPanel({
           <div className="tile-value">{run.agent === "rule" ? "$0" : fmtUsd(cost != null && items ? cost / items : cost)}</div>
           {run.agent === "ai" && run.meta?.usage && (
             <div className="tile-note">
-              총 {fmtUsd(cost)} · LLM {run.meta.usage.calls ?? 0}회
-              {run.meta.usage.cached_calls ? ` (캐시 ${run.meta.usage.cached_calls})` : ""}
+              총 {fmtUsd(cost)} · {TERMS.llm.label} {run.meta.usage.calls ?? 0}회
+              {run.meta.usage.cached_calls ? ` (저장된 응답 재사용 ${run.meta.usage.cached_calls})` : ""}
             </div>
           )}
         </div>
@@ -69,21 +72,22 @@ export default function MetricsPanel({
 
       {reasons.length > 0 && (
         <figure className="chart">
-          <figcaption>미할당 사유별 건수</figcaption>
+          <figcaption title={tip("reasons")}>{TERMS.reasons.label}별 건수</figcaption>
           <ResponsiveContainer width="100%" height={36 + reasons.length * 30}>
             <BarChart data={reasons} layout="vertical" margin={{ top: 4, right: 24, bottom: 4, left: 8 }}>
               <CartesianGrid horizontal={false} stroke="var(--grid)" />
               <XAxis type="number" allowDecimals={false} tick={{ fill: "var(--text-muted)", fontSize: 12 }}
                 axisLine={{ stroke: "var(--axis)" }} tickLine={false} />
-              <YAxis type="category" dataKey="code" width={180} tick={{ fill: "var(--text-secondary)", fontSize: 12 }}
+              <YAxis type="category" dataKey="name" width={180} tick={{ fill: "var(--text-secondary)", fontSize: 12 }}
                 axisLine={{ stroke: "var(--axis)" }} tickLine={false} />
               <Tooltip
                 cursor={{ fill: "var(--hover-wash)" }}
                 content={({ active, payload }) =>
                   active && payload?.length ? (
                     <div className="tooltip static">
-                      <strong>{payload[0].payload.code}</strong>
-                      <div>{payload[0].payload.label}</div>
+                      <strong>{payload[0].payload.name}</strong>
+                      <div>{payload[0].payload.detail}</div>
+                      <div className="muted">{payload[0].payload.code}</div>
                       <div>{payload[0].payload.count}건</div>
                     </div>
                   ) : null
@@ -98,7 +102,7 @@ export default function MetricsPanel({
       {violations.length > 0 && (
         <table className="violations">
           <thead>
-            <tr><th>항목</th><th>규칙</th><th>내용</th></tr>
+            <tr><th>항목</th><th title={tip("violationRules")}>어긴 규칙</th><th>내용</th></tr>
           </thead>
           <tbody>
             {violations.slice(0, 50).map((v, i) => (

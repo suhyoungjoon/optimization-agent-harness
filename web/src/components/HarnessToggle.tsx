@@ -1,11 +1,5 @@
+import { FLAG_TERMS, TERMS, flagOn, levelShortName, tip } from "../terms";
 import type { HarnessInfo } from "../types";
-
-const FLAG_LABELS: [keyof HarnessInfo["levels"][string], string][] = [
-  ["spec", "명세"],
-  ["tools", "도구"],
-  ["validate_loop", "검증 루프"],
-  ["guardrail", "가드레일"],
-];
 
 export default function HarnessToggle({
   harness,
@@ -22,30 +16,32 @@ export default function HarnessToggle({
   const current = harness.levels[level];
   return (
     <div className="harness">
-      <div className="harness-levels" role="radiogroup" aria-label="하네스 레벨">
-        {Object.keys(harness.levels).map((l) => (
-          <button
-            key={l}
-            role="radio"
-            aria-checked={l === level}
-            className={l === level ? "selected" : undefined}
-            onClick={() => onChange(l)}
-            disabled={disabled}
-          >
-            {l}
-          </button>
-        ))}
+      <div className="harness-levels" role="radiogroup" aria-label="하네스 레벨" title={tip("harness")}>
+        {Object.keys(harness.levels).map((l) => {
+          const short = levelShortName(harness.levels, l);
+          return (
+            <button
+              key={l}
+              role="radio"
+              aria-checked={l === level}
+              aria-label={short ? `${l} ${short}` : l}
+              className={l === level ? "selected" : undefined}
+              onClick={() => onChange(l)}
+              disabled={disabled}
+            >
+              {l}
+              {short && <span className="level-short"> {short}</span>}
+            </button>
+          );
+        })}
       </div>
       {current && (
         <span className="harness-flags">
-          {FLAG_LABELS.map(([key, label]) => (
-            <span key={key} className={current[key] ? "flag on" : "flag"}>
-              {current[key] ? "✓" : "–"} {label}
+          {FLAG_TERMS.map(([flag, term]) => (
+            <span key={flag} className={flagOn(current, flag) ? "flag on" : "flag"} title={tip(term)}>
+              {flagOn(current, flag) ? "✓" : "–"} {TERMS[term].label}
             </span>
           ))}
-          <span className={current.trace === "full" ? "flag on" : "flag"}>
-            {current.trace === "full" ? "✓" : "–"} 트레이스
-          </span>
         </span>
       )}
     </div>

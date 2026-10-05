@@ -5,15 +5,16 @@ import type { DomainAdapter, MetricSpec, Scope } from "../domains/types";
 import type { HarnessInfo, HistoryRow, Proposal, ProposalBatch, SpecEstimate } from "../types";
 import { fmtMetric, fmtSeconds, fmtUsd } from "./MetricsPanel";
 import { usePoll } from "./usePoll";
+import { TERMS, tip } from "../terms";
 
 const STATUS_LABEL: Record<Proposal["status"], string> = {
   proposed: "제안됨",
-  invalid: "검증 실패",
-  simulating: "시뮬레이션 중",
-  simulated: "시뮬레이션 완료",
+  invalid: "적용 불가 (바꿀 수 있는 범위 밖 등)",
+  simulating: "미리 돌려보는 중",
+  simulated: "미리 돌려보기 완료",
   approved: "승인됨",
   rejected: "반려됨",
-  stale: "기준 변경됨 (다시 제안 필요)",
+  stale: "기준이 바뀜 (다시 제안 필요)",
 };
 
 const HUMAN_HOURS_KEY = "oah.humanHoursPerCycle";
@@ -114,23 +115,23 @@ export default function ImprovementPanel({
     <section className="improvement">
       <div className="controls">
         <button className="primary" disabled={!!busy || !reportId}
-          onClick={() => guard("개선안 생성 요청 중", async () => setBatchId((await api.propose(reportId!)).id))}>
-          개선안 생성
+          onClick={() => guard("개선 제안 요청 중", async () => setBatchId((await api.propose(reportId!)).id))} title={tip("proposal")}>
+          {TERMS.proposal.label} 만들기
         </button>
         <span className="muted small">
-          {reportId ? `분석 리포트 ${reportId} 기준` : "분석 탭에서 리포트를 먼저 만드세요."}
-          {current && ` · 현재 params v${String(current.params.version)}`}
+          {reportId ? `분석 결과 ${reportId} 기준` : "문제 찾기 탭에서 분석을 먼저 하세요."}
+          {current && ` · 현재 ${TERMS.params.label} v${String(current.params.version)}`}
         </span>
       </div>
       <div className="status-line" aria-live="polite">
         {busy && <span className="muted">{busy}…</span>}
         {error && <span className="critical-text">✕ {error}</span>}
         {notice && <span className="good-text">✓ {notice}</span>}
-        {batch?.status === "running" && <span className="muted">개선안 생성 중… (AI가 시뮬레이션으로 변경을 시험하고 있습니다)</span>}
-        {batch?.status === "error" && <span className="critical-text">✕ 개선안 생성 실패: {batch.error}</span>}
+        {batch?.status === "running" && <span className="muted">개선 제안을 만드는 중… (AI가 바꿀 내용을 미리 돌려보며 시험하고 있습니다)</span>}
+        {batch?.status === "error" && <span className="critical-text">✕ 개선 제안 만들기 실패: {batch.error}</span>}
         {batch?.status === "done" && batch.meta && (
           <span className="muted">
-            제안 {batch.proposals.length}건 · AI의 사전 시험 {batch.meta.trials}회 · 비용 {fmtUsd(batch.meta.usage.cost_usd)} ·{" "}
+            제안 {batch.proposals.length}건 · AI가 미리 돌려본 횟수 {batch.meta.trials}회 · 비용 {fmtUsd(batch.meta.usage.cost_usd)} ·{" "}
             {fmtSeconds(batch.meta.usage.seconds)}
           </span>
         )}
@@ -138,9 +139,9 @@ export default function ImprovementPanel({
 
       <div className="tiles">
         <div className="tile tile-cost">
-          <div className="tile-label">개선 1회전 (AI: 분석+제안+시뮬레이션)</div>
+          <div className="tile-label">개선 한 바퀴 (AI: 분석+제안+미리 돌려보기)</div>
           <div className="tile-value">{lastCycle ? fmtUsd(lastCycle.llm_cost_usd) : "–"}</div>
-          <div className="tile-note">{cycleSeconds != null ? `총 ${fmtSeconds(cycleSeconds)}` : "승인·반려한 회차가 없습니다"}</div>
+          <div className="tile-note">{cycleSeconds != null ? `총 ${fmtSeconds(cycleSeconds)}` : "아직 승인·반려한 제안이 없습니다"}</div>
           {cycleSeconds != null && humanHours ? (
             <div className="tile-note">
               사람 추정 {humanHours}시간 대비 AI {fmtSeconds(cycleSeconds)}
@@ -155,7 +156,7 @@ export default function ImprovementPanel({
           <div className="tile-note">현업 담당자에게 확인한 값을 입력하세요 (이 브라우저에만 저장).</div>
         </div>
         <div className="tile">
-          <div className="tile-label">반영된 회차</div>
+          <div className="tile-label" title={tip("history")}>반영 횟수</div>
           <div className="tile-value">{approved.length}회</div>
           <div className="tile-note">반려 {history.length - approved.length}건</div>
         </div>
@@ -166,15 +167,15 @@ export default function ImprovementPanel({
           <ProposalCard key={p.id} proposal={p} current={current} specs={adapter.metrics} harness={harness} scopes={scopes}
             busy={!!busy} guard={guard} onApproved={(msg) => setNotice(msg)} />
         ))}
-        {!batch && reportId && <p className="muted empty">개선안 생성 버튼을 누르면 AI가 리포트를 읽고 개선안을 만듭니다.</p>}
+        {!batch && reportId && <p className="muted empty">{TERMS.proposal.label} 만들기를 누르면 AI가 분석 결과를 읽고 규칙을 어떻게 바꿀지 제안합니다.</p>}
       </div>
 
       {history.length > 0 && (
         <section className="panel history">
-          <h2>개선 이력</h2>
+          <h2 title={tip("history")}>{TERMS.history.label}</h2>
           {trend.length > 1 && (
             <figure className="chart">
-              <figcaption>회차별 {headline.label} (시뮬레이션 기준)</figcaption>
+              <figcaption>회차별 {headline.label} (미리 돌려본 결과 기준)</figcaption>
               <ResponsiveContainer width="100%" height={200}>
                 <LineChart data={trend} margin={{ top: 8, right: 24, bottom: 4, left: 8 }}>
                   <CartesianGrid vertical={false} stroke="var(--grid)" />
@@ -201,7 +202,7 @@ export default function ImprovementPanel({
             <table className="compare-table-inner">
               <thead>
                 <tr>
-                  <th>회차</th><th>결과</th><th>개선안</th><th className="num">{headline.label} 전</th>
+                  <th>회차</th><th>결과</th><th>{TERMS.proposal.label}</th><th className="num">{headline.label} 전</th>
                   <th className="num">후</th><th className="num">AI 비용</th><th className="num">AI 시간</th><th>메모</th>
                 </tr>
               </thead>
@@ -210,7 +211,7 @@ export default function ImprovementPanel({
                   <tr key={h.proposal_id}>
                     <td>{h.round ?? "–"}</td>
                     <td className={h.status === "approved" ? "good-text" : "muted"}>{h.status === "approved" ? "✓ 승인" : "반려"}</td>
-                    <td>{h.title} <span className="muted small">({h.kind})</span></td>
+                    <td>{h.title} <span className="muted small">({h.kind === "params" ? TERMS.params.label : TERMS.spec.label})</span></td>
                     <td className="num">{fmtMetric(h.before?.[headline.key], headline.format)}</td>
                     <td className="num">{fmtMetric(h.after?.[headline.key], headline.format)}</td>
                     <td className="num">{fmtUsd(h.cycle.llm_cost_usd)}</td>
@@ -256,12 +257,12 @@ function ProposalCard({
   const open = p.status === "proposed" || p.status === "simulated";
 
   const simulate = () =>
-    guard("시뮬레이션 중", async () => {
+    guard("미리 돌려보는 중", async () => {
       const res = await api.simulate(p.id, p.kind === "spec" ? { level, scope } : {});
       if ("needs_confirmation" in res) setEstimate(res.estimate);
     });
   const confirmSpec = () =>
-    guard("AI agent 전후 실행 요청 중", async () => {
+    guard(`${TERMS.ai.label} 전후 실행 요청 중`, async () => {
       setEstimate(null);
       await api.simulate(p.id, { confirm: true, level, scope });
     });
@@ -270,14 +271,16 @@ function ProposalCard({
     <article className={`proposal proposal-${p.status}`}>
       <header>
         <strong>{p.body.title}</strong>
-        <span className="chip">{p.kind === "params" ? "규칙 파라미터" : "도메인 명세"}</span>
+        <span className="chip" title={tip(p.kind === "params" ? "params" : "spec")}>
+          {p.kind === "params" ? TERMS.params.label : TERMS.spec.label}
+        </span>
         <span className={`badge ${p.status === "invalid" ? "critical-text" : p.status === "approved" ? "good-text" : ""}`}>
           {STATUS_LABEL[p.status]}
         </span>
       </header>
       <p>{p.body.rationale}</p>
       {p.body.expected_effect && <p className="muted">기대 효과: {p.body.expected_effect}</p>}
-      <p className="muted small">대상 발견: {p.body.target_findings.join(", ") || "–"}</p>
+      <p className="muted small">해결하려는 문제: {p.body.target_findings.join(", ") || "–"}</p>
 
       <div className="diff">
         {(p.body.params_changes ?? []).map((c, i) => (
@@ -288,12 +291,13 @@ function ProposalCard({
         ))}
         {(p.body.override_rules ?? []).map((r, i) => (
           <div key={i}>
-            구간 조건 추가: <code>{JSON.stringify(r.when)}</code> 이면 <code>{JSON.stringify(r.set)}</code>
+            <span title={tip("overrides")}>{TERMS.overrides.label}</span>: <code>{JSON.stringify(r.when)}</code> 이면{" "}
+            <code>{JSON.stringify(r.set)}</code>
           </div>
         ))}
         {(p.body.spec_edits ?? []).map((e, i) => (
           <details key={i}>
-            <summary>명세 섹션 “{e.section}” 수정</summary>
+            <summary>{TERMS.spec.label}의 “{e.section}” 부분 수정</summary>
             <div className="spec-compare">
               <div><div className="tile-label">현재</div><pre>{current?.spec_sections[e.section] ?? ""}</pre></div>
               <div><div className="tile-label">제안</div><pre>{e.text}</pre></div>
@@ -311,9 +315,9 @@ function ProposalCard({
       {sim && !sim.error && sim.before && sim.after && p.status !== "proposed" && (
         <div className="sim">
           <div className="tile-label">
-            시뮬레이션 결과 ({sim.kind === "spec" ? "AI agent 개선 전·후 명세로 실행" : "규칙 엔진 재실행"} · {fmtSeconds(sim.seconds)}
+            미리 돌려본 결과 ({sim.kind === "spec" ? `${TERMS.ai.label}을 고치기 전·후 문서로 실행` : `${TERMS.rule.label}으로 다시 계산`} · {fmtSeconds(sim.seconds)}
             {sim.cost_usd != null && ` · ${fmtUsd(sim.cost_usd)}`}
-            {sim.replayed && " · 저장된 결과 재생"})
+            {sim.replayed && " · 저장된 결과"})
           </div>
           <table className="sim-table">
             <thead><tr><th>지표</th><th className="num">전</th><th className="num">후</th><th className="num">변화</th></tr></thead>
@@ -323,7 +327,7 @@ function ProposalCard({
                 const d = a - b;
                 return (
                   <tr key={s.key}>
-                    <td>{s.label}</td>
+                    <td title={s.tech}>{s.label}</td>
                     <td className="num">{fmtMetric(b, s.format)}</td>
                     <td className="num">{fmtMetric(a, s.format)}</td>
                     <td className="num">{d === 0 ? "–" : `${d > 0 ? "+" : ""}${s.format === "pct" ? `${(d * 100).toFixed(1)}%p` : `${d.toFixed(1)}분`}`}</td>
@@ -331,7 +335,7 @@ function ProposalCard({
                 );
               })}
               <tr>
-                <td>필수조건 위반</td>
+                <td title={tip("violations")}>{TERMS.violations.label}</td>
                 <td className="num">{sim.violations_before ?? 0}건</td>
                 <td className={`num ${sim.violations_after ? "critical-text" : ""}`}>{sim.violations_after ?? 0}건</td>
                 <td />
@@ -340,19 +344,19 @@ function ProposalCard({
           </table>
           {Object.entries(sim.slices ?? {}).map(([fid, s]) => (
             <div key={fid} className="small">
-              {fid} 구간 실패율 {(s.before.fail_rate * 100).toFixed(1)}% → {(s.after.fail_rate * 100).toFixed(1)}% ({s.after.items}건)
+              {fid} 조건의 실패율 {(s.before.fail_rate * 100).toFixed(1)}% → {(s.after.fail_rate * 100).toFixed(1)}% ({s.after.items}건)
             </div>
           ))}
         </div>
       )}
-      {sim?.error && <p className="critical-text small">✕ 시뮬레이션 실패: {sim.error}</p>}
+      {sim?.error && <p className="critical-text small">✕ 미리 돌려보기 실패: {sim.error}</p>}
 
       {estimate && (
         <div className="confirm">
           <p>
-            명세 개선안은 AI agent를 {estimate.level} 레벨로 개선 전·후 {estimate.runs}번 실행합니다 ({estimate.items}건씩).{" "}
+            {TERMS.spec.label}를 고치는 제안은 {TERMS.ai.label}을 {estimate.level} 레벨로 고치기 전·후 {estimate.runs}번 실행합니다 ({estimate.items}건씩).{" "}
             {estimate.replayed ? (
-              <>시연 모드: 저장된 결과를 재생하므로 비용이 들지 않습니다{estimate.estimate_usd != null && <> (원래 실행 비용 {fmtUsd(estimate.estimate_usd)})</>}.</>
+              <>{TERMS.demo.label}: 저장된 결과를 보여주므로 비용이 들지 않습니다{estimate.estimate_usd != null && <> (원래 실행 비용 {fmtUsd(estimate.estimate_usd)})</>}.</>
             ) : estimate.estimate_usd != null ? <>예상 비용 <strong>{fmtUsd(estimate.estimate_usd)}</strong> (이전 실행 기준).</> : estimate.note}
           </p>
           <button className="primary" onClick={confirmSpec} disabled={busy}>확인하고 실행</button>{" "}
@@ -364,23 +368,25 @@ function ProposalCard({
         <div className="actions">
           {p.kind === "spec" && (
             <>
-              <select value={level} onChange={(e) => setLevel(e.target.value)} aria-label="AI 실행 레벨">
+              <select value={level} onChange={(e) => setLevel(e.target.value)} aria-label="AI 실행 레벨" title="하네스 레벨">
                 {Object.keys(harness?.levels ?? { L3: 1 }).map((l) => <option key={l}>{l}</option>)}
               </select>
-              <select value={scopeId} onChange={(e) => setScopeId(e.target.value)} aria-label="AI 실행 범위">
+              <select value={scopeId} onChange={(e) => setScopeId(e.target.value)} aria-label="AI 처리할 건수" title={tip("scope")}>
                 {pilotScopes.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
               </select>
             </>
           )}
-          <button onClick={simulate} disabled={busy}>{p.status === "simulated" ? "다시 시뮬레이션" : "시뮬레이션"}</button>
+          <button onClick={simulate} disabled={busy} title={tip("simulate")}>
+            {p.status === "simulated" ? `다시 ${TERMS.simulate.label}` : TERMS.simulate.label}
+          </button>
           <input className="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="승인·반려 메모" />
           <button className="primary" disabled={busy || p.status !== "simulated"}
-            title={p.status !== "simulated" ? "시뮬레이션 후 승인할 수 있습니다" : undefined}
+            title={p.status !== "simulated" ? "미리 돌려본 뒤 승인할 수 있습니다" : undefined}
             onClick={() => guard("승인 반영 중", async () => {
               const r = await api.approve(p.id, note);
               onApproved(r.kind === "params"
-                ? `params.yaml v${r.decision?.params_version_after}로 반영했습니다. git 커밋은 직접 해주세요.`
-                : "domain-spec.md에 반영했습니다. git 커밋은 직접 해주세요.");
+                ? `${TERMS.params.label}을 v${r.decision?.params_version_after}로 반영했습니다(params.yaml). git 커밋은 직접 해주세요.`
+                : `${TERMS.spec.label}에 반영했습니다(domain-spec.md). git 커밋은 직접 해주세요.`);
             })}>
             승인
           </button>

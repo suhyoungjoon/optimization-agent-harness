@@ -1,12 +1,7 @@
 import type { DomainAdapter, Scope } from "../types";
 import DispatchDataMap from "./DispatchDataMap";
 import DispatchMap from "./DispatchMap";
-import { hhmm } from "./districtMap";
-
-const LABELS: Record<string, string> = {
-  install: "개통", repair: "장애", none: "일반", pole: "승주", outdoor: "옥외", high_risk: "고위험",
-  house: "주택", apartment: "아파트",
-};
+import { VALUE_LABELS as LABELS, hhmm } from "./districtMap";
 
 export const dispatchAdapter: DomainAdapter = {
   ResultView: DispatchMap,
@@ -17,6 +12,11 @@ export const dispatchAdapter: DomainAdapter = {
       { key: "orders", label: "지시서", idField: "id" },
     ],
     hidden: ["polygon"],
+    fieldLabels: {
+      id: "ID", name: "이름", day: "날짜", branch: "지점", work_type: "작업유형", media: "매체", difficulty: "난이도",
+      building_type: "건물유형", desired: "희망시간", x: "x(km)", y: "y(km)", skills: "기술", certs: "자격", cei: "CEI",
+      available: "가능시간",
+    },
     format: (_table, field, value) => {
       if (field === "desired" && typeof value === "number") return hhmm(value);
       if (field === "available" && Array.isArray(value)) return `${hhmm(value[0])}~${hhmm(value[1])}`;
@@ -28,14 +28,25 @@ export const dispatchAdapter: DomainAdapter = {
     View: DispatchDataMap,
   },
   metrics: [
-    { key: "assignment_rate", label: "할당성공률", format: "pct", headline: true },
-    { key: "desired_time_match_rate", label: "희망시간 일치율", format: "pct", headline: true },
-    { key: "avg_travel_min", label: "평균 이동시간", format: "min", headline: true },
-    { key: "worker_utilization", label: "작업자 활용률", format: "pct" },
-    { key: "stage_1_share", label: "1단계 매칭", format: "pct" },
-    { key: "stage_2_share", label: "2단계 매칭", format: "pct" },
-    { key: "stage_3_share", label: "3단계 매칭", format: "pct" },
+    { key: "assignment_rate", label: "배정 성공률", format: "pct", headline: true,
+      tech: "할당성공률: 배정된 지시서 ÷ 전체 지시서" },
+    { key: "desired_time_match_rate", label: "희망시간 준수율", format: "pct", headline: true,
+      tech: "희망시간 일치율: 배정된 지시서 중 고객 희망시각에 정확히 시작한 비율" },
+    { key: "avg_travel_min", label: "평균 이동시간", format: "min", headline: true,
+      tech: "직전 위치에서 지시서까지 이동시간 평균 (직선거리 × 우회계수 ÷ 평균 속도)" },
+    { key: "worker_utilization", label: "작업자 가동률", format: "pct",
+      tech: "작업자 활용률: 작업 시간 합 ÷ 작업자 가능시간 합" },
+    { key: "stage_1_share", label: "조건 그대로 배정", format: "pct", tech: "1단계 매칭 비율 (시간·지역 조건 완화 없음)" },
+    { key: "stage_2_share", label: "조금 완화해 배정", format: "pct", tech: "2단계 매칭 비율 (시간·지역 조건을 한 단계 완화)" },
+    { key: "stage_3_share", label: "많이 완화해 배정", format: "pct", tech: "3단계 매칭 비율 (시간·지역 조건을 최대로 완화)" },
   ],
+  reasonNames: {
+    NO_SKILL: "기술 보유자 없음",
+    NO_CERT: "자격 보유자 없음",
+    NO_TIME_MATCH: "희망시간에 가능한 사람 없음",
+    OUT_OF_AREA: "갈 수 있는 거리 밖",
+    CAPACITY: "일정이 꽉 참",
+  },
   // 지시서 ID는 "D01-O015" 형식: 날짜별로 묶는다
   scopes: (_instance, itemIds) => {
     const days = new Map<string, string[]>();

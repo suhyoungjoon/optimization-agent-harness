@@ -1,23 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { TERMS } from "../terms";
 import type { DecisionRecord, Run, TraceRecord } from "../types";
 
 type Filter = "all" | "retried" | "held" | "failed";
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "전체" },
-  { id: "retried", label: "재시도 있음" },
+  { id: "retried", label: "다시 시도한 건" },
   { id: "held", label: "차단·승인 대기" },
-  { id: "failed", label: "미할당" },
+  { id: "failed", label: TERMS.unassigned.label },
 ];
 
-const KIND_LABELS: Record<TraceRecord["kind"], string> = {
-  llm: "LLM 응답",
-  tool_call: "도구 호출",
-  validate: "검증",
-  retry: "재시도",
-  guardrail: "가드레일",
-  approval: "승인",
+const KIND_LABELS: Record<TraceRecord["kind"], [string, string]> = {   // [쉬운 말, 원래 용어]
+  llm: ["AI 응답", "LLM 응답"],
+  tool_call: ["조회", "도구 호출"],
+  validate: [TERMS.validateLoop.label, "검증"],
+  retry: ["다시 시도", "재시도"],
+  guardrail: [TERMS.guardrail.label, "가드레일"],
+  approval: ["승인", "승인"],
 };
 
 const STATUS_MARK: Record<DecisionRecord["status"], string> = {
@@ -41,6 +42,7 @@ export default function TracePanel({
   selectedItem,
   onSelectItem,
   reasonLabels,
+  reasonDetails = {},
 }: {
   runs: Run[];
   ruleDecisions: DecisionRecord[];
@@ -48,6 +50,7 @@ export default function TracePanel({
   selectedItem: string | null;
   onSelectItem: (id: string) => void;
   reasonLabels: Record<string, string>;
+  reasonDetails?: Record<string, string>;
 }) {
   const done = runs.filter((r) => r.status === "done");
   const preferred = [...done].reverse().find((r) => r.level === "L5") ?? done[done.length - 1];
@@ -73,7 +76,9 @@ export default function TracePanel({
   if (!run) {
     return (
       <section className="panel">
-        <p className="muted empty">비교 탭에서 AI agent를 실행하면 결정 과정을 여기서 볼 수 있습니다. 모든 단계를 보려면 L5로 실행하세요.</p>
+        <p className="muted empty">
+          비교 탭에서 {TERMS.ai.label}을 실행하면 결정 과정을 여기서 볼 수 있습니다. 모든 단계를 보려면 {TERMS.trace.label}이 켜진 레벨(L5)로 실행하세요.
+        </p>
       </section>
     );
   }
@@ -108,7 +113,7 @@ export default function TracePanel({
               <button className={d.item_id === item ? "selected" : undefined} onClick={() => onSelectItem(d.item_id)}>
                 <span className={`mark mark-${d.status}`} aria-hidden>{STATUS_MARK[d.status]}</span>
                 {d.item_id}
-                {(d.metrics.retries ?? 0) > 0 && <span className="badge">재시도 {d.metrics.retries}</span>}
+                {(d.metrics.retries ?? 0) > 0 && <span className="badge">다시 시도 {d.metrics.retries}</span>}
               </button>
             </li>
           ))}
@@ -116,13 +121,14 @@ export default function TracePanel({
 
         <div className="timeline">
           <div className="decision-pair">
-            <DecisionCard title={`AI agent (${run.level})`} record={aiRecord} reasonLabels={reasonLabels} />
-            <DecisionCard title="규칙 agent" record={ruleRecord} reasonLabels={reasonLabels} />
+            <DecisionCard title={`${TERMS.ai.label} (${run.level})`} record={aiRecord} reasonLabels={reasonLabels} reasonDetails={reasonDetails} />
+            <DecisionCard title={TERMS.rule.label} record={ruleRecord} reasonLabels={reasonLabels} reasonDetails={reasonDetails} />
           </div>
           {error && <p className="critical-text">✕ {error}</p>}
           {traces && traces.length === 0 && (
             <p className="muted">
-              이 실행은 trace=minimal이라 단계 기록이 없습니다({run.level}). L5로 실행하면 LLM 응답·도구 호출·검증·재시도·가드레일이 모두 기록됩니다.
+              이 실행({run.level})은 최종 결과만 남겨서 단계 기록이 없습니다. {TERMS.trace.label}이 켜진 레벨(L5)로 실행하면
+              AI 응답·조회·자동 검사·다시 시도·위험 결정 막기가 모두 기록됩니다.
             </p>
           )}
           <ol className="steps">
@@ -130,7 +136,7 @@ export default function TracePanel({
               <li key={t.step} className={`step step-${t.kind}`}>
                 <div className="step-head">
                   <span className="step-no">{t.step + 1}</span>
-                  <strong>{KIND_LABELS[t.kind]}</strong>
+                  <strong title={`원래 용어: ${KIND_LABELS[t.kind][1]}`}>{KIND_LABELS[t.kind][0]}</strong>
                 </div>
                 <StepBody trace={t} />
               </li>
@@ -146,25 +152,31 @@ function DecisionCard({
   title,
   record,
   reasonLabels,
+  reasonDetails,
 }: {
   title: string;
   record?: DecisionRecord;
   reasonLabels: Record<string, string>;
+  reasonDetails: Record<string, string>;
 }) {
   const d = record?.decision;
   return (
     <div className="decision-card">
       <div className="tile-label">{title}</div>
       {!record ? (
-        <p className="muted">기록 없음 (같은 범위로 실행되지 않음)</p>
+        <p className="muted">기록 없음 (같은 건수로 실행되지 않음)</p>
       ) : (
         <>
           <div className={{ success: "", pending_approval: "warning-text", failed: "critical-text", blocked: "critical-text" }[record.status]}>
             {STATUS_MARK[record.status]}{" "}
             {d && record.status !== "failed"
               ? `${String(d.worker_id)} ${String(d.start_time)} (${String(d.matching_stage ?? "?")}단계)`
-              : "미할당"}
-            {record.reason_code && ` · ${record.reason_code}: ${reasonLabels[record.reason_code] ?? ""}`}
+              : TERMS.unassigned.label}
+            {record.reason_code && (
+              <span title={`${reasonDetails[record.reason_code] ?? ""} (${record.reason_code})`}>
+                {" · "}{reasonLabels[record.reason_code] ?? record.reason_code}
+              </span>
+            )}
           </div>
           <p className="evidence">{record.evidence}</p>
         </>
@@ -192,8 +204,8 @@ function StepBody({ trace }: { trace: TraceRecord }) {
         {out?.error ? <p className="critical-text">{String(out.error)}</p> : null}
         <div className="muted small">
           {String(out?.stop_reason ?? "")}
-          {usage && ` · 입력 ${usage.input_tokens ?? 0} · 캐시 읽기 ${usage.cache_read_input_tokens ?? 0} · 출력 ${usage.output_tokens ?? 0}`}
-          {out?.from_cache ? " · 응답 캐시" : ""}
+          {usage && ` · 입력 ${usage.input_tokens ?? 0} · 캐시 읽기 ${usage.cache_read_input_tokens ?? 0} · 출력 ${usage.output_tokens ?? 0} (토큰)`}
+          {out?.from_cache ? " · 저장된 응답 재사용" : ""}
         </div>
       </div>
     );
@@ -212,7 +224,7 @@ function StepBody({ trace }: { trace: TraceRecord }) {
   if (trace.kind === "validate") {
     const violations = (trace.output as { rule: string; message: string }[]) ?? [];
     return violations.length === 0 ? (
-      <p className="good-text">✓ 위반 없음</p>
+      <p className="good-text">✓ 규칙 위반 없음</p>
     ) : (
       <ul className="critical-text">
         {violations.map((v, i) => (

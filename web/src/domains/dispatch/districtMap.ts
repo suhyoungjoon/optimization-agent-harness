@@ -42,6 +42,13 @@ const TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
 const BOUNDARY_ATTRIBUTION = "행정구역 경계: 통계청(2013)";
 
+// 값 코드 → 한글 이름 (데이터 표와 지도 설명에서 같이 쓴다)
+export const VALUE_LABELS: Record<string, string> = {
+  install: "개통", repair: "장애", none: "일반", pole: "승주", outdoor: "옥외", high_risk: "고위험",
+  house: "주택", apartment: "아파트",
+};
+export const valueLabel = (v: string) => VALUE_LABELS[v] ?? v;
+
 export const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 export const branchColor = (b: string) => `var(--series-${BRANCH_SLOT[b] ?? 1})`;
 export const slot = (b: string) => `b${BRANCH_SLOT[b] ?? 1}`;
