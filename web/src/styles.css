@@ -451,3 +451,50 @@ details.more > .more-body { margin-top: 8px; }
 .event-log { list-style: none; margin: 0; padding: 6px 8px; max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--page); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .event-log li { padding: 1px 0; }
 .wf-node.wf-check { border-left-color: var(--warning); }
+
+/* 가로 그래프 (M11, React Flow + dagre) */
+.gc-panel { margin-bottom: 12px; }
+.gc-panel h2 { margin-bottom: 4px; }
+.gc-canvas { width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--page); }
+.gc-canvas .react-flow { --xy-background-color: var(--page); --xy-controls-button-background-color: var(--surface);
+  --xy-controls-button-color: var(--text-primary); --xy-controls-button-border-color: var(--border); --xy-handle-background-color: transparent;
+  --xy-handle-border-color: transparent; }
+.gc-canvas .react-flow__handle { width: 4px; height: 4px; min-width: 0; min-height: 0; opacity: 0; }
+.gc-card { width: 100%; height: 100%; box-sizing: border-box; background: var(--surface); border: 1px solid var(--border);
+  border-left: 4px solid var(--axis); border-radius: 8px; padding: 4px 8px; font-size: 12px; color: var(--text-primary);
+  overflow: hidden; cursor: pointer; }
+.react-flow__node-card { width: auto; }
+.gc-card.gc-ai { border-left-color: var(--series-1); }
+.gc-card.gc-check { border-left-color: var(--warning); }
+.gc-card.gc-human { border-left-color: var(--series-3); }
+.gc-card.gc-idle { opacity: 0.62; }
+.gc-card.gc-done { opacity: 1; }
+.gc-card.gc-next, .gc-card.gc-waiting { box-shadow: 0 0 0 2px var(--series-1); opacity: 1; }
+.gc-card.gc-running { box-shadow: 0 0 0 3px var(--series-1); opacity: 1; animation: wf-pulse 0.8s ease-in-out infinite alternate; }
+.gc-card.gc-error { box-shadow: 0 0 0 2px var(--critical); }
+.gc-card.gc-selected { outline: 2px dashed var(--series-1); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .gc-card.gc-running { animation: none; } }
+.gc-head { display: flex; align-items: center; gap: 4px; font-size: 13px; white-space: nowrap; }
+.gc-head strong { overflow: hidden; text-overflow: ellipsis; }
+.gc-mark { color: var(--good-text); }
+.gc-error .gc-mark { color: var(--critical); }
+.gc-badge { margin-left: auto; font-size: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 0 5px; color: var(--text-secondary); }
+.gc-sub { display: flex; gap: 6px; font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; }
+.gc-summary { font-size: 11px; color: var(--text-secondary); margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; }
+.gc-terminal { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; border-radius: 15px;
+  background: var(--surface); border: 1px solid var(--axis); font-size: 11px; color: var(--text-secondary); }
+.gc-edge-label { position: absolute; font-size: 10px; color: var(--text-secondary); background: var(--surface); padding: 0 3px;
+  border-radius: 3px; pointer-events: none; }
+.gc-edge-active path.react-flow__edge-path { stroke-width: 2.5; }
+.gc-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; align-items: center; }
+.gc-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--axis); vertical-align: -1px; }
+.gc-dot.gc-ai { background: var(--series-1); }
+.gc-dot.gc-check { background: var(--warning); }
+.gc-dot.gc-human { background: var(--series-3); }
+.gc-legend-active { color: var(--series-1); font-weight: 600; }
+.ag-bottom { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 12px; align-items: start; }
+@media (max-width: 900px) { .ag-bottom { grid-template-columns: 1fr; } }
+.agents .wf-bar { position: static; margin-bottom: 8px; }
+.gc-canvas .react-flow__attribution { background: transparent; }
+.gc-canvas .react-flow__attribution a { color: var(--text-muted); }

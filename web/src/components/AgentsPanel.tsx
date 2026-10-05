@@ -1,22 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { DomainAdapter } from "../domains/types";
-import type { AgentEvent, AgentsGraph, AgentsRun, DomainInfo, HarnessInfo, WorkflowEdge } from "../types";
+import type { AgentEvent, AgentsGraph, AgentsRun, DomainInfo, HarnessInfo } from "../types";
 import { TERMS, tip } from "../terms";
+import GraphCanvas, { type NodeView } from "./GraphCanvas";
 import { usePoll } from "./usePoll";
 import { StepBar } from "./WorkflowPanel";
 
-// LangGraph agents (M10): 배정·분석·개선 제안 에이전트의 내부까지 LangGraph 하위 그래프로 만든 별도 탭.
-// 왼쪽은 상위 그래프(에이전트 단위로 멈춤), 오른쪽은 고른 에이전트의 내부 그래프와 실시간 진행 기록.
+// LangGraph agents (M10, 가로 그래프 M11): 배정·분석·개선 제안 에이전트의 내부까지 LangGraph 하위 그래프로 만든 별도 탭.
+// 위 = 상위 그래프(에이전트 단위로 멈춤), 아래 = 고른 에이전트의 내부 그래프. 둘 다 왼쪽→오른쪽 그래프로 그리고,
+// 방금 지나간 연결은 움직이는 선으로 보여준다. 맨 아래는 고른 단계의 결과와 실시간 진행 기록.
 // 그림은 모두 서버가 컴파일한 그래프(get_graph)로 그린다. 하네스 레벨을 바꾸면 배정 에이전트 그래프 모양이 바뀐다.
 
-const KIND: Record<string, { name: string; cls: string }> = {
-  ai: { name: "AI", cls: "wf-ai" },
-  rule: { name: "규칙 계산", cls: "wf-rule" },
-  human: { name: "사람", cls: "wf-human" },
-  tool: { name: "도구·흐름", cls: "wf-rule" },
-  check: { name: "검사", cls: "wf-check" },
-};
 const AGENT_NAMES: Record<string, string> = {
   dispatch_agent: "배정 에이전트",
   analysis_agent: "분석 에이전트",
@@ -104,15 +99,33 @@ export default function AgentsPanel({
     );
   }
 
-  const topNodes = (graph?.top.nodes ?? []).filter((n) => !n.id.startsWith("__"));
-  const label = (id: string) => (id === "__end__" ? "끝" : graph?.top.nodes.find((n) => n.id === id)?.label ?? id);
-  // 오른쪽에 보일 에이전트: 사람이 고른 것 > 지금 실행 중인 것 > 다음 차례 > 첫 에이전트
+  const topLabel = (id: string) => (id === "__end__" ? "끝" : graph?.top.nodes.find((n) => n.id === id)?.label ?? id);
+  const isAgent = (id: string | null | undefined) => !!id && (!!graph?.agents[id] || id === "simulate");
+  // 아래 줄에 보일 에이전트: 사람이 고른 것 > 지금 실행 중인 것 > 다음 차례 > 배정 에이전트
   const running = run?.status === "running" ? run.current : null;
-  const liveAgent = running && (graph?.agents[running] || running === "simulate") ? running : null;
+  const liveAgent = isAgent(running) ? running : null;
   const nextAgent = run?.next[0] && graph?.agents[run.next[0]] ? run.next[0] : null;
-  const shown = picked ?? liveAgent ?? nextAgent ?? "dispatch_agent";
+  const shown = (isAgent(picked) ? picked : null) ?? liveAgent ?? nextAgent ?? "dispatch_agent";
+  // 결과 칸에 보일 단계: 고른 노드 > 실행 중 > 마지막으로 끝난 단계
+  const lastStep = run?.steps[run.steps.length - 1]?.node ?? null;
+  const focus = picked ?? running ?? lastStep;
   const levels = Object.keys(harness?.levels ?? { L3: 1 });
   const demo = graph?.demo ?? false;
+
+  // 상위 그래프: 노드 상태·결과 한 줄, 방금 지나간 연결 (마지막으로 끝난 단계 → 지금/다음 단계)
+  const topViews: Record<string, NodeView> = {};
+  for (const n of graph?.top.nodes ?? []) {
+    const steps = run?.steps.filter((s) => s.node === n.id) ?? [];
+    topViews[n.id] = {
+      state: nodeState(n.id, run),
+      summary: steps.length ? steps[steps.length - 1].lines[0] : undefined,
+      badge: steps.length > 1 ? `${steps.length}회` : undefined,
+      selected: n.id === shown || n.id === picked,
+    };
+  }
+  const topActive = new Set<string>();
+  const towards = running ?? run?.next[0];
+  if (run && towards) topActive.add(`${lastStep ?? "__start__"}->${towards}`);
 
   return (
     <section className="workflow agents">
@@ -133,9 +146,9 @@ export default function AgentsPanel({
         <label title="처리 순서 앞에서부터 이 건수만 배정 에이전트가 처리한다 (비용 때문)">
           처리할 건수 <input type="number" min={1} max={200} value={form.items} onChange={(e) => setForm({ ...form, items: Number(e.target.value) })} />
         </label>
-        <label title="배정 에이전트 그래프의 모양을 정한다 (바꾸면 오른쪽 그림이 바로 바뀐다)">
+        <label title="배정 에이전트 그래프의 모양을 정한다 (바꾸면 아래 그래프가 바로 다시 그려진다)">
           하네스 레벨{" "}
-          <select value={form.level} onChange={(e) => setForm({ ...form, level: e.target.value })}
+          <select value={form.level} onChange={(e) => { setForm({ ...form, level: e.target.value }); setPicked("dispatch_agent"); }}
             disabled={!!run && run.status !== "done"}>
             {levels.map((l) => <option key={l}>{l}</option>)}
           </select>
@@ -167,63 +180,35 @@ export default function AgentsPanel({
         {run && <span className="muted small">AI: {run.llm === "fake" ? "가짜 AI (수치는 AI 성능과 무관)" : "Claude API"}</span>}
       </div>
 
-      <div className="wf-split">
-        <div className="wf-flow">
-          <StepBar run={run} nextLabel={run?.next[0] ? label(run.next[0]) : null}
-            currentLabel={run?.current ? label(run.current) : null} note={note} setNote={setNote} onStep={step}
-            idleText="입력을 고르고 [에이전트 준비]를 누르면 첫 단계 앞에서 멈춥니다. 에이전트 하나가 끝날 때마다 멈춥니다."
-            doneText="에이전트 노드를 누르면 오른쪽에서 내부 그래프와 기록을 다시 볼 수 있습니다." />
-          <ol className="wf-nodes" aria-label="상위 그래프">
-            {topNodes.map((n, i) => {
-              const st = nodeState(n.id, run);
-              const steps = run?.steps.filter((s) => s.node === n.id) ?? [];
-              const out = graph!.top.edges.filter((e) => e.source === n.id && e.conditional);
-              const isAgent = !!graph!.agents[n.id];
-              return (
-                <li key={n.id}>
-                  {i > 0 && <div className="wf-arrow" aria-hidden>↓</div>}
-                  <div className={`wf-node ${KIND[n.kind ?? "rule"]?.cls ?? ""} wf-${st}${shown === n.id ? " wf-shown" : ""}`}>
-                    <div className="wf-head">
-                      <span className="wf-mark" aria-hidden>{MARK[st]}</span>
-                      <strong>{n.label ?? n.id}</strong>
-                      <span className="wf-kind">{isAgent ? "AI 에이전트 (하위 그래프)" : KIND[n.kind ?? "rule"]?.name}</span>
-                      <code className="wf-id muted">{n.id}</code>
-                      {(isAgent || n.id === "simulate") && (
-                        <button className="link-button small" aria-pressed={shown === n.id} onClick={() => setPicked(picked === n.id ? null : n.id)}>
-                          내부 보기 →
-                        </button>
-                      )}
-                    </div>
-                    {steps.length === 0 && <p className="muted small">{n.description}</p>}
-                    {steps.map((s, k) => (
-                      <ul key={k} className="wf-lines small">
-                        {steps.length > 1 && <li className="muted">{k + 1}회차</li>}
-                        {s.lines.map((line, j) => <li key={j}>{line}</li>)}
-                      </ul>
-                    ))}
-                    {st === "error" && run?.error && <p className="critical-text small">✕ {run.error} — [다시 실행]</p>}
-                    {out.length > 0 && (
-                      <ul className="wf-branches small" aria-label="조건부 연결">
-                        {out.map((e) => <li key={e.target}>◇ {e.label ?? "다음"} → {label(e.target)}</li>)}
-                      </ul>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
-        </div>
+      <StepBar run={run} nextLabel={run?.next[0] ? topLabel(run.next[0]) : null}
+        currentLabel={run?.current ? topLabel(run.current) : null} note={note} setNote={setNote} onStep={step}
+        idleText="입력을 고르고 [에이전트 준비]를 누르면 첫 단계 앞에서 멈춥니다. 에이전트 하나가 끝날 때마다 멈춥니다."
+        doneText="그래프의 노드를 누르면 그 단계의 결과와 에이전트 내부를 다시 볼 수 있습니다." />
 
-        <aside className="wf-inner">
-          <AgentInside graph={graph} agent={shown} run={run} events={events} live={liveAgent === shown} />
-        </aside>
+      {graph && (
+        <div className="panel gc-panel">
+          <h2>상위 그래프 <span className="muted small">(StateGraph · 노드를 누르면 아래에 내부·결과)</span></h2>
+          <GraphCanvas ariaLabel="상위 그래프" nodes={graph.top.nodes} edges={graph.top.edges} views={topViews}
+            activeEdges={topActive} onNodeClick={(id) => !id.startsWith("__") && setPicked(picked === id ? null : id)}
+            height={230} nodeWidth={160} nodeHeight={74} minFitZoom={0.82} follow={towards ?? lastStep ?? "__start__"} />
+          <Legend />
+        </div>
+      )}
+
+      <AgentInside graph={graph} agent={shown} run={run} events={events} live={liveAgent === shown} />
+
+      <div className="ag-bottom">
+        <div className="panel">
+          <h2>{focus ? topLabel(focus) : "단계 결과"} <span className="muted small">{focus ? "결과" : ""}</span></h2>
+          <StepResult run={run} node={focus} description={graph?.top.nodes.find((n) => n.id === focus)?.description} />
+        </div>
+        <EventLog agent={shown} events={events} live={liveAgent === shown} graph={graph} />
       </div>
     </section>
   );
 }
 
-type NodeState = "done" | "next" | "running" | "error" | "waiting" | "idle";
-const MARK: Record<NodeState, string> = { done: "✓", next: "▶", running: "…", error: "✕", waiting: "⏸", idle: "○" };
+type NodeState = NonNullable<NodeView["state"]>;
 
 function nodeState(id: string, run: AgentsRun | null): NodeState {
   if (!run) return "idle";
@@ -233,7 +218,37 @@ function nodeState(id: string, run: AgentsRun | null): NodeState {
   return "idle";
 }
 
-// 고른 에이전트의 내부 그래프(하위 그래프)와 실시간 진행 기록
+function Legend() {
+  return (
+    <div className="gc-legend small muted" aria-label="범례">
+      <span><i className="gc-dot gc-ai" /> AI</span>
+      <span><i className="gc-dot gc-check" /> 검사</span>
+      <span><i className="gc-dot gc-rule" /> 규칙 계산·도구</span>
+      <span><i className="gc-dot gc-human" /> 사람</span>
+      <span>── 바로 연결 · ╌╌ 조건부 연결 (라벨 = 갈래) · 아래로 도는 선 = 되돌아감</span>
+      <span className="gc-legend-active">━ 방금 지나간 연결</span>
+    </div>
+  );
+}
+
+function StepResult({ run, node, description }: { run: AgentsRun | null; node: string | null; description?: string }) {
+  const steps = (node && run?.steps.filter((s) => s.node === node)) || [];
+  if (!node) return <p className="muted small">실행하면 단계마다 결과가 여기에 나옵니다.</p>;
+  if (steps.length === 0) return <p className="muted small">{description}</p>;
+  return (
+    <>
+      {steps.map((s, k) => (
+        <ul key={k} className="wf-lines small">
+          {steps.length > 1 && <li className="muted">{k + 1}회차</li>}
+          {s.lines.map((line, j) => <li key={j}>{line}</li>)}
+        </ul>
+      ))}
+      {run?.error && run.next[0] === node && <p className="critical-text small">✕ {run.error} — [다시 실행]</p>}
+    </>
+  );
+}
+
+// 고른 에이전트의 내부 그래프(하위 그래프): 노드별 지나간 횟수, 지금 노드, 방금 지나간 연결
 function AgentInside({ graph, agent, run, events, live }: {
   graph: AgentsGraph | null;
   agent: string;
@@ -241,50 +256,56 @@ function AgentInside({ graph, agent, run, events, live }: {
   events: AgentEvent[];
   live: boolean;
 }) {
-  const logRef = useRef<HTMLOListElement>(null);
-  const mine = events.filter((e) => e.agent === agent);
-  const last = mine[mine.length - 1];
-  useEffect(() => {
-    const el = logRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [mine.length]);
   // 미리 돌려보기는 배정 에이전트 하위 그래프를 다시 쓴다
   const sub = graph?.agents[agent === "simulate" ? "dispatch_agent" : agent];
   if (!sub) return null;
-  const nodes = sub.nodes.filter((n) => !n.id.startsWith("__"));
+  const mine = events.filter((e) => e.agent === agent);
+  const last = mine[mine.length - 1];
+  const prev = mine[mine.length - 2];
   const counts = run?.counts[agent] ?? {};
-  const name = (id: string) => (id === "__end__" ? "끝" : id === "__start__" ? "시작" : sub.nodes.find((n) => n.id === id)?.label ?? id);
-  const edgesFrom = (id: string): WorkflowEdge[] => sub.edges.filter((e) => e.source === id);
-
+  const views: Record<string, NodeView> = {};
+  for (const n of sub.nodes) {
+    const visits = counts[n.id] ?? 0;
+    views[n.id] = {
+      state: live && last?.node === n.id ? "running" : visits ? "done" : "idle",
+      badge: visits ? `${visits}회` : undefined,
+      summary: [...mine].reverse().find((e) => e.node === n.id)?.text,
+    };
+  }
+  const active = new Set<string>();
+  if (last && prev) active.add(`${prev.node}->${last.node}`);
+  if (last && !prev) active.add(`__start__->${last.node}`);
+  const dispatch = agent === "dispatch_agent" || agent === "simulate";
   return (
-    <div className="panel">
+    <div className="panel gc-panel">
       <h2>
         {AGENT_NAMES[agent] ?? agent} 내부{" "}
-        <span className="muted small">(LangGraph 하위 그래프{agent === "dispatch_agent" || agent === "simulate" ? ` · 하네스 레벨 ${graph?.level}` : ""})</span>
+        <span className="muted small">(LangGraph 하위 그래프{dispatch ? ` · 하네스 레벨 ${graph?.level}` : ""}{live ? " · 실행 중" : ""})</span>
       </h2>
       <p className="muted small">
-        {agent === "dispatch_agent" || agent === "simulate"
+        {dispatch
           ? "지시서마다 이 그래프를 한 바퀴 돈다. 레벨을 올리면 조회 도구 → 자동 검사·다시 시도 → 위험 결정 막기 → 과정 저장 노드가 붙는다."
           : "AI 응답 ⇄ 도구를 오가다 제출하면 검사한다. 분석·개선 제안 에이전트가 같은 틀(build_tool_agent)을 쓴다."}
       </p>
-      <ol className="inner-nodes" aria-label="에이전트 내부 그래프">
-        {nodes.map((n) => {
-          const active = live && last?.node === n.id;
-          const visits = counts[n.id] ?? 0;
-          return (
-            <li key={n.id} className={`inner-node ${KIND[n.kind ?? "tool"]?.cls ?? ""}${active ? " inner-active" : ""}${visits ? " inner-visited" : ""}`}>
-              <div className="wf-head">
-                <strong>{n.label ?? n.id}</strong>
-                <code className="wf-id muted">{n.id}</code>
-                {visits > 0 && <span className="badge" title="이 노드를 지나간 횟수">{visits}회</span>}
-              </div>
-              <InnerEdges edges={edgesFrom(n.id)} name={name} />
-            </li>
-          );
-        })}
-      </ol>
-      <h3 className="small">진행 기록 {live && <span className="muted">(실시간)</span>}</h3>
-      <ol className="event-log small" ref={logRef} aria-label="에이전트 진행 기록" aria-live="off">
+      <GraphCanvas ariaLabel={`${AGENT_NAMES[agent] ?? agent} 내부 그래프`} nodes={sub.nodes} edges={sub.edges}
+        views={views} activeEdges={active} height={360} nodeWidth={150} nodeHeight={70} minFitZoom={0.6} padding={0.24} />
+    </div>
+  );
+}
+
+function EventLog({ agent, events, live, graph }: { agent: string; events: AgentEvent[]; live: boolean; graph: AgentsGraph | null }) {
+  const ref = useRef<HTMLOListElement>(null);
+  const mine = events.filter((e) => e.agent === agent);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [mine.length]);
+  const sub = graph?.agents[agent === "simulate" ? "dispatch_agent" : agent];
+  const name = (id: string) => sub?.nodes.find((n) => n.id === id)?.label ?? id;
+  return (
+    <div className="panel">
+      <h2>진행 기록 <span className="muted small">{AGENT_NAMES[agent] ?? agent}{live ? " · 실시간" : ""}</span></h2>
+      <ol className="event-log small" ref={ref} aria-label="에이전트 진행 기록">
         {mine.length === 0 && <li className="muted">아직 실행하지 않았습니다.</li>}
         {mine.slice(-200).map((e) => (
           <li key={e.i} className={e.text.startsWith("✕") ? "critical-text" : e.text.startsWith("✓") ? "good-text" : undefined}>
@@ -292,17 +313,6 @@ function AgentInside({ graph, agent, run, events, live }: {
           </li>
         ))}
       </ol>
-    </div>
-  );
-}
-
-function InnerEdges({ edges, name }: { edges: WorkflowEdge[]; name: (id: string) => string }) {
-  if (edges.length === 0) return null;
-  return (
-    <div className="inner-edges small muted">
-      {edges.map((e) => (
-        <span key={e.target}>{e.conditional ? "◇ " : "→ "}{e.label ? `${e.label} → ` : ""}{name(e.target)}</span>
-      ))}
     </div>
   );
 }
