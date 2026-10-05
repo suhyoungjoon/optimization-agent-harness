@@ -56,4 +56,6 @@ export interface DomainAdapter {
   scopes: (instance: unknown, itemIds: string[]) => Scope[];
   data?: DomainData; // [M6 추가]
   reasonNames?: Record<string, string>; // [M8 추가] 도메인 사유 코드 → 짧은 쉬운 이름 (없으면 dimensions.yaml 설명 문장)
+  valueNames?: Record<string, string>;  // [M8 추가] 조건 값 → 화면 이름 (예: boundary → 경계 지역). 없으면 값 그대로
+  decisionText?: (decision: Record<string, unknown>) => string; // [M8 추가] 결정 한 줄 요약 (결정 과정 탭). 없으면 필드 값을 나열
 }

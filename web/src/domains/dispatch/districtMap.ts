@@ -45,7 +45,7 @@ const BOUNDARY_ATTRIBUTION = "행정구역 경계: 통계청(2013)";
 // 값 코드 → 한글 이름 (데이터 표와 지도 설명에서 같이 쓴다)
 export const VALUE_LABELS: Record<string, string> = {
   install: "개통", repair: "장애", none: "일반", pole: "승주", outdoor: "옥외", high_risk: "고위험",
-  house: "주택", apartment: "아파트",
+  house: "주택", apartment: "아파트", core: "관할 안쪽", boundary: "경계 지역",
 };
 export const valueLabel = (v: string) => VALUE_LABELS[v] ?? v;
 

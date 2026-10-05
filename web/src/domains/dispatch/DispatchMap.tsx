@@ -10,7 +10,7 @@ type Hover =
 
 // 매칭 단계 → 쉬운 말 (params.yaml의 matching: 단계가 올라갈수록 시간·지역 조건을 완화)
 const STAGE_NAMES: Record<string, string> = { "1": "조건 그대로", "2": "조금 완화", "3": "많이 완화" };
-const stageName = (stage: unknown) => STAGE_NAMES[String(stage)] ?? `${String(stage)}단계`;
+export const stageName = (stage: unknown) => STAGE_NAMES[String(stage)] ?? `${String(stage)}단계`;
 
 export default function DispatchMap({ instance, decisions, reasonLabels, reasonDetails = {}, selected, onSelect, highlight }: ResultViewProps) {
   const inst = instance as Instance;

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { TERMS } from "../terms";
+import Details from "./Details";
 import type { DecisionRecord, Run, TraceRecord } from "../types";
 
 type Filter = "all" | "retried" | "held" | "failed";
@@ -43,6 +44,7 @@ export default function TracePanel({
   onSelectItem,
   reasonLabels,
   reasonDetails = {},
+  decisionText = defaultDecisionText,
 }: {
   runs: Run[];
   ruleDecisions: DecisionRecord[];
@@ -51,6 +53,7 @@ export default function TracePanel({
   onSelectItem: (id: string) => void;
   reasonLabels: Record<string, string>;
   reasonDetails?: Record<string, string>;
+  decisionText?: (decision: Record<string, unknown>) => string; // 도메인 어댑터가 정하는 결정 한 줄
 }) {
   const done = runs.filter((r) => r.status === "done");
   const preferred = [...done].reverse().find((r) => r.level === "L5") ?? done[done.length - 1];
@@ -120,9 +123,12 @@ export default function TracePanel({
         </ul>
 
         <div className="timeline">
+          {aiRecord && <TraceVerdict ai={aiRecord} rule={ruleRecord} traces={traces} />}
           <div className="decision-pair">
-            <DecisionCard title={`${TERMS.ai.label} (${run.level})`} record={aiRecord} reasonLabels={reasonLabels} reasonDetails={reasonDetails} />
-            <DecisionCard title={TERMS.rule.label} record={ruleRecord} reasonLabels={reasonLabels} reasonDetails={reasonDetails} />
+            <DecisionCard title={`${TERMS.ai.label} (${run.level})`} record={aiRecord} reasonLabels={reasonLabels} reasonDetails={reasonDetails}
+              decisionText={decisionText} />
+            <DecisionCard title={TERMS.rule.label} record={ruleRecord} reasonLabels={reasonLabels} reasonDetails={reasonDetails}
+              decisionText={decisionText} />
           </div>
           {error && <p className="critical-text">✕ {error}</p>}
           {traces && traces.length === 0 && (
@@ -131,17 +137,24 @@ export default function TracePanel({
               AI 응답·조회·자동 검사·다시 시도·위험 결정 막기가 모두 기록됩니다.
             </p>
           )}
-          <ol className="steps">
-            {traces?.map((t) => (
-              <li key={t.step} className={`step step-${t.kind}`}>
-                <div className="step-head">
-                  <span className="step-no">{t.step + 1}</span>
-                  <strong title={`원래 용어: ${KIND_LABELS[t.kind][1]}`}>{KIND_LABELS[t.kind][0]}</strong>
-                </div>
-                <StepBody trace={t} />
-              </li>
-            ))}
-          </ol>
+          {traces && traces.length > 0 && (
+            <>
+              <StepFlow traces={traces} />
+              <Details summary={`상세보기 (단계 ${traces.length}개 · AI 응답 원문 · 조회 결과 · 토큰)`}>
+                <ol className="steps">
+                  {traces.map((t) => (
+                    <li key={t.step} className={`step step-${t.kind}`}>
+                      <div className="step-head">
+                        <span className="step-no">{t.step + 1}</span>
+                        <strong title={`원래 용어: ${KIND_LABELS[t.kind][1]}`}>{KIND_LABELS[t.kind][0]}</strong>
+                      </div>
+                      <StepBody trace={t} />
+                    </li>
+                  ))}
+                </ol>
+              </Details>
+            </>
+          )}
         </div>
       </div>
     </section>
@@ -153,11 +166,13 @@ function DecisionCard({
   record,
   reasonLabels,
   reasonDetails,
+  decisionText,
 }: {
   title: string;
   record?: DecisionRecord;
   reasonLabels: Record<string, string>;
   reasonDetails: Record<string, string>;
+  decisionText: (decision: Record<string, unknown>) => string;
 }) {
   const d = record?.decision;
   return (
@@ -170,7 +185,7 @@ function DecisionCard({
           <div className={{ success: "", pending_approval: "warning-text", failed: "critical-text", blocked: "critical-text" }[record.status]}>
             {STATUS_MARK[record.status]}{" "}
             {d && record.status !== "failed"
-              ? `${String(d.worker_id)} ${String(d.start_time)} (${String(d.matching_stage ?? "?")}단계)`
+              ? decisionText(d)
               : TERMS.unassigned.label}
             {record.reason_code && (
               <span title={`${reasonDetails[record.reason_code] ?? ""} (${record.reason_code})`}>
@@ -182,6 +197,78 @@ function DecisionCard({
         </>
       )}
     </div>
+  );
+}
+
+const STATUS_TEXT: Record<DecisionRecord["status"], string> = {
+  success: "배정",
+  failed: TERMS.unassigned.label,
+  blocked: "차단",
+  pending_approval: "승인 대기",
+};
+
+function defaultDecisionText(decision: Record<string, unknown>) {
+  return Object.values(decision).map(String).join(" ");
+}
+
+// 같은 결정인가: 상태와 결정 내용이 모두 같을 때
+function sameDecision(a: DecisionRecord, b: DecisionRecord) {
+  return a.status === b.status && JSON.stringify(a.decision ?? null) === JSON.stringify(b.decision ?? null);
+}
+
+// 결론 카드 (M8-c): 최종 상태 · 규칙 방식과 같은지 · 다시 시도 횟수 · 자동 검사에서 걸린 횟수
+function TraceVerdict({ ai, rule, traces }: { ai: DecisionRecord; rule?: DecisionRecord; traces: TraceRecord[] | null }) {
+  const retries = ai.metrics.retries ?? 0;
+  const failedChecks = (traces ?? []).filter((t) => t.kind === "validate" && Array.isArray(t.output) && t.output.length > 0).length;
+  return (
+    <div className="verdict" role="status" aria-label="결론">
+      <span>
+        <strong>{ai.item_id}</strong>{" "}
+        <span className={{ success: "good-text", pending_approval: "warning-text", failed: "critical-text", blocked: "critical-text" }[ai.status]}>
+          {STATUS_MARK[ai.status]} {TERMS.ai.label}: {STATUS_TEXT[ai.status]}
+        </span>
+      </span>
+      {rule ? (
+        sameDecision(ai, rule)
+          ? <span className="good-text">{TERMS.rule.label}과 같은 결정</span>
+          : <span className="warning-text">{TERMS.rule.label}과 다른 결정 ({STATUS_TEXT[rule.status]})</span>
+      ) : (
+        <span className="muted">{TERMS.rule.label} 기록 없음</span>
+      )}
+      <span className={retries ? "warning-text" : "muted"}>다시 시도 {retries}회</span>
+      {traces && traces.some((t) => t.kind === "validate") && (
+        <span className={failedChecks ? "warning-text" : "muted"}>{TERMS.validateLoop.label}에서 걸림 {failedChecks}회</span>
+      )}
+    </div>
+  );
+}
+
+// 단계 흐름 한 줄: AI 응답 → 조회 ×2 → 자동 검사 ✕ → 다시 시도 → … (같은 단계가 이어지면 묶는다)
+function StepFlow({ traces }: { traces: TraceRecord[] }) {
+  const mark = (t: TraceRecord) => {
+    if (t.kind === "validate") return Array.isArray(t.output) && t.output.length > 0 ? " ✕" : " ✓";
+    if (t.kind === "guardrail") {
+      const a = (t.output as { action?: string } | null)?.action;
+      return a === "blocked" ? " ✕" : a === "pending_approval" ? " ◯" : " ✓";
+    }
+    return "";
+  };
+  const groups: { label: string; n: number }[] = [];
+  for (const t of traces) {
+    const label = KIND_LABELS[t.kind][0] + mark(t);
+    const last = groups[groups.length - 1];
+    if (last && last.label === label) last.n += 1;
+    else groups.push({ label, n: 1 });
+  }
+  return (
+    <p className="step-flow small" aria-label="단계 흐름">
+      {groups.map((g, i) => (
+        <span key={i}>
+          {i > 0 && <span className="muted"> → </span>}
+          <span className={g.label.endsWith("✕") ? "critical-text" : undefined}>{g.label}{g.n > 1 && ` ×${g.n}`}</span>
+        </span>
+      ))}
+    </p>
   );
 }
 

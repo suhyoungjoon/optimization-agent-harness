@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import AnalysisPanel from "./components/AnalysisPanel";
 import ComparePanel from "./components/ComparePanel";
-import { ExpandAllContext, readExpandAll, saveExpandAll } from "./components/Details";
+import Details, { ExpandAllContext, readExpandAll, saveExpandAll } from "./components/Details";
 import DomainPanel from "./components/DomainPanel";
 import ImprovementPanel from "./components/ImprovementPanel";
 import TracePanel from "./components/TracePanel";
@@ -244,6 +244,7 @@ export default function App() {
             onSelectItem={selectItem}
             reasonLabels={reasonLabels}
             reasonDetails={reasonDetails}
+            decisionText={adapter?.decisionText}
           />
         )}
         {domain && adapter && tab === "analysis" && (
@@ -285,21 +286,23 @@ function DemoBanner({ manifest, catalog }: { manifest: NonNullable<HarnessInfo["
   return (
     <div className="demo-banner" role="note">
       <strong title={tip("demo")}>{TERMS.demo.label}</strong>
-      <span>
-        AI 결과는 미리 저장해 둔 결과를 다시 보여줍니다 (AI 호출·인터넷 없음). {TERMS.rule.label}과 {TERMS.simulate.label}는 실제로 계산하고,
-        승인은 임시 사본에만 반영됩니다.
-      </span>
-      <span className="muted small">
-        저장 시각 {manifest.created_at}
-        {manifest.git_commit && ` · ${manifest.git_ref} ${manifest.git_commit.slice(0, 7)}`}
-        {manifest.note && ` · ${manifest.note}`}
-      </span>
-      {catalog.length > 0 && (
-        <span className="muted small">
-          다시 볼 수 있는 AI 실행:{" "}
-          {catalog.map((c) => `${c.dataset_id} ${c.level} ${c.items}건 ×${c.runs}`).join(" · ")}
+      <span>AI 결과는 저장해 둔 것을 다시 보여주고(비용 없음), 승인은 임시 사본에만 반영됩니다.</span>
+      <Details summary={`상세보기 (저장 정보${catalog.length ? ` · 다시 볼 수 있는 AI 실행 ${catalog.length}개` : ""})`}>
+        <span className="small">
+          AI 호출·인터넷 없이 동작합니다. {TERMS.rule.label}과 {TERMS.simulate.label}는 실제로 계산합니다. 서버를 다시 켜면 승인 전 상태로 돌아갑니다.
         </span>
-      )}
+        <span className="muted small">
+          저장 시각 {manifest.created_at}
+          {manifest.git_commit && ` · ${manifest.git_ref} ${manifest.git_commit.slice(0, 7)}`}
+          {manifest.note && ` · ${manifest.note}`}
+        </span>
+        {catalog.length > 0 && (
+          <span className="muted small">
+            다시 볼 수 있는 AI 실행:{" "}
+            {catalog.map((c) => `${c.dataset_id} ${c.level} ${c.items}건 ×${c.runs}`).join(" · ")}
+          </span>
+        )}
+      </Details>
     </div>
   );
 }
