@@ -382,3 +382,19 @@ code.json { color: var(--text-secondary); word-break: break-all; }
 /* 하네스 레벨 버튼의 짧은 이름 (M8-a: 설정 플래그에서 만든 설명) */
 .harness-levels .level-short { font-size: 11px; color: var(--text-muted); }
 .harness-levels button.selected .level-short { color: inherit; opacity: 0.85; }
+
+/* 요약 먼저, 상세는 펼쳐서 (M8-b) */
+header .expand-all { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+details.more { margin-top: 10px; }
+details.more > summary { cursor: pointer; font-size: 13px; color: var(--series-1); list-style: none; padding: 2px 0; }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary::before { content: "▸ "; }
+details.more[open] > summary::before { content: "▾ "; }
+details.more > .more-body { margin-top: 8px; }
+.verdict { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; padding: 8px 12px; margin: 8px 0;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 13px; }
+.verdict strong { font-weight: 600; }
+.verdict .side { color: var(--text-secondary); }
+.proposal .gist { font-size: 13px; margin: 6px 0; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.proposal .gist .worse { color: var(--critical); }
+.proposal .gist .better { color: var(--good-text); }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import AnalysisPanel from "./components/AnalysisPanel";
 import ComparePanel from "./components/ComparePanel";
+import { ExpandAllContext, readExpandAll, saveExpandAll } from "./components/Details";
 import DomainPanel from "./components/DomainPanel";
 import ImprovementPanel from "./components/ImprovementPanel";
 import TracePanel from "./components/TracePanel";
@@ -28,6 +29,7 @@ export default function App() {
   const [demoCatalog, setDemoCatalog] = useState<DemoCatalogEntry[]>([]);
   const [tab, setTab] = useState<Tab>("compare");
   const [fatal, setFatal] = useState<string | null>(null);
+  const [expandAll, setExpandAll] = useState(readExpandAll);
 
   // 실험 세션 상태
   const [seed, setSeed] = useState(42);
@@ -160,6 +162,7 @@ export default function App() {
   const selectItem = (id: string) => setSelectedItem(id);
 
   return (
+    <ExpandAllContext.Provider value={expandAll}>
     <div className="app">
       <header>
         <h1>Optimization Agent Harness</h1>
@@ -172,6 +175,10 @@ export default function App() {
         ) : (
           domainName && <span className="muted" title={tip("domain")}>{TERMS.domain.label}: {domainName}</span>
         )}
+        <label className="expand-all small muted" title="모든 상세보기를 펼친 채로 본다 (이 브라우저에 기억)">
+          <input type="checkbox" checked={expandAll}
+            onChange={(e) => { setExpandAll(e.target.checked); saveExpandAll(e.target.checked); }} /> 모두 펼치기
+        </label>
       </header>
       {harness?.demo && <DemoBanner manifest={harness.demo} catalog={demoCatalog} />}
       <nav className="tabs" role="tablist">
@@ -270,6 +277,7 @@ export default function App() {
         )}
       </main>
     </div>
+    </ExpandAllContext.Provider>
   );
 }
 

@@ -4,7 +4,7 @@ import type { CompareSummary, Dataset, DecisionRecord, DomainInfo, HarnessInfo, 
 import CompareTable from "./CompareTable";
 import HarnessPipeline from "./HarnessPipeline";
 import HarnessToggle from "./HarnessToggle";
-import MetricsPanel from "./MetricsPanel";
+import MetricsPanel, { fmtMetric, fmtUsd } from "./MetricsPanel";
 import { TERMS, tip } from "../terms";
 
 export interface CompareProps {
@@ -129,6 +129,10 @@ export default function ComparePanel(p: CompareProps) {
         )}
       </div>
 
+      {p.ruleRun?.status === "done" && p.shownAiRun?.status === "done" && (
+        <Verdict rule={p.ruleRun} ai={p.shownAiRun} specs={p.adapter.metrics} />
+      )}
+
       <div className="split">
         <article className="panel">
           <h2 title={tip("rule")}>{TERMS.rule.label}</h2>
@@ -174,6 +178,29 @@ export default function ComparePanel(p: CompareProps) {
 
       <CompareTable rows={p.summary} specs={p.adapter.metrics} />
     </section>
+  );
+}
+
+// 결론 한 줄 (M8-b): 두 방식의 규칙 위반 · 핵심 지표 · 건당 비용
+function Verdict({ rule, ai, specs }: { rule: Run; ai: Run; specs: DomainAdapter["metrics"] }) {
+  const primary = specs.filter((s) => s.primary);
+  const line = (run: Run) => {
+    const v = run.violations?.length ?? 0;
+    const items = run.meta?.items;
+    const cost = run.meta?.usage?.cost_usd;
+    return (
+      <>
+        <span className={v ? "critical-text" : "good-text"} title={tip("violations")}>{TERMS.violations.label} {v}건</span>
+        {primary.map((s) => <span key={s.key} title={s.tech}> · {s.label} {fmtMetric(run.metrics?.[s.key], s.format)}</span>)}
+        <span> · 건당 {run.agent === "rule" ? "$0" : fmtUsd(cost != null && items ? cost / items : cost)}</span>
+      </>
+    );
+  };
+  return (
+    <div className="verdict" role="status" aria-label="결론">
+      <span><strong>{TERMS.rule.label}</strong> {line(rule)}</span>
+      <span><strong>{TERMS.ai.label} ({ai.level})</strong> {line(ai)}</span>
+    </div>
   );
 }
 
