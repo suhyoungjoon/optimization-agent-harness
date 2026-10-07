@@ -155,7 +155,7 @@ def load_config(path: Path = <configs/llm.yaml>) -> dict      # 환경변수 LLM
 class LLMClient(Protocol):
     model: str
     def create(self, *, system: list[dict], messages: list[dict], tools: list[dict], salt: str = "") -> LLMResponse
-class AnthropicClient:            # 실제 호출은 여기서만. thinking=adaptive, effort는 llm.yaml
+class AnthropicClient:            # 실제 호출은 여기서만. thinking·effort는 llm.yaml 값대로 (모델마다 지원이 다름)
     def __init__(self, config: dict | None = None, cache: ResponseCache | None = None, api: Any = None,
                  env_path: str | Path | None = None)   # env_path: API 키를 읽을 .env (없으면 패키지 위치의 .env)
 class ResponseCache:              # 요청+salt 해시 → 응답 (SQLite)

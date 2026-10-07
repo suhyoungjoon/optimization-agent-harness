@@ -114,7 +114,7 @@ export default function ComparePanel(p: CompareProps) {
           </label>
           {p.harness && (
             <span className="muted small" title="원래 용어: 모델 · effort · 응답 캐시 (configs/llm.yaml)">
-              {p.harness.llm.model} · 생각 깊이 {p.harness.llm.effort}
+              {p.harness.llm.model}{p.harness.llm.effort ? ` · 생각 깊이 ${p.harness.llm.effort}` : ""}
               {p.harness.llm.cache ? " · 같은 요청은 저장된 응답 재사용" : ""}
             </span>
           )}

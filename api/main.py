@@ -128,7 +128,7 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
     @app.get("/harness/levels")
     def levels():
         return {"levels": {name: to_jsonable(level) for name, level in load_levels().items()},
-                "llm": {k: llm_config.get(k) for k in ("model", "effort", "cache", "concurrency",
+                "llm": {k: llm_config.get(k) for k in ("model", "thinking", "effort", "cache", "concurrency",
                                                          "max_llm_calls_per_item")},
                 "demo": demo.manifest if demo else None}
 

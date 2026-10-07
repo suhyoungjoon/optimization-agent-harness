@@ -121,7 +121,7 @@ class ResponseCache:
 
 
 class AnthropicClient:
-    """Anthropic Messages API 호출. thinking은 adaptive, 깊이는 effort로 조절한다."""
+    """Anthropic Messages API 호출. 생각(thinking)·깊이(effort)는 설정 파일 값대로 보낸다 (모델마다 지원이 다름)."""
 
     def __init__(self, config: dict | None = None, cache: ResponseCache | None = None, api: Any = None,
                  env_path: str | Path | None = None):
@@ -144,9 +144,11 @@ class AnthropicClient:
             "system": system,
             "messages": messages,
             "tools": tools,
-            "thinking": {"type": "adaptive"},
-            "output_config": {"effort": self.config["effort"]},
         }
+        if self.config.get("thinking", "adaptive") == "adaptive":   # off면 보내지 않는다 (Haiku 4.5 등)
+            request["thinking"] = {"type": "adaptive"}
+        if self.config.get("effort"):                               # 없으면 보내지 않는다
+            request["output_config"] = {"effort": self.config["effort"]}
         key = ResponseCache.key({**request, "salt": salt}) if self.cache else None
         if key and (hit := self.cache.get(key)):
             return hit
