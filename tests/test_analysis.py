@@ -184,3 +184,50 @@ def test_report_schema_and_grounding_are_public():
     assert core.grounding_problems({"title": "a", "description": "40건 중 12건", "cited_calls": ["t1"]}, calls) == []
     assert core.grounding_problems({"title": "a", "description": "40건 중 13건", "cited_calls": ["t1"]}, calls)
     assert core.grounding_problems({"title": "a", "description": "x", "cited_calls": []}, calls)
+
+
+# --- 근거 인용 번호 (실제 모델은 긴 tool_use id 대신 순번을 적는 경향이 있다) -----------
+
+def test_tool_results_show_short_call_refs(run_p4):
+    """도구 결과마다 짧은 호출 번호(c1, c2 …)를 보여 주고, calls에도 같은 번호를 남긴다."""
+    pack, inst, decisions, _ = run_p4
+    llm = FakeLLM(scripted([lambda m: tool_use("overview", {}),
+                            lambda m: tool_use("aggregate", {"group_by": ["area_zone"]}),
+                            lambda m: tool_use("submit_report", {"summary": "없음", "findings": []})]))
+    report = analyze(pack, inst, decisions, llm, load_config(), salt="t")
+    assert [c["ref"] for c in report["calls"].values()] == ["c1", "c2"]
+    second = last_tool_output(llm.calls[2]["messages"])
+    assert second["call_ref"] == "c2" and second["rows"]
+
+
+def test_analyze_accepts_call_refs_and_lists_them_on_rejection(run_p4):
+    pack, inst, decisions, _ = run_p4
+    zone = {}
+
+    def submit(cite):
+        def step(messages):
+            if not zone:
+                zone.update({r["area_zone"]: r for r in last_tool_output(messages)["rows"]})
+            b = zone["boundary"]
+            return tool_use("submit_report", {"summary": "경계", "findings": [
+                {"title": "경계 지역 OUT_OF_AREA", "description": f"경계 지역 {b['items']}건 중 {b['failed']}건 실패",
+                 "slice": {"area_zone": ["boundary"]}, "reason_codes": ["OUT_OF_AREA"], "cited_calls": [cite]}]})
+        return step
+
+    # 처음엔 없는 번호(c9)를 인용 → 반려 메시지에 인용할 수 있는 호출 목록 → c1로 고쳐 제출
+    llm = FakeLLM(scripted([lambda m: tool_use("aggregate", {"group_by": ["area_zone"]}), submit("c9"), submit("c1")]))
+    report = analyze(pack, inst, decisions, llm, load_config(), salt="t")
+    feedback = llm.calls[2]["messages"][-1]["content"][-1]["content"]
+    assert "c1 aggregate" in feedback
+    assert [f["title"] for f in report["findings"]] == ["경계 지역 OUT_OF_AREA"] and not report["dropped"]
+    call_id = next(iter(report["calls"]))
+    assert report["findings"][0]["cited_calls"] == [call_id]      # 저장할 때는 원래 tool_use id로 바꾼다 (화면이 id로 찾음)
+
+
+def test_grounding_accepts_ref_number_and_id():
+    import core
+    calls = {"toolu_x": {"ref": "c1", "name": "aggregate", "input": {}, "output": {"items": 40, "failed": 12}}}
+    for cite in ("toolu_x", "c1", "1"):
+        assert core.grounding_problems({"title": "a", "description": "40건 중 12건", "cited_calls": [cite]}, calls) == []
+    problems = core.grounding_problems({"title": "a", "description": "40건", "cited_calls": ["c2"]}, calls)
+    assert problems and "c1 aggregate" in problems[0]

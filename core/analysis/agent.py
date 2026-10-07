@@ -6,7 +6,7 @@
 
 from core.interfaces import DecisionRecord, DomainPack
 from core.llm.client import LLMClient
-from core.llm.tool_loop import run_tool_loop, usage_dict
+from core.llm.tool_loop import call_list_text, resolve_call, run_tool_loop, usage_dict
 
 from .aggregate_tools import Aggregator
 from .grounding import numbers_in, unsupported_numbers
@@ -18,6 +18,7 @@ SYSTEM = """너는 최적화 결과 분석가다. 주어진 실행 결과에서 
 규칙:
 - 반드시 도구로 데이터를 조회한다. 추측하지 않는다.
 - 발견의 설명에 쓰는 모든 수치는 cited_calls에 넣은 도구 결과에 그대로 있어야 한다. 도구 결과에 없는 수치를 계산해 쓰지 않는다.
+- cited_calls에는 근거가 된 도구 결과의 호출 번호(결과 맨 앞의 call_ref, 예: "c3")를 적는다.
 - 발견 하나는 패턴 하나다. 전체 평균과 뚜렷이 다른 구간만 발견으로 올린다. 3~6개가 적당하다.
 - slice에는 패턴이 나타나는 구간을 선언된 차원과 값으로 적는다 (overview 도구로 확인).
 - 실패가 아니라 자원 쪽 패턴(예: 활용률이 낮은 자원)이면 metric에 지표 이름과 방향을 적는다.
@@ -47,7 +48,7 @@ def report_submit_tool(dimensions: dict, metric_names: list[str]) -> dict:
                             "direction": {"type": "string", "enum": ["low", "high"]}}},
                         "hypothesis": {"type": "string", "description": "원인 가설"},
                         "cited_calls": {"type": "array", "items": {"type": "string"},
-                                        "description": "근거가 된 도구 호출의 tool_use id"},
+                                        "description": "근거가 된 도구 결과의 호출 번호 (call_ref, 예: c3)"},
                     },
                     "required": ["title", "description", "cited_calls"],
                 }},
@@ -57,11 +58,17 @@ def report_submit_tool(dimensions: dict, metric_names: list[str]) -> dict:
     }
 
 
+def cited_call_ids(finding: dict, calls: dict) -> list[str]:
+    """발견이 인용한 호출(호출 번호·tool_use id 모두 허용)을 tool_use id 목록으로. 없는 인용은 뺀다."""
+    return [cid for c in finding.get("cited_calls") or [] if (cid := resolve_call(c, calls))]
+
+
 def grounding_problems(finding: dict, calls: dict) -> list[str]:
     """발견 하나의 근거 검사. 인용한 도구 호출이 없거나, 설명의 수치가 인용 결과에 없으면 문제 목록을 돌려준다."""
-    cited = [c for c in finding.get("cited_calls") or [] if c in calls]
+    cited = cited_call_ids(finding, calls)
     if not cited:
-        return ["인용한 도구 호출이 없거나 존재하지 않는 id"]
+        listing = call_list_text(calls)
+        return ["인용한 도구 호출이 없거나 존재하지 않는 호출 번호" + (f" (인용할 수 있는 호출: {listing})" if listing else "")]
     sources = [n for c in cited for n in numbers_in(calls[c]["output"]) + numbers_in(calls[c]["input"])]
     sources += numbers_in(finding.get("slice") or {})
     bad = unsupported_numbers(f"{finding.get('title', '')} {finding.get('description', '')}", sources)
@@ -96,7 +103,7 @@ def analyze(pack: DomainPack, instance, decisions: list[DecisionRecord], llm: LL
         if problems:
             dropped.append({"finding": f, "problems": problems})
         else:
-            kept.append({**f, "id": f"F{len(kept) + 1}"})
+            kept.append({**f, "cited_calls": cited_call_ids(f, result.calls), "id": f"F{len(kept) + 1}"})
     return {
         "summary": (result.submission or {}).get("summary", ""),
         "findings": kept,

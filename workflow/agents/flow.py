@@ -199,7 +199,8 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
         for f in (out.get("submission") or {}).get("findings") or []:
             problems = analysis_core.grounding_problems(f, out.get("calls") or {})
             (dropped.append({"finding": f, "problems": problems}) if problems
-             else kept.append({**f, "id": f"F{len(kept) + 1}"}))
+             else kept.append({**f, "cited_calls": analysis_core.cited_call_ids(f, out.get("calls") or {}),
+                               "id": f"F{len(kept) + 1}"}))
         d["report"] = {"summary": (out.get("submission") or {}).get("summary", ""), "findings": kept, "dropped": dropped}
         s = score(kept, d["truth"].get("faults", {}))
         lines = [f"찾은 문제 {len(kept)}건" + (f" · 심어둔 문제 {s['total']}개 중 {s['detected']}개 찾음" if s["total"] else "")

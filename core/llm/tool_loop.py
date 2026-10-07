@@ -17,11 +17,37 @@ from core.storage.store import to_jsonable
 class LoopResult:
     submission: dict | None
     stop: str                                  # submitted | no_submit | max_calls | refusal
-    calls: dict[str, dict] = field(default_factory=dict)   # tool_use id → {name, input, output, is_error}
+    calls: dict[str, dict] = field(default_factory=dict)   # tool_use id → {ref, name, input, output, is_error}
     usage: Usage = field(default_factory=Usage)
     llm_calls: int = 0
     feedback_rounds: int = 0
     seconds: float = 0.0
+
+
+def call_ref(n: int) -> str:
+    """n번째 도구 호출의 짧은 번호 (c1, c2 …). 모델은 긴 tool_use id를 옮겨 적지 못해 근거 인용에 이 번호를 쓴다."""
+    return f"c{n}"
+
+
+def tool_result_content(ref: str, out: Any) -> str:
+    """모델에게 돌려줄 도구 결과. 맨 앞에 호출 번호(call_ref)를 붙인다 (calls에 저장하는 output은 그대로)."""
+    body = to_jsonable(out)
+    body = {"call_ref": ref, **body} if isinstance(body, dict) else {"call_ref": ref, "result": body}
+    return json.dumps(body, ensure_ascii=False)
+
+
+def resolve_call(cited: str, calls: dict[str, dict]) -> str | None:
+    """인용 값(tool_use id, 호출 번호 c3, 또는 숫자 3)을 tool_use id로 바꾼다. 없으면 None."""
+    cited = str(cited).strip()
+    if cited in calls:
+        return cited
+    ref = call_ref(int(cited)) if cited.isdigit() else cited
+    return next((cid for cid, c in calls.items() if c.get("ref") == ref), None)
+
+
+def call_list_text(calls: dict[str, dict]) -> str:
+    """반려 메시지에 넣을 인용 가능한 호출 목록 (예: "c1 overview, c2 aggregate")."""
+    return ", ".join(f"{c['ref']} {c['name']}" for c in calls.values() if c.get("ref"))
 
 
 def run_tool_loop(llm: LLMClient, *, system: str, user: str, tools: list[dict], submit_tool: dict,
@@ -66,10 +92,11 @@ def run_tool_loop(llm: LLMClient, *, system: str, user: str, tools: list[dict], 
             except (ValueError, KeyError, TypeError) as exc:
                 out = {"error": str(exc)}
             is_error = isinstance(out, dict) and "error" in out
-            result.calls[use["id"]] = {"name": use["name"], "input": use.get("input"), "output": to_jsonable(out),
-                                       "is_error": is_error}
+            ref = call_ref(len(result.calls) + 1)
+            result.calls[use["id"]] = {"ref": ref, "name": use["name"], "input": use.get("input"),
+                                       "output": to_jsonable(out), "is_error": is_error}
             tool_results.append({"type": "tool_result", "tool_use_id": use["id"],
-                                 "content": json.dumps(to_jsonable(out), ensure_ascii=False), "is_error": is_error})
+                                 "content": tool_result_content(ref, out), "is_error": is_error})
 
         if submitted is not None:
             submission = submitted.get("input") or {}

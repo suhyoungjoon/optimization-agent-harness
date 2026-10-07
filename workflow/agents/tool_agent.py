@@ -9,13 +9,13 @@
 core/llm/tool_loop.py의 반복문과 같은 일을 노드와 연결로 나눈 것이다 (코어는 그대로).
 """
 
-import json
 from collections.abc import Callable
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
 from core.llm.client import Usage
+from core.llm.tool_loop import call_ref, tool_result_content
 from core.storage.store import to_jsonable
 
 from .context import AgentContext
@@ -87,10 +87,11 @@ def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, to
             except (ValueError, KeyError, TypeError) as exc:
                 out = {"error": str(exc)}
             is_error = isinstance(out, dict) and "error" in out
-            calls[use["id"]] = {"name": use["name"], "input": use.get("input"), "output": to_jsonable(out),
-                                "is_error": is_error}
+            ref = call_ref(len(calls) + 1)
+            calls[use["id"]] = {"ref": ref, "name": use["name"], "input": use.get("input"),
+                                "output": to_jsonable(out), "is_error": is_error}
             results.append({"type": "tool_result", "tool_use_id": use["id"],
-                            "content": json.dumps(to_jsonable(out), ensure_ascii=False), "is_error": is_error})
+                            "content": tool_result_content(ref, out), "is_error": is_error})
             text = tool_text(use["name"], use.get("input") or {}, out) if tool_text else use["name"]
             ctx.emit(agent, "tools", ("✕ " if is_error else "") + text)
         if submit_id:
