@@ -44,10 +44,27 @@ def test_request_shape(config, tmp_path):
     client, api = make(config, tmp_path)
     client.create(**ARGS)
     req = api.requests[0]
-    assert req["model"] == config["model"] == "claude-sonnet-5"
-    assert req["thinking"] == {"type": "adaptive"}
-    assert req["output_config"] == {"effort": config["effort"]}
+    assert req["model"] == config["model"]
     assert "temperature" not in req
+    assert config["model"] in config["pricing_per_mtok"]   # 비용 계산에 단가가 있어야 한다
+
+
+@pytest.mark.parametrize("thinking, effort, sent_thinking, sent_effort", [
+    ("adaptive", "medium", {"type": "adaptive"}, {"effort": "medium"}),   # Sonnet 5 / Opus 5 계열
+    ("off", None, None, None),                                           # Haiku 4.5: 둘 다 보내지 않음
+])
+def test_thinking_and_effort_follow_config(config, tmp_path, thinking, effort, sent_thinking, sent_effort):
+    client, api = make({**config, "thinking": thinking, "effort": effort}, tmp_path)
+    client.create(**ARGS)
+    req = api.requests[0]
+    assert req.get("thinking") == sent_thinking
+    assert req.get("output_config") == sent_effort
+
+
+def test_config_thinking_matches_model(config):
+    """Haiku 4.5는 adaptive thinking·effort를 받지 않는다 (보내면 400). 설정이 모델과 맞는지 확인."""
+    if config["model"].startswith("claude-haiku-4-5"):
+        assert config.get("thinking") == "off" and not config.get("effort")
 
 
 def test_null_fields_dropped(config, tmp_path):

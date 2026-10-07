@@ -92,7 +92,7 @@ python -m api.main --demo demo/rehearsal      # http://127.0.0.1:8000
 ### AI agent 실행
 
 `.env.example`을 `.env`로 복사하고 `ANTHROPIC_API_KEY`를 채운다(`.env`는 커밋하지 않는다).
-모델·effort·동시 실행 수·응답 캐시는 `configs/llm.yaml`에 있다. 같은 입력은 캐시에서 재사용하므로 반복 개발 비용이 줄어든다. 최종 측정 때는 `LLM_CACHE=0`으로 끈다.
+모델·생각(thinking)·effort·동시 실행 수·응답 캐시는 `configs/llm.yaml`에 있다. 기본 모델은 비용을 아끼려고 `claude-haiku-4-5`이고, Haiku 4.5는 adaptive thinking과 effort를 지원하지 않아 `thinking: "off"`, `effort: null`로 둔다(Sonnet·Opus 5 계열로 바꾸면 `thinking: adaptive`와 effort를 같이 켠다). 같은 입력은 캐시에서 재사용하므로 반복 개발 비용이 줄어든다. 최종 측정 때는 `LLM_CACHE=0`으로 끈다.
 
 비용 때문에 AI는 실행 범위를 **1일차 앞 10건(시범)**부터 돌려 건당 비용을 확인한 뒤 넓힌다. 규칙 agent는 비용이 없으니 전체로 돌린다.
 

@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.main import create_app
+from core.llm.client import load_config
 from tests.fake_llm import FakeLLM, submit
 
 
@@ -141,7 +142,7 @@ def test_ai_run_failure_reported_in_stream(tmp_path):
 def test_levels_and_domain_codes(client):
     body = client.get("/harness/levels").json()
     assert list(body["levels"]) == ["L0", "L1", "L2", "L3", "L4", "L5"]
-    assert body["llm"]["model"] == "claude-sonnet-5"
+    assert body["llm"]["model"] == load_config()["model"]
     assert "LLM_REFUSAL" in client.get("/domains").json()[0]["core_reason_codes"]
 
 
