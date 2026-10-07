@@ -132,3 +132,14 @@ def test_env_path_reads_api_key_from_given_file(tmp_path, monkeypatch):
         assert client.api is not None                   # 클라이언트 생성만 하고 API는 호출하지 않는다
     finally:
         os.environ.pop("ANTHROPIC_API_KEY", None)       # load_dotenv가 넣은 값이 다른 테스트로 새지 않게
+
+
+def test_api_key_prefers_oah_env(monkeypatch):
+    from core.llm.client import api_key_from_env
+    monkeypatch.delenv("OAH_ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert api_key_from_env() is None
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "generic")
+    assert api_key_from_env() == "generic"
+    monkeypatch.setenv("OAH_ANTHROPIC_API_KEY", "oah")
+    assert api_key_from_env() == "oah"

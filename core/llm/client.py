@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 CONFIG_PATH = ROOT / "configs" / "llm.yaml"
 DEFAULT_CACHE_PATH = ROOT / "runs" / "llm_cache.sqlite"
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+API_KEY_ENVS = ("OAH_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY")   # 앞의 것이 우선
 
 
 def load_dotenv(path: Path = ROOT / ".env") -> None:
@@ -30,6 +31,11 @@ def load_dotenv(path: Path = ROOT / ".env") -> None:
             key, value = line.split("=", 1)
             if value.strip():
                 os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+def api_key_from_env() -> str | None:
+    """API 키를 API_KEY_ENVS 순서대로 찾는다. 없으면 None (SDK 기본 동작에 맡김)."""
+    return next((os.environ[name] for name in API_KEY_ENVS if os.environ.get(name)), None)
 
 
 def load_config(path: Path = CONFIG_PATH) -> dict:
@@ -133,7 +139,7 @@ class AnthropicClient:
             import anthropic  # 실제 호출 때만 필요
 
             load_dotenv(Path(env_path)) if env_path is not None else load_dotenv()
-            api = anthropic.Anthropic()
+            api = anthropic.Anthropic(api_key=api_key_from_env())
         self.api = api
 
     def create(self, *, system: list[dict], messages: list[dict], tools: list[dict],

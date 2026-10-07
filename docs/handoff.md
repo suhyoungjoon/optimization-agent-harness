@@ -474,7 +474,7 @@ overrides:                        # 구간 조건
 | 런타임 의존성 | `pyyaml`, `ruamel.yaml`, `anthropic`, `fastapi`, `pydantic`, `uvicorn` (fastapi 계열은 코어만 쓸 때도 설치된다) |
 | 개발 의존성 (`[dev]`) | `pytest`, `httpx` |
 | 패키지 데이터 | `configs/*.yaml`, `domains/dispatch/*.yaml`·`*.md`·`geo/*.geojson` |
-| 환경변수 | `ANTHROPIC_API_KEY`(LLM 사용 시, `.env` 가능), `LLM_CACHE=0`(캐시 끄기), `HARNESS_DB`(API·스크립트의 DB 경로), `HOST`·`PORT`(API 서버) |
+| 환경변수 | `OAH_ANTHROPIC_API_KEY`(우선) 또는 `ANTHROPIC_API_KEY`(LLM 사용 시, `.env` 가능), `LLM_CACHE=0`(캐시 끄기), `HARNESS_DB`(API·스크립트의 DB 경로), `HOST`·`PORT`(API 서버) |
 
 설치:
 
