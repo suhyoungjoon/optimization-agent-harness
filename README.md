@@ -9,7 +9,7 @@
 
 전체 기획은 [docs/plan.md](docs/plan.md), 화면 사용법은 [docs/ui-guide.md](docs/ui-guide.md), 새 도메인 추가는 [docs/domain-pack-guide.md](docs/domain-pack-guide.md).
 분석·개선 루프가 도는 방식은 [docs/improvement-loop.md](docs/improvement-loop.md) (쉬운 설명: [docs/improvement-loop-easy.md](docs/improvement-loop-easy.md)).
-실제 API로 하네스 레벨별 배정을 비교한 결과와 시사점은 [docs/experiment-real-api-2026-10.md](docs/experiment-real-api-2026-10.md).
+실제 API로 하네스 레벨별 배정을 비교하고 분석·개선 루프를 돌린 결과와 시사점은 [docs/experiment-real-api-2026-10.md](docs/experiment-real-api-2026-10.md).
 다른 레포에서 코어를 패키지로 설치해 재사용하려면 [docs/handoff.md](docs/handoff.md)와 [examples/reuse_quickstart.py](examples/reuse_quickstart.py).
 
 ## 화면
