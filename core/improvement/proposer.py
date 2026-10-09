@@ -68,11 +68,13 @@ def finding_slices(report: dict) -> dict[str, dict]:
 
 def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: dict, report: dict,
             llm: LLMClient, llm_config: dict, salt: str = "", max_calls: int = 20,
-            feedback: list[str] | None = None, constraints: list[dict] | None = None) -> dict:
+            feedback: list[str] | None = None, constraints: list[dict] | None = None,
+            memory_text: str = "") -> dict:
     """feedback: 앞선 시도의 개선안이 탈락한 이유 (재시도할 때 같은 안을 다시 내지 않도록 입력에 붙인다).
     constraints: 사람이 정한 한도 (core.improvement.constraints 형식). 입력에 붙이고, simulate_params 도구
     결과에 위반을 함께 돌려줘 제출 전에 스스로 피하게 한다.
-    둘 다 없으면 입력은 이전과 같다 (LLM 캐시 키도 같다)."""
+    memory_text: 이전 회차에서 사람이 반려한 개선안 (core.improvement.memory.proposal_memory_text).
+    모두 없으면 입력은 이전과 같다 (LLM 캐시 키도 같다)."""
     slices = finding_slices(report)
     trials: list[dict] = []
 
@@ -113,6 +115,7 @@ def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: di
                  + json.dumps(constraints, ensure_ascii=False, indent=1)
                  + "\nsimulate_params 결과의 constraint_violations가 비도록 안을 설계하라. "
                    "어길 수밖에 없으면 rationale에 어떤 제약을 왜 어기는지 적어라.")
+    user += memory_text
     if feedback:
         user += ("\n\n# 이전 시도에서 탈락한 이유\n" + "\n".join(f"- {f}" for f in feedback)
                  + "\n같은 변경을 다시 제안하지 말고, 위 이유를 피하는 안을 제안하라.")

@@ -211,3 +211,41 @@ def test_no_constraints_no_violation_field(client):
     assert "constraints" not in (batch["meta"] or {})
     sim = client.post(f"/proposals/{batch['proposals'][0]['id']}/simulate", json={}).json()["simulation"]
     assert "constraint_violations" not in sim
+
+
+def test_second_cycle_gets_human_judgments_as_memory(tmp_path, files):
+    """1회차의 오탐 판정과 반려 사유가 2회차 분석·개선 에이전트 입력으로 들어가고, 쓴 기억이 기록된다 (M12-c)."""
+    llms = []
+
+    def factory():
+        llms.append(FakeLLM(analyst_or_proposer))
+        return llms[-1]
+
+    client = TestClient(create_app(tmp_path / "h.db", serve_web=False, llm_factory=factory))
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+
+    # 1회차: 분석 → 오탐 판정, 개선안 → 명세안 반려
+    first = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    assert first["body"]["memory"]["item_ids"] == []                       # 처음에는 기억이 없다
+    client.post(f"/analysis/{first['id']}/labels", json={"finding_id": "F2", "label": "false_positive"})
+    batch = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': first['id']}).json()['id']}")
+    spec = next(p for p in batch["proposals"] if p["kind"] == "spec")
+    client.post(f"/proposals/{spec['id']}/reject", json={"note": "AI 재실행 비용 대비 효과 불명"})
+
+    memory = client.get("/memory", params={"domain": "dispatch"}).json()
+    assert len(memory["judgments"]) == 1 and len(memory["rejections"]) == 1
+
+    # 2회차: 분석 입력에 오탐 판정, 개선안 입력에 반려 사유
+    second = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    assert len(second["body"]["memory"]["item_ids"]) == 2 and second["body"]["memory"]["version"]
+    analysis_input = llms[-1].calls[0]["messages"][0]["content"]
+    assert "중심 지역 용량 부족" in analysis_input and "잘못 짚음" in analysis_input
+    batch2 = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': second['id']}).json()['id']}")
+    assert batch2["meta"]["memory"]["version"] == second["body"]["memory"]["version"]
+    assert "AI 재실행 비용 대비 효과 불명" in llms[-1].calls[0]["messages"][0]["content"]
+
+    # 기억 없이 (비교 실험용)
+    plain = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id'], 'use_memory': False}).json()['id']}")
+    assert plain["body"]["memory"] is None
+    assert "잘못 짚음" not in llms[-1].calls[0]["messages"][0]["content"]

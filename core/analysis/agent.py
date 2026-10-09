@@ -81,7 +81,8 @@ _problems = grounding_problems
 
 
 def analyze(pack: DomainPack, instance, decisions: list[DecisionRecord], llm: LLMClient, llm_config: dict,
-            salt: str = "", max_calls: int = 30) -> dict:
+            salt: str = "", max_calls: int = 30, memory_text: str = "") -> dict:
+    """memory_text: 이전 회차에서 사람이 내린 판정 (core.improvement.memory.analysis_memory_text). 비면 입력이 이전과 같다."""
     dimensions = pack.dimensions()
     tools = Aggregator(decisions, dimensions).tools() + pack.analysis_tools(instance, decisions)
     metric_names = sorted(pack.metrics(instance, decisions))
@@ -93,7 +94,7 @@ def analyze(pack: DomainPack, instance, decisions: list[DecisionRecord], llm: LL
         return issues
 
     user = ("실행 결과를 분석해 실패 패턴과 원인 가설을 찾아라. 먼저 overview로 전체와 차원을 확인하라.\n"
-            f"분석 대상 항목 수: {len(decisions)}")
+            f"분석 대상 항목 수: {len(decisions)}") + memory_text
     result = run_tool_loop(llm, system=SYSTEM, user=user, tools=tools, submit_tool=report_submit_tool(dimensions, metric_names),
                            max_calls=max_calls, salt=salt, check_submission=check)
 

@@ -14,6 +14,7 @@ from core.harness.tracer import Tracer
 from core.improvement.approval import write_params, write_spec
 from core.improvement.changes import apply_params, apply_spec, params_errors, spec_errors, spec_sections
 from core.improvement.constraints import constraint_errors, constraint_violations
+from core.improvement.memory import analysis_memory_text, build_memory, collect_memory, proposal_memory_text
 from core.improvement.proposer import finding_slices, propose
 from core.improvement.simulate import simulate_params
 from core.interfaces import DecisionRecord, DomainPack, ToolContext, TraceRecord, Violation
@@ -41,7 +42,7 @@ __all__ = [
     "Aggregator", "analyze", "grounding_problems", "report_submit_tool",
     # 개선 루프 (core.improvement)
     "apply_params", "apply_spec", "constraint_errors", "constraint_violations", "finding_slices", "params_errors",
-    "propose", "simulate_params",
+    "propose", "simulate_params", "analysis_memory_text", "build_memory", "collect_memory", "proposal_memory_text",
     "spec_errors", "spec_sections", "write_params", "write_spec",
     # 저장소 (core.storage)
     "Store", "dataset_id", "to_jsonable",

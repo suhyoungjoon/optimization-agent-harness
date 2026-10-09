@@ -19,6 +19,7 @@ from core.harness.levels import load_levels
 from core.improvement.approval import write_params, write_spec
 from core.improvement.changes import apply_params, apply_spec
 from core.improvement.constraints import constraint_errors, constraint_violations
+from core.improvement.memory import analysis_memory_text, collect_memory, proposal_memory_text
 from core.improvement.proposer import finding_slices, propose
 from core.improvement.simulate import simulate_params
 from core.interfaces import DecisionRecord
@@ -31,6 +32,7 @@ from .replay import equivalent_run_ids
 class AnalysisRequest(BaseModel):
     run_id: str
     cached: bool = False      # 같은 조건 실행의 저장된 리포트를 재생 (시연 모드에서는 항상)
+    use_memory: bool = True   # 이전 회차에서 사람이 내린 판정을 입력에 넣는다 (M12-c). 비교 실험은 false
 
 
 class LabelRequest(BaseModel):
@@ -42,6 +44,7 @@ class ProposalRequest(BaseModel):
     report_id: str
     cached: bool = False
     constraints: list[dict] | None = None   # 사람이 정한 한도 (core.improvement.constraints 형식). 개선안 묶음에 저장
+    use_memory: bool = True                 # 이전 회차에서 반려된 개선안과 사유를 입력에 넣는다 (M12-c)
 
 
 class SimulateRequest(BaseModel):
@@ -125,14 +128,29 @@ def register(app: FastAPI, ctx: Context) -> None:
             store.finish_report(report_id, {**stored["body"], "replayed_from": source}, stored["score"])
             return JSONResponse(status_code=202, content={"id": report_id, "status": "done", "replayed": True})
         llm = _llm_or_503(ctx)
+        memory = current_memory(run["domain"]) if req.use_memory else None
         report_id = store.create_report(req.run_id)
-        ctx.executor.submit(_analyze_job, report_id, req.run_id, llm)
+        ctx.executor.submit(_analyze_job, report_id, req.run_id, llm, memory)
         return JSONResponse(status_code=202, content={"id": report_id, "status": "running"})
 
-    def _analyze_job(report_id: str, run_id: str, llm):
+    def current_memory(domain: str) -> dict:
+        """사람이 내린 판단을 지금 규칙 버전 기준으로 모은다. 쓴 기억은 리포트·개선안 묶음에 그대로 남긴다 (재현 조건)."""
+        return collect_memory(store, domain, load_params(load_pack(domain)).get("version"))
+
+    @app.get("/memory")
+    def get_memory(domain: str):
+        """다음 회차 에이전트 입력에 들어갈 기억 (반려 개선안, 발견 판정)."""
+        try:
+            return current_memory(domain)
+        except KeyError:
+            raise HTTPException(404, f"unknown domain: {domain}")
+
+    def _analyze_job(report_id: str, run_id: str, llm, memory: dict | None = None):
         try:
             _run, dataset, pack, instance, truth, decisions = _run_context(store, run_id)
-            body = analyze(pack, instance, decisions, llm, ctx.llm_config, salt=f"analysis:{run_id}")
+            body = analyze(pack, instance, decisions, llm, ctx.llm_config, salt=f"analysis:{run_id}",
+                           memory_text=analysis_memory_text(memory))
+            body["memory"] = memory
             store.finish_report(report_id, body, score(body["findings"], truth.get("faults", {}), body["calls"]))
         except Exception as exc:
             store.fail_report(report_id, repr(exc))
@@ -169,22 +187,25 @@ def register(app: FastAPI, ctx: Context) -> None:
             if errors:
                 raise HTTPException(400, "; ".join(errors))
         llm = _llm_or_503(ctx)
+        memory = current_memory(store.get_run(report["run_id"])["domain"]) if req.use_memory else None
         batch_id = store.create_batch(req.report_id)
-        ctx.executor.submit(_propose_job, batch_id, report, llm, req.constraints or None)
+        ctx.executor.submit(_propose_job, batch_id, report, llm, req.constraints or None, memory)
         return JSONResponse(status_code=202, content={"id": batch_id, "status": "running"})
 
-    def _propose_job(batch_id: str, report: dict, llm, constraints: list[dict] | None = None):
+    def _propose_job(batch_id: str, report: dict, llm, constraints: list[dict] | None = None,
+                     memory: dict | None = None):
         try:
             _run, dataset, pack, instance, _truth, _decisions = _run_context(store, report["run_id"])
             params = load_params(pack)
             spec_text = Path(pack.spec_path()).read_text(encoding="utf-8")
             out = propose(lambda p: load_pack(pack.name, p), instance, params, spec_text, pack.dimensions(),
                           report["body"], llm, ctx.llm_config, salt=f"proposals:{report['id']}",
-                          constraints=constraints)
+                          constraints=constraints, memory_text=proposal_memory_text(memory))
             meta = {"usage": out["usage"], "trials": out["trials"], "stop": out["stop"],
                     "params_version": params.get("version")}
             if constraints:
                 meta["constraints"] = constraints
+            meta["memory"] = memory
             store.finish_batch(batch_id, report["id"], out["proposals"], meta)
         except Exception as exc:
             store.fail_batch(batch_id, repr(exc))
