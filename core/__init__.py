@@ -5,6 +5,7 @@
 
 from core.analysis.agent import analyze, grounding_problems, report_submit_tool
 from core.analysis.aggregate_tools import Aggregator
+from core.analysis.perspectives import analyze_perspectives, merge_findings, perspective_errors
 from core.evaluation.compare import compare, consistency
 from core.evaluation.fault_scorer import apply_labels, matches, score
 from core.evaluation.runner import create_ai_run, run_ai_agent, run_rule_agent
@@ -21,7 +22,7 @@ from core.interfaces import DecisionRecord, DomainPack, ToolContext, TraceRecord
 from core.llm.client import AnthropicClient, LLMClient, LLMResponse, ResponseCache, Usage, load_config
 from core.llm.tool_loop import LoopResult, run_tool_loop, usage_dict
 from core.params import apply_overrides, check_params, get_path, parse_path, path_errors, set_path
-from core.registry import list_domains, list_faults, load_faults, load_pack, load_params
+from core.registry import list_domains, list_faults, load_faults, load_pack, load_params, load_perspectives
 from core.storage.store import Store, dataset_id, to_jsonable
 
 __all__ = [
@@ -30,7 +31,7 @@ __all__ = [
     # 파라미터: 경로 접근, 구간 조건, 허용 범위 검사 (core.params)
     "apply_overrides", "check_params", "get_path", "parse_path", "path_errors", "set_path",
     # 도메인 팩 로딩 (core.registry)
-    "list_domains", "list_faults", "load_faults", "load_pack", "load_params",
+    "list_domains", "list_faults", "load_faults", "load_pack", "load_params", "load_perspectives",
     # 하네스 (core.harness)
     "CORE_REASON_CODES", "AbortRun", "HarnessRunner", "Level", "RunOutput", "Tracer", "get_level", "load_levels",
     # LLM (core.llm)
@@ -39,7 +40,8 @@ __all__ = [
     # 실행·비교·채점 (core.evaluation)
     "apply_labels", "compare", "consistency", "create_ai_run", "matches", "run_ai_agent", "run_rule_agent", "score",
     # 분석 (core.analysis)
-    "Aggregator", "analyze", "grounding_problems", "report_submit_tool",
+    "Aggregator", "analyze", "analyze_perspectives", "grounding_problems", "merge_findings", "perspective_errors",
+    "report_submit_tool",
     # 개선 루프 (core.improvement)
     "apply_params", "apply_spec", "constraint_errors", "constraint_violations", "finding_slices", "params_errors",
     "propose", "simulate_params", "analysis_memory_text", "build_memory", "collect_memory", "proposal_memory_text",

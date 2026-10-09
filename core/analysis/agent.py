@@ -81,10 +81,17 @@ _problems = grounding_problems
 
 
 def analyze(pack: DomainPack, instance, decisions: list[DecisionRecord], llm: LLMClient, llm_config: dict,
-            salt: str = "", max_calls: int = 30, memory_text: str = "") -> dict:
-    """memory_text: 이전 회차에서 사람이 내린 판정 (core.improvement.memory.analysis_memory_text). 비면 입력이 이전과 같다."""
+            salt: str = "", max_calls: int = 30, memory_text: str = "", perspective: dict | None = None) -> dict:
+    """memory_text: 이전 회차에서 사람이 내린 판정 (core.improvement.memory.analysis_memory_text). 비면 입력이 이전과 같다.
+    perspective: 관점 하나 ({id, name, question, tools}, core.analysis.perspectives). 주면 그 관점의 도구만 주고
+    질문을 시스템 프롬프트 뒤에 붙인다. 없으면 입력이 이전과 같다."""
     dimensions = pack.dimensions()
     tools = Aggregator(decisions, dimensions).tools() + pack.analysis_tools(instance, decisions)
+    system = SYSTEM
+    if perspective:
+        allowed = set(perspective["tools"])
+        tools = [t for t in tools if t["name"] in allowed]
+        system = f"{SYSTEM}\n\n관점: {perspective['name']}\n{perspective['question'].strip()}"
     metric_names = sorted(pack.metrics(instance, decisions))
 
     def check(submission: dict, calls: dict) -> list[str]:
@@ -95,7 +102,7 @@ def analyze(pack: DomainPack, instance, decisions: list[DecisionRecord], llm: LL
 
     user = ("실행 결과를 분석해 실패 패턴과 원인 가설을 찾아라. 먼저 overview로 전체와 차원을 확인하라.\n"
             f"분석 대상 항목 수: {len(decisions)}") + memory_text
-    result = run_tool_loop(llm, system=SYSTEM, user=user, tools=tools, submit_tool=report_submit_tool(dimensions, metric_names),
+    result = run_tool_loop(llm, system=system, user=user, tools=tools, submit_tool=report_submit_tool(dimensions, metric_names),
                            max_calls=max_calls, salt=salt, check_submission=check)
 
     kept, dropped = [], []
