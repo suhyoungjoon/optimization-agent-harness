@@ -163,6 +163,28 @@ export interface Finding {
   metric?: { name: string; direction: "low" | "high" };
   hypothesis?: string;
   cited_calls: string[];
+  // 관점별 분석 (M12-b): 이 발견을 찾은 관점과, 같은 발견에 대한 다른 관점의 해석
+  perspectives?: string[];
+  perspective_names?: string[];
+  alternatives?: FindingAlternative[];
+}
+
+export interface FindingAlternative {
+  perspective: string;
+  perspective_name: string;
+  title: string;
+  description: string;
+  hypothesis?: string | null;
+  cited_calls: string[];
+}
+
+export interface PerspectiveResult {
+  name: string;
+  error: string | null;
+  findings: number;
+  dropped: number;
+  stop: string | null;
+  usage?: Usage & { llm_calls?: number; seconds?: number };
 }
 
 export interface ToolCall {
@@ -170,6 +192,7 @@ export interface ToolCall {
   input: unknown;
   output: unknown;
   is_error: boolean;
+  perspective?: string;
 }
 
 export interface FaultScore {
@@ -233,6 +256,7 @@ export interface Report {
     feedback_rounds: number;
     usage: Usage & { llm_calls?: number; seconds?: number };
     memory?: Memory | null;
+    perspectives?: Record<string, PerspectiveResult>;
   } | null;
   score: Score | null;
 }
@@ -369,6 +393,7 @@ export interface AgentsGraph {
   reason?: string;
   demo?: boolean;
   level?: string;
+  perspectives?: boolean;
   top: { nodes: (WorkflowNode & { agent?: boolean })[]; edges: WorkflowEdge[] };
   agents: Record<string, { nodes: WorkflowNode[]; edges: WorkflowEdge[] }>;
 }
@@ -388,5 +413,5 @@ export interface AgentsRun extends Omit<WorkflowRun, "ids" | "inputs" | "approva
   counts: Record<string, Record<string, number>>;
   last_event: AgentEvent | null;
   proposals: { title: string; kind: string; status: string; errors: string[] }[];
-  inputs: { domain?: string; seed?: number; faults?: string[]; items?: number; level?: string };
+  inputs: { domain?: string; seed?: number; faults?: string[]; items?: number; level?: string; perspectives?: boolean };
 }

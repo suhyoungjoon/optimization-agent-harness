@@ -24,9 +24,10 @@ export interface RunOptions {
 }
 
 export const api = {
-  agentsGraph: (level: string) => request<AgentsGraph>(`/agents/graph?level=${level}`),
+  agentsGraph: (level: string, domain?: string, perspectives = false) =>
+    request<AgentsGraph>(`/agents/graph?level=${level}` + (perspectives && domain ? `&domain=${domain}&perspectives=true` : "")),
   agentsStart: (body: { domain: string; seed: number; faults: string[]; items: number; level: string; metrics: unknown[];
-    llm: "fake" | "claude"; pace: number }) => request<AgentsRun>("/agents/runs", { method: "POST", body: JSON.stringify(body) }),
+    llm: "fake" | "claude"; pace: number; perspectives?: boolean }) => request<AgentsRun>("/agents/runs", { method: "POST", body: JSON.stringify(body) }),
   agentsGet: (id: string, after = -1) => request<AgentsRun>(`/agents/runs/${id}?after=${after}`),
   agentsStep: (id: string, action: "next" | "approve" | "reject", note = "") =>
     request<AgentsRun>(`/agents/runs/${id}/step`, { method: "POST", body: JSON.stringify({ action, note }) }),
@@ -72,8 +73,8 @@ export const api = {
   // --- M4: 분석·개선 ---
   params: (domain: string) =>
     request<{ params: Record<string, unknown>; spec_sections: Record<string, string> }>(`/domains/${domain}/params`),
-  analyze: (runId: string) =>
-    request<{ id: string }>("/analysis", { method: "POST", body: JSON.stringify({ run_id: runId }) }),
+  analyze: (runId: string, opts: { perspectives?: boolean } = {}) =>
+    request<{ id: string }>("/analysis", { method: "POST", body: JSON.stringify({ run_id: runId, ...opts }) }),
   report: (id: string) => request<Report>(`/analysis/${id}`),
   label: (id: string, findingId: string, label: FindingLabel | null) =>
     request<Report>(`/analysis/${id}/labels`, { method: "POST", body: JSON.stringify({ finding_id: findingId, label }) }),

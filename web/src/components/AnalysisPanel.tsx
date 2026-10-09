@@ -39,6 +39,7 @@ export default function AnalysisPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [focus, setFocus] = useState<string | null>(null);
+  const [byPerspective, setByPerspective] = useState(false);
   const polled = usePoll<Report>(reportId ? () => api.report(reportId) : null, (r) => r.status !== "running", [reportId]);
   const report = polled?.id === reportId ? polled : null;
   const [labelled, setLabelled] = useState<Report | null>(null);
@@ -88,9 +89,14 @@ export default function AnalysisPanel({
           {TERMS.rule.label} 전체 실행
         </button>
         <button className="primary" disabled={!!busy || !run} title={tip("aiAnalysis")}
-          onClick={() => guard("분석 요청 중", async () => setReportId((await api.analyze(run!.run_id)).id))}>
+          onClick={() => guard("분석 요청 중", async () =>
+            setReportId((await api.analyze(run!.run_id, { perspectives: byPerspective })).id))}>
           {TERMS.aiAnalysis.label} 실행
         </button>
+        <label title="실패 패턴·자원 활용·시간 수급처럼 관점마다 AI를 따로(동시에) 돌린 뒤 합칩니다. 같은 발견에 대한 관점별 해석은 나란히 보여 줍니다. 비용은 관점 수만큼 늘어납니다">
+          <input type="checkbox" checked={byPerspective} onChange={(e) => setByPerspective(e.target.checked)} disabled={!!busy} />{" "}
+          관점별로 분석
+        </label>
       </div>
       <div className="status-line" aria-live="polite">
         {busy && <span className="muted">{busy}…</span>}
@@ -102,7 +108,7 @@ export default function AnalysisPanel({
       {current?.status === "done" && current.body && current.score && (
         <>
           <AnalysisVerdict report={current} />
-          {current.body.summary && <p className="summary">{current.body.summary}</p>}
+          {current.body.summary && <p className="summary" style={{ whiteSpace: "pre-line" }}>{current.body.summary}</p>}
 
           <Details summary="상세보기 (정답 대조 · 분석 비용·시간)">
             <div className="tiles">
@@ -136,6 +142,20 @@ export default function AnalysisPanel({
                 )}
               </div>
             </div>
+            {current.body.perspectives && (
+              <div className="tiles">
+                {Object.entries(current.body.perspectives).map(([pid, p]) => (
+                  <div key={pid} className={`tile ${p.error ? "tile-critical" : ""}`}>
+                    <div className="tile-label">관점: {p.name}</div>
+                    <div className="tile-value">{p.error ? "실패" : `발견 ${p.findings}건`}</div>
+                    <div className="tile-note">
+                      {p.error ? p.error : `${fmtUsd(p.usage?.cost_usd)} · ${fmtSeconds(p.usage?.seconds)} · ${TERMS.llm.label} ${p.usage?.llm_calls ?? 0}회`
+                        + (p.dropped ? ` · 근거 부족으로 뺌 ${p.dropped}건` : "")}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             <p className="muted small">정답은 채점에만 쓰며 {TERMS.aiAnalysis.label}은 보지 못합니다.</p>
           </Details>
 
@@ -296,6 +316,9 @@ function FindingCard({
         )}
       </header>
       <div className="chips">
+        {(finding.perspective_names ?? []).map((name) => (
+          <span key={name} className="chip chip-perspective" title="이 발견을 찾은 관점">관점: {name}</span>
+        ))}
         {Object.entries(finding.slice ?? {}).map(([dim, values]) => (
           <span key={dim} className="chip" title={`${dim}: ${values.join(", ")}`}>
             {dimensionLabels[dim] ?? dim}: {values.map((v) => valueNames[String(v)] ?? v).join(", ")}
@@ -310,9 +333,17 @@ function FindingCard({
           </span>
         )}
       </div>
-      <Details summary={`상세보기 (설명${finding.hypothesis ? " · 추정 원인" : ""} · ${TERMS.evidence.label} ${finding.cited_calls.length}건)`}>
+      <Details summary={`상세보기 (설명${finding.hypothesis ? " · 추정 원인" : ""}${finding.alternatives?.length ? ` · 다른 관점의 해석 ${finding.alternatives.length}건` : ""} · ${TERMS.evidence.label} ${finding.cited_calls.length}건)`}>
         <p>{finding.description}</p>
-        {finding.hypothesis && <p className="muted">추정 원인: {finding.hypothesis}</p>}
+        {finding.hypothesis && (
+          <p className="muted">추정 원인{finding.alternatives?.length ? ` (${finding.perspective_names?.[0]})` : ""}: {finding.hypothesis}</p>
+        )}
+        {(finding.alternatives ?? []).map((a) => (
+          <div key={a.perspective} className="alternative" title="같은 구간을 다른 관점에서 본 해석입니다. 어느 해석이 맞는지는 사람이 판단합니다">
+            <strong>{a.perspective_name}</strong>: {a.title}
+            {a.hypothesis && <p className="muted">추정 원인 ({a.perspective_name}): {a.hypothesis}</p>}
+          </div>
+        ))}
         {finding.cited_calls.map((id) => calls[id] && <Evidence key={id} call={calls[id]} />)}
       </Details>
     </article>

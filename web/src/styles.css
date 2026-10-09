@@ -244,6 +244,9 @@ code.json { color: var(--text-secondary); word-break: break-all; }
 .label-buttons button.selected.danger { background: var(--critical); }
 .chip { display: inline-block; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; font-size: 12px; color: var(--text-secondary); }
 .chips { margin: 6px 0; }
+.chip-perspective { border-style: dashed; color: var(--text); }
+.alternative { border-left: 3px solid var(--border); padding: 2px 8px; margin: 6px 0; font-size: 13px; }
+.alternative p { margin: 2px 0 0; }
 .evidence-call { margin-top: 6px; }
 .evidence-call summary { cursor: pointer; font-size: 12px; color: var(--text-secondary); }
 .evidence-table { border-collapse: collapse; font-size: 12px; margin-top: 6px; }
