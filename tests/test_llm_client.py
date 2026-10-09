@@ -94,6 +94,24 @@ def test_env_overrides_cache(monkeypatch):
     assert load_config()["cache"] is False
 
 
+def test_env_overrides_model_thinking_effort(monkeypatch):
+    """실험할 때만 모델을 바꾼다 (설정 파일은 그대로). 사용한 모델은 사용량 기록에 남는다."""
+    base = load_config()
+    monkeypatch.setenv("LLM_MODEL", "claude-sonnet-5-5")
+    monkeypatch.setenv("LLM_THINKING", "adaptive")
+    monkeypatch.setenv("LLM_EFFORT", "medium")
+    c = load_config()
+    assert (c["model"], c["thinking"], c["effort"]) == ("claude-sonnet-5-5", "adaptive", "medium")
+    monkeypatch.setenv("LLM_EFFORT", "none")                 # 깊이를 보내지 않음
+    assert load_config()["effort"] is None
+    monkeypatch.delenv("LLM_MODEL"); monkeypatch.delenv("LLM_THINKING"); monkeypatch.delenv("LLM_EFFORT")
+    assert load_config()["model"] == base["model"]
+
+
+def test_usage_dict_records_model(config):
+    assert Usage().to_dict("claude-haiku-4-5", config)["model"] == "claude-haiku-4-5"
+
+
 def test_usage_cost(config):
     usage = Usage()
     tokens = {"input_tokens": 1_000_000, "output_tokens": 100_000,

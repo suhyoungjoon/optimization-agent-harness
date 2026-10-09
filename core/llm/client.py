@@ -43,6 +43,13 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
     env_cache = os.environ.get("LLM_CACHE")
     if env_cache is not None:
         config["cache"] = env_cache not in ("0", "false", "False", "")
+    # 실험용 덮어쓰기 (설정 파일은 그대로). 사용한 모델은 사용량 기록(usage.model)에 남는다
+    if os.environ.get("LLM_MODEL"):
+        config["model"] = os.environ["LLM_MODEL"]
+    if os.environ.get("LLM_THINKING"):
+        config["thinking"] = os.environ["LLM_THINKING"]
+    if os.environ.get("LLM_EFFORT"):
+        config["effort"] = None if os.environ["LLM_EFFORT"] in ("none", "null") else os.environ["LLM_EFFORT"]
     return config
 
 
@@ -96,7 +103,7 @@ class Usage:
         return cost / 1_000_000
 
     def to_dict(self, model: str, config: dict) -> dict:
-        return {"calls": self.calls, "cached_calls": self.cached_calls, **self.tokens,
+        return {"model": model, "calls": self.calls, "cached_calls": self.cached_calls, **self.tokens,
                 "cost_usd": self.cost_usd(model, config)}
 
 

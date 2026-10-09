@@ -1,4 +1,5 @@
 # LLM 설정. 모델 교체는 이 파일만 바꾼다 (코드는 core/llm/client.py 한 곳에서만 호출).
+# 실험할 때만 바꾸려면 환경변수 LLM_MODEL, LLM_THINKING, LLM_EFFORT로 덮어쓴다 (파일은 그대로).
 model: claude-haiku-4-5       # 비용 절약용 (실제 API 실험, 2026-10). 이전: claude-sonnet-5
 # 생각(thinking)과 깊이(effort)는 모델마다 지원이 다르다. 모델을 바꿀 때 두 줄도 같이 맞춘다.
 #   Sonnet 5 / Opus 5 계열: thinking: adaptive, effort: low | medium | high | xhigh | max
@@ -16,5 +17,7 @@ pricing_per_mtok:
   claude-opus-5: {input: 5.0, output: 25.0}
   claude-opus-5-5: {input: 4.0, output: 20.0}
   claude-haiku-4-5: {input: 1.0, output: 5.0}   # 2026-10 확인
+  claude-sonnet-5-5: {input: 2.0, output: 10.0}  # 2026-10 확인
+  claude-haiku-5-5: {input: 0.10, output: 0.50}  # 2026-10 확인. 프롬프트 10만 토큰 이하 단가 (초과 시 0.50 / 2.50)
 # 프롬프트 캐시 단가 배율 (입력 단가 대비): 쓰기 5분 TTL, 읽기
 cache_multipliers: {write: 1.25, read: 0.1}
