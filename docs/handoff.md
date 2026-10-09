@@ -153,6 +153,17 @@ def constraint_violations(constraints, candidate_params: dict, simulation: dict 
 - **패키지**: `propose(..., constraints=제약)` — 개선 에이전트 입력에 붙고, 에이전트의 `simulate_params` 도구 결과에 `constraint_violations`가 함께 돌아간다. 제약이 없으면 입력·LLM 캐시 키는 이전과 같다.
 - **API**: `POST /proposals {"report_id": ..., "constraints": [...]}` (형식이 틀리면 400). 개선안 묶음 `meta.constraints`에 저장되고, `POST /proposals/{id}/simulate` 결과에 `constraint_violations`가 붙는다 (명세 개선안은 지표 제약만).
 
+### 2.8-2 회차 간 장기 기억 — `core/improvement/memory.py` (M12-c)
+
+```python
+def collect_memory(store, domain, params_version=None, limit=10) -> dict   # 기존 기록에서 반려 개선안·발견 판정을 모음
+def build_memory(rejections, judgments, params_version, limit=10) -> dict   # {"rejections", "judgments", "item_ids", "version"}
+def analysis_memory_text(memory) -> str    # analyze(..., memory_text=...)에 넘길 문단 (없으면 "")
+def proposal_memory_text(memory) -> str    # propose(..., memory_text=...)에 넘길 문단 (없으면 "")
+```
+
+`Store.rejected_proposals(domain)`, `Store.labeled_reports(domain)`이 출처다. 다른 레포가 자기 저장소를 쓴다면 `build_memory`에 같은 형식의 항목 목록을 직접 넘긴다. 쓴 기억 dict를 실행 기록에 함께 저장해야 재현할 수 있다 (`CLAUDE.md` 원칙 4).
+
 ### 2.9 params 버전 관리
 
 - `params.yaml`의 최상위 `version: int`. `write_params`가 승인 때 +1 하고 ruamel.yaml로 주석을 보존해 쓴다.
