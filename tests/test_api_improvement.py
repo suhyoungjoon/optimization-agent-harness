@@ -178,3 +178,36 @@ def test_cause_confirmation_label(tmp_path, files):
     assert ok["score"]["faults"]["P3"]["status"] == "detected" and ok["score"]["detected"] == 1
     wrong = client.post(f"/analysis/{report['id']}/labels", json={"finding_id": "F1", "label": "cause_wrong"}).json()
     assert wrong["score"]["faults"]["P3"]["status"] == "missed" and wrong["score"]["pending"] == 0
+
+
+AREA_LIMIT = {"type": "param", "path": "matching.area_extension_km[2]", "max": 3, "source": "현장 담당자",
+              "note": "관할 밖 3km까지만 출동 가능"}
+
+
+def test_constraints_are_stored_and_checked_in_simulation(client):
+    """제약은 개선안 묶음에 남고, 시뮬레이션 결과에 위반이 표시된다. 위반이 있어도 승인은 사람이 정한다."""
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    report = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+
+    bad = client.post("/proposals", json={"report_id": report["id"], "constraints": [{**AREA_LIMIT, "max": "3km"}]})
+    assert bad.status_code == 400 and "숫자" in bad.text
+
+    bat = client.post("/proposals", json={"report_id": report["id"], "constraints": [AREA_LIMIT]}).json()
+    batch = wait(client, f"/proposals/batches/{bat['id']}")
+    assert batch["meta"]["constraints"] == [AREA_LIMIT]
+    boundary = batch["proposals"][0]                                  # 경계 지역만 3단계 4km → 제약(3km) 위반
+    sim = client.post(f"/proposals/{boundary['id']}/simulate", json={}).json()["simulation"]
+    assert len(sim["constraint_violations"]) == 1 and "구간 조건" in sim["constraint_violations"][0]["message"]
+    approved = client.post(f"/proposals/{boundary['id']}/approve", json={"note": "현장과 재협의 완료"})
+    assert approved.status_code == 200 and approved.json()["status"] == "approved"
+
+
+def test_no_constraints_no_violation_field(client):
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    report = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    batch = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id']}).json()['id']}")
+    assert "constraints" not in (batch["meta"] or {})
+    sim = client.post(f"/proposals/{batch['proposals'][0]['id']}/simulate", json={}).json()["simulation"]
+    assert "constraint_violations" not in sim

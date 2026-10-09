@@ -18,6 +18,7 @@ from core.evaluation.runner import create_ai_run, run_ai_agent
 from core.harness.levels import load_levels
 from core.improvement.approval import write_params, write_spec
 from core.improvement.changes import apply_params, apply_spec
+from core.improvement.constraints import constraint_errors, constraint_violations
 from core.improvement.proposer import finding_slices, propose
 from core.improvement.simulate import simulate_params
 from core.interfaces import DecisionRecord
@@ -40,6 +41,7 @@ class LabelRequest(BaseModel):
 class ProposalRequest(BaseModel):
     report_id: str
     cached: bool = False
+    constraints: list[dict] | None = None   # 사람이 정한 한도 (core.improvement.constraints 형식). 개선안 묶음에 저장
 
 
 class SimulateRequest(BaseModel):
@@ -161,20 +163,28 @@ def register(app: FastAPI, ctx: Context) -> None:
             if batch is None:
                 raise HTTPException(404, "이 리포트로 만든 저장된 개선안이 없음")
             return JSONResponse(status_code=202, content={"id": batch["id"], "status": "done", "replayed": True})
+        if req.constraints:
+            _run, _dataset, pack, instance, _truth, decisions = _run_context(store, report["run_id"])
+            errors = constraint_errors(req.constraints, load_params(pack), sorted(pack.metrics(instance, decisions)))
+            if errors:
+                raise HTTPException(400, "; ".join(errors))
         llm = _llm_or_503(ctx)
         batch_id = store.create_batch(req.report_id)
-        ctx.executor.submit(_propose_job, batch_id, report, llm)
+        ctx.executor.submit(_propose_job, batch_id, report, llm, req.constraints or None)
         return JSONResponse(status_code=202, content={"id": batch_id, "status": "running"})
 
-    def _propose_job(batch_id: str, report: dict, llm):
+    def _propose_job(batch_id: str, report: dict, llm, constraints: list[dict] | None = None):
         try:
             _run, dataset, pack, instance, _truth, _decisions = _run_context(store, report["run_id"])
             params = load_params(pack)
             spec_text = Path(pack.spec_path()).read_text(encoding="utf-8")
             out = propose(lambda p: load_pack(pack.name, p), instance, params, spec_text, pack.dimensions(),
-                          report["body"], llm, ctx.llm_config, salt=f"proposals:{report['id']}")
+                          report["body"], llm, ctx.llm_config, salt=f"proposals:{report['id']}",
+                          constraints=constraints)
             meta = {"usage": out["usage"], "trials": out["trials"], "stop": out["stop"],
                     "params_version": params.get("version")}
+            if constraints:
+                meta["constraints"] = constraints
             store.finish_batch(batch_id, report["id"], out["proposals"], meta)
         except Exception as exc:
             store.fail_batch(batch_id, repr(exc))
@@ -185,6 +195,15 @@ def register(app: FastAPI, ctx: Context) -> None:
         if batch is None:
             raise HTTPException(404, f"unknown batch: {batch_id}")
         return batch
+
+    def batch_constraints(p: dict) -> list[dict]:
+        return ((store.get_batch(p["batch_id"]) or {}).get("meta") or {}).get("constraints") or []
+
+    def with_constraint_check(result: dict, constraints: list[dict], candidate_params: dict | None) -> dict:
+        """제약이 있으면 시뮬레이션 결과에 위반 목록을 붙인다 (표시만, 승인은 막지 않음)."""
+        if constraints:
+            result["constraint_violations"] = constraint_violations(constraints, candidate_params or {}, result)
+        return result
 
     def proposal_or_404(proposal_id: str) -> dict:
         p = store.get_proposal(proposal_id)
@@ -206,9 +225,11 @@ def register(app: FastAPI, ctx: Context) -> None:
         run, dataset, pack, instance, _truth, _decisions = _run_context(store, report["run_id"])
         if p["kind"] == "params":
             params = load_params(pack)
+            candidate = apply_params(params, p["body"])
             result = simulate_params(lambda q: load_pack(pack.name, q), instance, params,
-                                     apply_params(params, p["body"]), finding_slices(report["body"]))
+                                     candidate, finding_slices(report["body"]))
             result["params_version"] = params.get("version")
+            with_constraint_check(result, batch_constraints(p), candidate)
             return store.update_proposal(proposal_id, status="simulated", simulation=result)
 
         # spec: AI agent를 개선 전·후 명세로 한 번씩 실행 (비용 발생 → 확인 필요)
@@ -253,6 +274,7 @@ def register(app: FastAPI, ctx: Context) -> None:
                       "violations_after": len(runs["after"]["violations"] or []),
                       "run_ids": {k: r["run_id"] for k, r in runs.items()},
                       "cost_usd": cost, "seconds": time.time() - started}
+            with_constraint_check(result, batch_constraints(p), None)   # 명세 개선안: 지표 제약만
             store.update_proposal(proposal_id, status="simulated", simulation=result)
         except Exception as exc:
             store.update_proposal(proposal_id, status="proposed",
