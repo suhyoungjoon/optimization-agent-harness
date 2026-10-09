@@ -249,3 +249,21 @@ def test_second_cycle_gets_human_judgments_as_memory(tmp_path, files):
     plain = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id'], 'use_memory': False}).json()['id']}")
     assert plain["body"]["memory"] is None
     assert "잘못 짚음" not in llms[-1].calls[0]["messages"][0]["content"]
+
+
+def test_llm_factory_receives_role(tmp_path, files):
+    """분석과 개선안 에이전트는 역할별 모델로 만든다 (configs/llm.yaml의 roles)."""
+    roles = []
+
+    def factory(role=None):
+        roles.append(role)
+        return FakeLLM(analyst_or_proposer)
+
+    client = TestClient(create_app(tmp_path / "h.db", serve_web=False, llm_factory=factory))
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    report = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id']}).json()['id']}")
+    assert roles == ["analysis", "proposals"]
+    llm = client.get("/harness/levels").json()["llm"]
+    assert set(llm["roles"]) >= {"analysis", "proposals"} and llm["roles"]["proposals"]["model"]

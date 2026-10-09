@@ -3,6 +3,7 @@
 실행: python -m api.main  (web/dist가 있으면 프런트엔드도 함께 서빙)
 """
 
+import inspect
 import json
 import os
 import threading
@@ -76,12 +77,20 @@ def _rel(path: Path) -> str:
         return str(path)          # 시연 모드 작업 복사본 등 레포 밖
 
 
-def _no_llm_in_demo():
+def _no_llm_in_demo(role=None):
     raise RuntimeError("시연 모드에서는 LLM을 호출하지 않는다 (저장된 결과만 재생)")
 
 
+def accepts_role(factory: Callable) -> bool:
+    """llm_factory가 역할 인자를 받는지 (테스트의 인자 없는 팩토리도 그대로 쓰기 위해)."""
+    try:
+        return len(inspect.signature(factory).parameters) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def create_app(db_path: str | Path | None = None, serve_web: bool = True,
-               llm_factory: Callable[[], LLMClient] | None = None,
+               llm_factory: Callable[..., LLMClient] | None = None,
                demo_bundle: str | Path | None = None, demo_work_root: str | Path | None = None,
                replay_seconds: float = REPLAY_SECONDS) -> FastAPI:
     """demo_bundle을 주면 시연 모드: 번들의 작업 복사본을 쓰고, LLM은 만들지 않고, AI 결과는 재생만 한다."""
@@ -94,7 +103,13 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
         store = Store(db_path or os.environ.get("HARNESS_DB", DEFAULT_DB))
     llm_config = load_config()
     if not demo:
-        make_llm = llm_factory or (lambda: AnthropicClient(llm_config))
+        # role: None(배정), "analysis", "proposals" — configs/llm.yaml의 roles로 역할별 모델
+        if llm_factory is None:
+            make_llm = lambda role=None: AnthropicClient(load_config(role=role))  # noqa: E731
+        elif accepts_role(llm_factory):
+            make_llm = llm_factory
+        else:
+            make_llm = lambda role=None: llm_factory()  # noqa: E731
     executor = ThreadPoolExecutor(max_workers=llm_config.get("concurrency", 4))
     progress = Progress()
     replay = ReplayClock(replay_seconds)
@@ -128,8 +143,10 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
     @app.get("/harness/levels")
     def levels():
         return {"levels": {name: to_jsonable(level) for name, level in load_levels().items()},
-                "llm": {k: llm_config.get(k) for k in ("model", "thinking", "effort", "cache", "concurrency",
-                                                         "max_llm_calls_per_item")},
+                "llm": {**{k: llm_config.get(k) for k in ("model", "thinking", "effort", "cache", "concurrency",
+                                                            "max_llm_calls_per_item")},
+                        "roles": {role: {k: cfg.get(k) for k in ("model", "thinking", "effort")}
+                                  for role in (llm_config.get("roles") or {}) for cfg in [load_config(role=role)]}},
                 "demo": demo.manifest if demo else None}
 
     @app.get("/demo")

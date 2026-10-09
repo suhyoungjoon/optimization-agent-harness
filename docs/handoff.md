@@ -183,7 +183,9 @@ AI agent 러너 전용이다. 규칙 엔진·개선 루프 단계는 트레이�
 ### 2.11 LLM 클라이언트 — `core/llm/client.py`, `core/llm/tool_loop.py`
 
 ```python
-def load_config(path: Path = <configs/llm.yaml>) -> dict      # 환경변수 LLM_CACHE가 cache를 덮어씀
+def load_config(path: Path = <configs/llm.yaml>, role: str | None = None) -> dict
+# role: roles.<role>(model·thinking·effort·max_tokens)을 기본값 위에 덮음 (analysis, proposals). 없으면 기본값(배정)
+# 환경변수 LLM_CACHE가 cache를, LLM_MODEL·LLM_THINKING·LLM_EFFORT가 역할 설정보다 우선해 덮어씀
 class LLMClient(Protocol):
     model: str
     def create(self, *, system: list[dict], messages: list[dict], tools: list[dict], salt: str = "") -> LLMResponse

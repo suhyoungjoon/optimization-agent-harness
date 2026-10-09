@@ -108,6 +108,39 @@ def test_env_overrides_model_thinking_effort(monkeypatch):
     assert load_config()["model"] == base["model"]
 
 
+def test_role_config_overrides_base(monkeypatch, tmp_path):
+    """역할(analysis, proposals)마다 모델을 따로 쓴다. 역할이 없으면 기본값(배정 기준선). 환경변수는 역할보다 우선."""
+    for k in ("LLM_MODEL", "LLM_THINKING", "LLM_EFFORT"):
+        monkeypatch.delenv(k, raising=False)
+    path = tmp_path / "llm.yaml"
+    path.write_text("""model: base-model
+thinking: "off"
+effort: null
+max_tokens: 100
+roles:
+  analysis: {model: small-model, thinking: adaptive, effort: medium}
+  proposals: {model: big-model, thinking: adaptive, effort: medium}
+""", encoding="utf-8")
+    base = load_config(path)
+    assert (base["model"], base["thinking"], base["effort"]) == ("base-model", "off", None)
+    a = load_config(path, role="analysis")
+    assert (a["model"], a["thinking"], a["effort"], a["max_tokens"]) == ("small-model", "adaptive", "medium", 100)
+    assert load_config(path, role="proposals")["model"] == "big-model"
+    assert load_config(path, role="unknown")["model"] == "base-model"
+    monkeypatch.setenv("LLM_MODEL", "exp-model")
+    assert load_config(path, role="analysis")["model"] == "exp-model"
+
+
+def test_repo_config_keeps_assignment_baseline():
+    """배정 기준선은 Haiku 4.5, 생각 끔. 분석·개선안은 모델 비교 실험 결과에 따라 역할별로 (실험 보고서 6.9절)."""
+    import os
+    if any(os.environ.get(k) for k in ("LLM_MODEL", "LLM_THINKING", "LLM_EFFORT")):
+        pytest.skip("실험용 환경변수가 설정되어 있음")
+    assert load_config()["model"] == "claude-haiku-4-5"
+    assert load_config(role="analysis")["model"] == "claude-haiku-5-5"
+    assert load_config(role="proposals")["model"] == "claude-opus-5-5"
+
+
 def test_usage_dict_records_model(config):
     assert Usage().to_dict("claude-haiku-4-5", config)["model"] == "claude-haiku-4-5"
 

@@ -38,8 +38,15 @@ def api_key_from_env() -> str | None:
     return next((os.environ[name] for name in API_KEY_ENVS if os.environ.get(name)), None)
 
 
-def load_config(path: Path = CONFIG_PATH) -> dict:
+ROLE_KEYS = ("model", "thinking", "effort", "max_tokens")
+
+
+def load_config(path: Path = CONFIG_PATH, role: str | None = None) -> dict:
+    """role: 역할별 설정(roles.<role>)을 기본값 위에 덮는다 (예: analysis, proposals). 없으면 기본값.
+    실험용 환경변수(LLM_MODEL 등)는 역할보다 우선한다."""
     config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    override = ((config.get("roles") or {}).get(role) or {}) if role else {}
+    config.update({k: v for k, v in override.items() if k in ROLE_KEYS})
     env_cache = os.environ.get("LLM_CACHE")
     if env_cache is not None:
         config["cache"] = env_cache not in ("0", "false", "False", "")

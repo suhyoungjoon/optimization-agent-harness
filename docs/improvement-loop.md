@@ -142,6 +142,17 @@ spec 개선안(③)은 AI agent를 개선 전 명세·개선 후 명세로 각�
 - 쓴 기억(항목과 해시)은 리포트 본문 `memory`, 개선안 묶음 `meta.memory`에 남는다 (재현 조건).
 - `POST /analysis`, `POST /proposals`의 `use_memory`(기본 true)로 끌 수 있다. `GET /memory?domain=`으로 다음 회차에 들어갈 기억을 본다. 기억이 비어 있으면 입력은 이전과 같다.
 
+## 7. 역할별 모델
+
+`configs/llm.yaml`의 `roles`로 분석 agent와 개선 agent가 배정 agent와 다른 모델을 쓴다. 배정은 기준선 비교를 위해 기본값(Haiku 4.5, 생각 끔)을 유지한다.
+
+| 역할 | 모델 | 이유 ([실험 보고서](experiment-real-api-2026-10.md) 6.9절) |
+|---|---|---|
+| 분석 (`analysis`) | Haiku 5.5, 생각 켬, 깊이 medium | 3회 모두 P1·P2·P4를 같은 구간으로 찾았고 근거 검사 탈락 0, 1회 $0.01 미만 |
+| 개선안 (`proposals`) | Opus 5.5, 생각 켬, 깊이 medium | 사람이 교환 효율을 따져 고른 수정안과 같은 설정을 스스로 찾음, 1회 약 $0.3 |
+
+실험할 때는 환경변수 `LLM_MODEL`·`LLM_THINKING`·`LLM_EFFORT`가 역할 설정보다 우선한다. 리포트와 개선안 묶음의 사용량 기록(`usage.model`)에 실제로 쓴 모델이 남는다.
+
 ## 역할 정리
 
 | 누가 | 하는 일 |

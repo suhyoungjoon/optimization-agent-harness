@@ -192,7 +192,7 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
                                          pack.metrics(d["instance"], d["full_rule"]))])
 
     def analysis_agent(state: AgentsState):
-        out = run_tool_agent(analysis_agent_graph(ctx, ctx.make_llm()),
+        out = run_tool_agent(analysis_agent_graph(ctx, ctx.make_llm("analysis")),
                              "실행 결과를 분석해 실패 패턴과 원인 가설을 찾아라. 먼저 overview로 전체와 차원을 확인하라.\n"
                              f"분석 대상 항목 수: {len(d['full_rule'])}")
         kept, dropped = [], []
@@ -217,7 +217,7 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
                                             ensure_ascii=False, indent=1)
                 + "\n\n# 차원\n" + json.dumps({k: v.get("values") for k, v in dims.get("dimensions", {}).items()},
                                              ensure_ascii=False))
-        out = run_tool_agent(proposal_agent_graph(ctx, ctx.make_llm()), user)
+        out = run_tool_agent(proposal_agent_graph(ctx, ctx.make_llm("proposals")), user)
         spec_text = Path(d["pack"].spec_path()).read_text(encoding="utf-8")
         proposals = []
         for p in (out.get("submission") or {}).get("proposals") or []:

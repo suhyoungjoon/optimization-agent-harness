@@ -127,7 +127,7 @@ def register(app: FastAPI, ctx: Context) -> None:
             report_id = store.create_report(req.run_id)
             store.finish_report(report_id, {**stored["body"], "replayed_from": source}, stored["score"])
             return JSONResponse(status_code=202, content={"id": report_id, "status": "done", "replayed": True})
-        llm = _llm_or_503(ctx)
+        llm = _llm_or_503(ctx, "analysis")
         memory = current_memory(run["domain"]) if req.use_memory else None
         report_id = store.create_report(req.run_id)
         ctx.executor.submit(_analyze_job, report_id, req.run_id, llm, memory)
@@ -186,7 +186,7 @@ def register(app: FastAPI, ctx: Context) -> None:
             errors = constraint_errors(req.constraints, load_params(pack), sorted(pack.metrics(instance, decisions)))
             if errors:
                 raise HTTPException(400, "; ".join(errors))
-        llm = _llm_or_503(ctx)
+        llm = _llm_or_503(ctx, "proposals")
         memory = current_memory(store.get_run(report["run_id"])["domain"]) if req.use_memory else None
         batch_id = store.create_batch(req.report_id)
         ctx.executor.submit(_propose_job, batch_id, report, llm, req.constraints or None, memory)
@@ -357,8 +357,9 @@ def register(app: FastAPI, ctx: Context) -> None:
         return rows
 
 
-def _llm_or_503(ctx: Context):
+def _llm_or_503(ctx: Context, role: str | None = None):
+    """role: None(배정), "analysis", "proposals" — configs/llm.yaml roles의 역할별 모델."""
     try:
-        return ctx.make_llm()
+        return ctx.make_llm(role)
     except Exception as exc:
         raise HTTPException(503, f"LLM 클라이언트를 만들 수 없음: {exc}")

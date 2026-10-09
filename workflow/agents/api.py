@@ -45,7 +45,7 @@ def _fake_llm_factory(ctx):
             return base(item, n, messages, tools)
         return wrapped
 
-    def make():
+    def make(role=None):
         if "fake_policy" not in ctx.data:
             ctx.data["fake_policy"] = policy(build_policy(ctx.data["pack"], ctx.data["instance"]))
         return FakeLLM(ctx.data["fake_policy"])
@@ -82,10 +82,10 @@ class AgentRuns:
                 raise HTTPException(501, f"가짜 AI를 쓸 수 없음 (레포에서 실행해야 함): {exc}")
         else:
             try:
-                client = AnthropicClient(config)
+                clients = {role: AnthropicClient(load_config(role=role)) for role in (None, "analysis", "proposals")}
             except Exception as exc:  # 자격 증명이 없는 경우 등
                 raise HTTPException(503, f"LLM 클라이언트를 만들 수 없음: {exc}")
-            ctx.make_llm = lambda: client
+            ctx.make_llm = lambda role=None: clients[role]
         graph = build_flow(ctx, levels)
         inputs = req.model_dump(exclude={"llm", "pace"})
         flow_id = self.runs.start(graph, {**inputs, "log": []}, llm=kind, _ctx=ctx)

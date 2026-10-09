@@ -7,6 +7,11 @@ model: claude-haiku-4-5       # 비용 절약용 (실제 API 실험, 2026-10). �
 thinking: "off"                # adaptive | "off" (따옴표 필요: YAML은 off를 false로 읽는다)
 effort: null
 max_tokens: 16000
+# 역할별 모델 (위 기본값 위에 덮어씀). 배정은 기본값(Haiku 4.5, 기준선 유지), 분석·개선안은 모델 비교 실험 결과로
+# 정했다 (docs/experiment-real-api-2026-10.md 6.9절: 분석은 Haiku 5.5로 충분, 개선안은 Opus 5.5가 확실히 나음)
+roles:
+  analysis: {model: claude-haiku-5-5, thinking: adaptive, effort: medium}
+  proposals: {model: claude-opus-5-5, thinking: adaptive, effort: medium}
 max_llm_calls_per_item: 12     # 한 항목에서 도구 호출 루프가 끝나지 않을 때 끊는 상한
 concurrency: 4                 # 동시에 실행할 run 수 (레벨·반복)
 cache: true                    # 입력 해시 캐시. 최종 측정 때는 끈다 (환경변수 LLM_CACHE=0이 우선)
