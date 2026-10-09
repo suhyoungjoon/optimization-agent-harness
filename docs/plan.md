@@ -542,7 +542,7 @@ M9가 기존 에이전트를 노드로 감싸 연결만 했다면, M10은 **에�
 | 크기 | 그래프 탭 두 개는 탭을 열 때 불러온다 (첫 화면 번들은 그대로, 그래프 탭 +77KB gzip) |
 | 범위 | LangGraph agents 탭만 (사용자 결정). Agent workflow 탭은 그대로 |
 
-**M12 상세 계획: 분석·개선 고도화 — 코어 확장·장기 기억(이 레포)과 현장 의견 대화(별도 레포) (M12-a·M12-b·M12-c 완료, 실제 API 실험은 실험 보고서 6.7~6.10절)**
+**M12 상세 계획: 분석·개선 고도화 — 코어 확장·장기 기억(이 레포)과 현장 의견 대화(별도 레포) (M12-a·M12-b·M12-c 완료, 실제 API 실험은 실험 보고서 6.7~6.10.1절)**
 
 목표: 실제 API 실험에서 드러난 분석·개선 단계의 약점을 두 방향으로 보완한다.
 
@@ -611,7 +611,7 @@ M9가 기존 에이전트를 노드로 감싸 연결만 했다면, M10은 **에�
 | 테스트 | 가짜 AI로: 관점별 도구 묶음만 노출, 겹치는 발견 합치기, 가설이 다른 발견은 따로 유지, 관점 하나가 실패해도 나머지 리포트는 나옴, 관점 파일 형식 검사 |
 | 효과 실험 | 같은 규칙 실행(`seed 42`, P1~P4)에 단일/관점별 각 3회 (`LLM_CACHE=0`). 지표: M12-a로 보강한 채점의 탐지율, P3 원인 일치, P1 구간 일치, 발견 수·중복 수, 비용 |
 | 범위 밖 | 관점을 AI가 스스로 정하는 것, 관점끼리 대화·토론, 관점 수 자동 조절 |
-| 구현 결과 (2026-10-09) | `core/analysis/perspectives.py` (`perspective_errors`, `merge_findings`, `combine_results`, `analyze_perspectives`), `analyze(..., perspective=)`, `core.registry.load_perspectives`. API `POST /analysis {perspectives: true}`, LangGraph `AgentsStart.perspectives`·`GET /agents/graph?domain=&perspectives=true` (관점 노드 병렬 → 합치기). 계획과 다른 점: 합치기 규칙은 `fault_scorer.matches` 대신 "구간 차원이 서로 같고 값·사유가 겹침"으로 했다(정답표 형식에 묶이지 않게). 관점 파일에 "주로 볼 지표"는 넣지 않았다(질문 문단으로 충분). 실험 결과는 실험 보고서 6.10절 |
+| 구현 결과 (2026-10-09) | `core/analysis/perspectives.py` (`perspective_errors`, `merge_findings`, `combine_results`, `analyze_perspectives`), `analyze(..., perspective=)`, `core.registry.load_perspectives`. API `POST /analysis {perspectives: true}`, LangGraph `AgentsStart.perspectives`·`GET /agents/graph?domain=&perspectives=true` (관점 노드 병렬 → 합치기). 계획과 다른 점: 합치기 규칙은 `fault_scorer.matches` 대신 "구간 차원이 서로 같고 값·사유가 겹침"으로 했다(정답표 형식에 묶이지 않게). 관점 파일에 "주로 볼 지표"는 넣지 않았다(질문 문단으로 충분). 실험 결과는 실험 보고서 6.10절. 후속 보강(구간 정리, 관련 발견 `related`, 관점 질문 보완)과 재실험은 6.10.1절 |
 
 *M12-c 회차 간 장기 기억 (이 레포)*
 
