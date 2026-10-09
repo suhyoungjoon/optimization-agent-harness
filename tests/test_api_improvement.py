@@ -3,6 +3,7 @@
 import json
 import shutil
 import time
+from pathlib import Path
 
 import pytest
 import yaml
@@ -57,6 +58,7 @@ def files(tmp_path, monkeypatch):
     params, spec = tmp_path / "params.yaml", tmp_path / "domain-spec.md"
     shutil.copy(DispatchPack.params_path(None), params)
     shutil.copy(DispatchPack.spec_path(None), spec)
+    shutil.copy(Path(DispatchPack.params_path(None)).parent / "analysis_perspectives.yaml", tmp_path)   # 관점별 분석
     monkeypatch.setattr(DispatchPack, "params_path", lambda self: str(params))
     monkeypatch.setattr(DispatchPack, "spec_path", lambda self: str(spec))
     return params, spec
@@ -267,3 +269,23 @@ def test_llm_factory_receives_role(tmp_path, files):
     assert roles == ["analysis", "proposals"]
     llm = client.get("/harness/levels").json()["llm"]
     assert set(llm["roles"]) >= {"analysis", "proposals"} and llm["roles"]["proposals"]["model"]
+
+
+def test_perspective_analysis(tmp_path, files):
+    """관점별 분석: 관점마다 클라이언트를 따로 만들고, 같은 발견은 하나로 합쳐 채점한다."""
+    roles = []
+
+    def factory(role=None):
+        roles.append(role)
+        return FakeLLM(analyst_or_proposer)
+
+    client = TestClient(create_app(tmp_path / "h.db", serve_web=False, llm_factory=factory))
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    rep = client.post("/analysis", json={"run_id": run["run_id"], "perspectives": True, "use_memory": False})
+    report = wait(client, f"/analysis/{rep.json()['id']}")
+    assert report["status"] == "done", report.get("error")
+    body = report["body"]
+    assert roles == ["analysis"] * 3 and set(body["perspectives"]) == {"failure", "resource", "time"}
+    assert [len(f["perspectives"]) for f in body["findings"]] == [3, 3]      # 세 관점이 같은 두 발견을 냄
+    assert report["score"]["detected"] == 1 and body["usage"]["llm_calls"] == 6

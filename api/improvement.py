@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from core.analysis.agent import analyze
+from core.analysis.perspectives import analyze_perspectives
 from core.evaluation.fault_scorer import apply_labels, score
 from core.evaluation.runner import create_ai_run, run_ai_agent
 from core.harness.levels import load_levels
@@ -23,7 +24,7 @@ from core.improvement.memory import analysis_memory_text, collect_memory, propos
 from core.improvement.proposer import finding_slices, propose
 from core.improvement.simulate import simulate_params
 from core.interfaces import DecisionRecord
-from core.registry import load_pack, load_params
+from core.registry import load_pack, load_params, load_perspectives
 from core.storage.store import Store
 
 from .replay import equivalent_run_ids
@@ -33,6 +34,7 @@ class AnalysisRequest(BaseModel):
     run_id: str
     cached: bool = False      # 같은 조건 실행의 저장된 리포트를 재생 (시연 모드에서는 항상)
     use_memory: bool = True   # 이전 회차에서 사람이 내린 판정을 입력에 넣는다 (M12-c). 비교 실험은 false
+    perspectives: bool = False   # 관점별 분석 (M12-b): 도메인의 analysis_perspectives.yaml 관점마다 병렬로 돌려 합친다
 
 
 class LabelRequest(BaseModel):
@@ -128,9 +130,14 @@ def register(app: FastAPI, ctx: Context) -> None:
             store.finish_report(report_id, {**stored["body"], "replayed_from": source}, stored["score"])
             return JSONResponse(status_code=202, content={"id": report_id, "status": "done", "replayed": True})
         llm = _llm_or_503(ctx, "analysis")
+        perspectives = None
+        if req.perspectives:
+            perspectives = load_perspectives(load_pack(run["domain"]))
+            if not perspectives:
+                raise HTTPException(400, "이 도메인에는 분석 관점 파일(analysis_perspectives.yaml)이 없음")
         memory = current_memory(run["domain"]) if req.use_memory else None
         report_id = store.create_report(req.run_id)
-        ctx.executor.submit(_analyze_job, report_id, req.run_id, llm, memory)
+        ctx.executor.submit(_analyze_job, report_id, req.run_id, llm, memory, perspectives)
         return JSONResponse(status_code=202, content={"id": report_id, "status": "running"})
 
     def current_memory(domain: str) -> dict:
@@ -145,11 +152,19 @@ def register(app: FastAPI, ctx: Context) -> None:
         except KeyError:
             raise HTTPException(404, f"unknown domain: {domain}")
 
-    def _analyze_job(report_id: str, run_id: str, llm, memory: dict | None = None):
+    def _analyze_job(report_id: str, run_id: str, llm, memory: dict | None = None, perspectives: list | None = None):
         try:
             _run, dataset, pack, instance, truth, decisions = _run_context(store, run_id)
-            body = analyze(pack, instance, decisions, llm, ctx.llm_config, salt=f"analysis:{run_id}",
-                           memory_text=analysis_memory_text(memory))
+            if perspectives:
+                # 관점마다 클라이언트를 따로 만든다 (첫 관점은 요청 때 만든 것). 대화 상태를 나누지 않게
+                first = [llm]
+                body = analyze_perspectives(pack, instance, decisions,
+                                            lambda: first.pop() if first else ctx.make_llm("analysis"),
+                                            ctx.llm_config, perspectives, salt=f"analysis:{run_id}",
+                                            memory_text=analysis_memory_text(memory))
+            else:
+                body = analyze(pack, instance, decisions, llm, ctx.llm_config, salt=f"analysis:{run_id}",
+                               memory_text=analysis_memory_text(memory))
             body["memory"] = memory
             store.finish_report(report_id, body, score(body["findings"], truth.get("faults", {}), body["calls"]))
         except Exception as exc:
