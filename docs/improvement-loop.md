@@ -153,6 +153,22 @@ spec 개선안(③)은 AI agent를 개선 전 명세·개선 후 명세로 각�
 
 실험할 때는 환경변수 `LLM_MODEL`·`LLM_THINKING`·`LLM_EFFORT`가 역할 설정보다 우선한다. 리포트와 개선안 묶음의 사용량 기록(`usage.model`)에 실제로 쓴 모델이 남는다.
 
+## 8. 관점별 분석 (M12-b)
+
+분석 agent를 관점마다 따로 돌리고(fan-out) 코드로 합친다(fan-in). `POST /analysis`에 `perspectives: true`를 주거나, 문제 찾기 탭에서 "관점별로 분석"을 켠다.
+
+```
+                ┌ 관점: 실패 패턴 (overview, aggregate, list_items) ┐
+실행 결과 ──────┼ 관점: 자원 활용 (overview, worker_stats, aggregate) ┼── 합치기 → 리포트 (채점·개선안은 그대로)
+                └ 관점: 시간 수급 (overview, demand_by_hour, aggregate) ┘
+```
+
+- 관점: 도메인 파일 `analysis_perspectives.yaml` (`id`, `name`, `question`, `tools`). 형식 검사는 `perspective_errors`. 관점의 질문은 분석 시스템 프롬프트 뒤에 붙고, 관점에 없는 도구는 보이지 않는다.
+- 각 관점은 기존 분석 agent 그대로다(근거 검사·인용 규칙 같음). 한 관점이 실패해도 나머지로 리포트를 만들고 실패는 `perspectives.<id>.error`에 남는다.
+- 합치기 (`merge_findings`): 구간의 차원이 서로 같고 값이 겹치며 사유가 겹치면 같은 발견이다. 먼저 나온 관점의 발견이 대표가 되고, 다른 관점의 해석은 `alternatives`에 그대로 남긴다. 어느 해석이 맞는지는 사람이 판단한다.
+- 리포트에 붙는 것: 발견의 `perspectives`·`perspective_names`·`alternatives`, 관점별 결과 `perspectives` (발견 수·탈락·비용·오류), 도구 호출의 `perspective`.
+- 실험 결과(실험 보고서 6.10절): P3를 3회 모두 잡았다(단일은 2회). 같은 문제에 대한 해석이 관점마다 갈렸다. 대신 발견 수와 사람 판정량이 늘고 비용은 약 3배(회차당 약 $0.012)였다. 합치기 규칙이 엄격해 중복이 남는다.
+
 ## 역할 정리
 
 | 누가 | 하는 일 |
