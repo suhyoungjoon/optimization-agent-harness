@@ -132,6 +132,27 @@ def write_params(params_path, proposal: dict) -> tuple[int, int]   # 파일에 �
 def write_spec(spec_path, proposal: dict) -> None
 ```
 
+### 2.8-1 개선 제약 — `core/improvement/constraints.py` (M12-a)
+
+사람(현장·운영)이 정한 한도를 개선안과 시뮬레이션 결과에 대조한다. 위반은 **표시만** 하고 승인은 사람이 정한다. 현장 의견 대화를 다루는 별도 레포는 대화로 정리한 제약을 이 형식으로 넘긴다.
+
+```python
+# 제약 형식 (목록). source(누가)는 필수, note(왜)는 선택
+[{"type": "param", "path": "matching.area_extension_km[2]", "max": 4,
+  "source": "현장 담당자", "note": "강남 3km 초과 시 이동 30분 이상"},          # min / max
+ {"type": "metric", "metric": "on_time_rate", "max_drop": 0.03, "source": "운영팀"}]   # min / max / max_drop / max_rise
+
+def constraint_errors(constraints, params: dict, metric_names: list[str]) -> list[str]   # 형식 오류 (빈 목록 = 통과)
+def constraint_violations(constraints, candidate_params: dict, simulation: dict | None = None) -> list[dict]
+# → [{"index": i, "type": "param"|"metric", "message": "...(출처: ...)"}]
+# param: 전역 값과 구간 조건(override_rules의 set)으로 바꾼 값을 모두 본다. 경로가 목록이면 모든 원소
+# metric: min·max는 개선 후 값, max_drop·max_rise는 simulation의 before 대비 변화량. simulation이 없으면 보지 않음
+```
+
+전달 방법:
+- **패키지**: `propose(..., constraints=제약)` — 개선 에이전트 입력에 붙고, 에이전트의 `simulate_params` 도구 결과에 `constraint_violations`가 함께 돌아간다. 제약이 없으면 입력·LLM 캐시 키는 이전과 같다.
+- **API**: `POST /proposals {"report_id": ..., "constraints": [...]}` (형식이 틀리면 400). 개선안 묶음 `meta.constraints`에 저장되고, `POST /proposals/{id}/simulate` 결과에 `constraint_violations`가 붙는다 (명세 개선안은 지표 제약만).
+
 ### 2.9 params 버전 관리
 
 - `params.yaml`의 최상위 `version: int`. `write_params`가 승인 때 +1 하고 ruamel.yaml로 주석을 보존해 쓴다.
@@ -378,10 +399,10 @@ overrides:                        # 구간 조건
 |---|---|---|
 | 0. 실행 | 데이터셋 재생성 → solve → validate → metrics → 저장 | `core/evaluation/runner.py` `run_rule_agent` |
 | 1. 분석 | 집계 도구로 발견 도출, 근거 없는 수치는 제외 | `core/analysis/agent.py` `analyze`, `grounding.py` |
-| 1-1. 채점 | 정답표 대조 (화면용) | `core/evaluation/fault_scorer.py` `score` |
-| 2. 제안 | LLM이 `get_params`/`get_spec`/`simulate_params` 도구로 시험 후 `submit_proposals` | `core/improvement/proposer.py` `propose` |
+| 1-1. 채점 | 정답표 대조 (화면용). 2단계: 자동 근거 일치(`requires_tools`) + 사람 원인 확인(`confirm_cause` → `labels`의 `cause_ok`/`cause_wrong`, `apply_labels`) | `core/evaluation/fault_scorer.py` `score`·`apply_labels` |
+| 2. 제안 | LLM이 `get_params`/`get_spec`/`simulate_params` 도구로 시험 후 `submit_proposals`. 제약이 있으면 입력과 시뮬레이션 도구 결과에 포함 | `core/improvement/proposer.py` `propose` |
 | 3. 허용 범위 검사 | 제출안마다 `params_errors`(경로 차단 + `check_params`) 또는 `spec_errors` → 오류가 있으면 invalid로 표시 | `core/improvement/changes.py`, `core/params.py` |
-| 4. 시뮬레이션 | params 안: 규칙 엔진 전후 재실행(`simulate_params`, 비용 없음). spec 안: AI agent를 전·후 명세로 2회 실행(비용, 확인 필요) | `core/improvement/simulate.py`, `api/improvement.py` `simulate`·`_simulate_spec_job` |
+| 4. 시뮬레이션 | params 안: 규칙 엔진 전후 재실행(`simulate_params`, 비용 없음). spec 안: AI agent를 전·후 명세로 2회 실행(비용, 확인 필요). 묶음에 제약이 있으면 `constraint_violations` 표시 | `core/improvement/simulate.py`, `core/improvement/constraints.py`, `api/improvement.py` `simulate`·`_simulate_spec_job` |
 | 5. 승인 | 시뮬레이션을 마친 안만(강제 승인은 사유 필수). params → `write_params`(version +1), spec → `write_spec` | `api/improvement.py` `approve`, `core/improvement/approval.py` |
 | 6. 후처리 | 같은 종류의 다른 미결 안을 `stale`로 표시, 이력 조회 | `core/storage/store.py` `mark_stale`, `decided_proposals`, `GET /history` |
 
