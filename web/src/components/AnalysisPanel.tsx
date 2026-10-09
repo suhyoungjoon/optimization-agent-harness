@@ -129,6 +129,11 @@ export default function AnalysisPanel({
                 <div className="tile-note">
                   {fmtSeconds(current.body.usage.seconds)} · {TERMS.llm.label} {current.body.usage.llm_calls ?? 0}회 · 집계 {Object.keys(current.body.calls).length}회
                 </div>
+                {current.body.memory !== undefined && (
+                  <div className="tile-note" title="이전 회차에서 사람이 내린 판정(잘못 짚음·원인 판정)을 AI에게 알려 주었습니다">
+                    {current.body.memory ? `사용한 기억 ${current.body.memory.judgments.length}건` : "기억 없이 분석"}
+                  </div>
+                )}
               </div>
             </div>
             <p className="muted small">정답은 채점에만 쓰며 {TERMS.aiAnalysis.label}은 보지 못합니다.</p>

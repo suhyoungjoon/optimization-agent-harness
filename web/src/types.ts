@@ -196,6 +196,29 @@ export interface Score {
   unlabeled: number;
 }
 
+// 회차 간 장기 기억 (M12-c): 사람이 내린 판단을 다음 회차 에이전트 입력으로
+export interface MemoryItem {
+  id: string;
+  title: string;
+  at?: number;
+  params_version?: number | null;
+  stale?: boolean;
+  // 반려 개선안
+  kind?: "params" | "spec";
+  change?: string;
+  reason?: string;
+  // 발견 판정
+  label?: FindingLabel;
+  hypothesis?: string | null;
+}
+
+export interface Memory {
+  rejections: MemoryItem[];
+  judgments: MemoryItem[];
+  item_ids: string[];
+  version: string | null;
+}
+
 export interface Report {
   id: string;
   run_id: string;
@@ -209,6 +232,7 @@ export interface Report {
     stop: string;
     feedback_rounds: number;
     usage: Usage & { llm_calls?: number; seconds?: number };
+    memory?: Memory | null;
   } | null;
   score: Score | null;
 }
@@ -269,7 +293,7 @@ export interface ProposalBatch {
   report_id: string;
   status: "running" | "done" | "error";
   error?: string | null;
-  meta: { usage: Usage & { seconds?: number }; trials: number; params_version?: number; constraints?: Constraint[] } | null;
+  meta: { usage: Usage & { seconds?: number }; trials: number; params_version?: number; constraints?: Constraint[]; memory?: Memory | null } | null;
   proposals: Proposal[];
 }
 

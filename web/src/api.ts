@@ -1,5 +1,5 @@
 import type {
-  CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DomainDefinition, DecisionRecord, DomainInfo, FindingLabel, HarnessInfo, HistoryRow, Proposal, ProposalBatch, Report, Run,
+  CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DomainDefinition, DecisionRecord, DomainInfo, FindingLabel, HarnessInfo, Memory, HistoryRow, Proposal, ProposalBatch, Report, Run,
   SpecEstimate, TraceRecord, WorkflowGraph, WorkflowRun, AgentsGraph, AgentsRun,
 } from "./types";
 
@@ -89,6 +89,7 @@ export const api = {
   reject: (id: string, note: string) =>
     request<Proposal>(`/proposals/${id}/reject`, { method: "POST", body: JSON.stringify({ note }) }),
   history: () => request<HistoryRow[]>("/history"),
+  memory: (domain: string) => request<Memory>(`/memory?domain=${encodeURIComponent(domain)}`),
 
   // 진행 상황 SSE. 닫는 함수를 돌려준다.
   stream: (runId: string, onEvent: (e: { status: string; done?: number; total?: number }) => void) => {
