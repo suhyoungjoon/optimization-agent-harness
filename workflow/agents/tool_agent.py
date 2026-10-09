@@ -42,8 +42,18 @@ TO_AI, REJECT, PASS = "결과 전달", "반려 → 고쳐 오기", "통과"
 def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, tools: list[dict], submit_tool: dict,
                      check: Callable[[dict, dict], list[str]] | None = None, check_label: str = "검사",
                      feedback: bool = True, max_calls: int = 30, max_feedback: int = 1, salt: str = "",
-                     tool_text: Callable[[str, dict, Any], str] | None = None):
-    """check(submission, calls) → 문제 목록. feedback=False면 문제를 기록만 하고 끝낸다 (돌려보내지 않음)."""
+                     tool_text: Callable[[str, dict, Any], str] | None = None, node_name: str | None = None):
+    """check(submission, calls) → 문제 목록. feedback=False면 문제를 기록만 하고 끝낸다 (돌려보내지 않음).
+    node_name: 이 하위 그래프가 바깥 그래프의 한 노드일 때 (관점별 분석의 관점 노드). 진행 기록을 그 노드 이름으로
+    남기고 내부 단계는 글 앞에 붙인다 (화면이 바깥 그래프의 노드를 밝힌다)."""
+    inner_labels = {"ai": "AI", "tools": "도구", "check": check_label, "nudge": "재촉"}
+
+    def emit(node: str, text: str) -> None:
+        if node_name:
+            ctx.emit(agent, node_name, f"{inner_labels[node]} · {text}")
+        else:
+            ctx.emit(agent, node, text)
+
     handlers = {t["name"]: t["handler"] for t in tools}
     api_tools = [{k: v for k, v in t.items() if k != "handler"} for t in tools] + [submit_tool]
     api_tools[-1] = {**api_tools[-1], "cache_control": {"type": "ephemeral"}}
@@ -56,7 +66,7 @@ def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, to
         n = state.get("llm_calls", 0) + 1
         uses = [b for b in resp.content if b.get("type") == "tool_use"]
         names = ", ".join(u["name"] for u in uses) or "글로만 답함"
-        ctx.emit(agent, "ai", f"{n}번째: {names}")
+        emit("ai", f"{n}번째: {names}")
         if resp.stop_reason == "refusal":
             return {"llm_calls": n, "stop": "refusal"}
         return {"llm_calls": n, "messages": state["messages"] + [{"role": "assistant", "content": resp.content}]}
@@ -93,7 +103,7 @@ def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, to
             results.append({"type": "tool_result", "tool_use_id": use["id"],
                             "content": tool_result_content(ref, out), "is_error": is_error})
             text = tool_text(use["name"], use.get("input") or {}, out) if tool_text else use["name"]
-            ctx.emit(agent, "tools", ("✕ " if is_error else "") + text)
+            emit("tools", ("✕ " if is_error else "") + text)
         if submit_id:
             return {"calls": calls, "pending": results, "submit_id": submit_id}
         return {"calls": calls, "messages": state["messages"] + [{"role": "user", "content": results}]}
@@ -109,20 +119,20 @@ def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, to
         problems = check(submission, state.get("calls") or {}) if check else []
         rounds = state.get("feedback_rounds", 0)
         if problems and feedback and rounds < max_feedback:
-            ctx.emit(agent, "check", f"✕ {problems[0]}" + (f" 외 {len(problems) - 1}건" if len(problems) > 1 else ""))
+            emit("check", f"✕ {problems[0]}" + (f" 외 {len(problems) - 1}건" if len(problems) > 1 else ""))
             results = (state.get("pending") or []) + [{
                 "type": "tool_result", "tool_use_id": use["id"], "is_error": True,
                 "content": "제출을 반려한다. 아래를 고쳐 다시 제출하라.\n- " + "\n- ".join(problems)}]
             return {"feedback_rounds": rounds + 1, "problems": problems, "pending": [], "submit_id": None,
                     "messages": state["messages"] + [{"role": "user", "content": results}]}
-        ctx.emit(agent, "check", "✓ 통과" if not problems else f"문제 {len(problems)}건 기록 (적용 불가로 표시)")
+        emit("check", "✓ 통과" if not problems else f"문제 {len(problems)}건 기록 (적용 불가로 표시)")
         return {"submission": submission, "problems": problems, "stop": "submitted"}
 
     def after_check(state: ToolAgentState) -> str:
         return PASS if state.get("stop") == "submitted" else REJECT
 
     def nudge(state: ToolAgentState):
-        ctx.emit(agent, "nudge", f"{submit_name} 도구로 제출하라고 다시 요청")
+        emit("nudge", f"{submit_name} 도구로 제출하라고 다시 요청")
         return {"nudged": True,
                 "messages": state["messages"] + [{"role": "user", "content": f"{submit_name} 도구로 결과를 제출하라."}]}
 

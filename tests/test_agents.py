@@ -123,3 +123,27 @@ def test_reject_runs_dispatch_agent_again_for_spec_proposal(client):
     snap = step(client, snap["id"])   # 업무 규칙 문서 제안: 배정 에이전트 하위 그래프를 전·후로 다시 실행
     assert snap["counts"]["simulate"]["record"] == 20
     assert lines(snap, "simulate")[-4] == "예외 처리: 경계 지역은 3단계까지 시도"
+
+
+def test_perspective_analysis_fans_out_and_merges(client):
+    """관점별 분석: 분석 에이전트가 관점 노드들(병렬) → 합치기 모양이 되고, 같은 발견은 하나로 합쳐진다."""
+    g = client.get("/agents/graph?level=L3&domain=dispatch&perspectives=true").json()
+    nodes = [n["id"] for n in g["agents"]["analysis_agent"]["nodes"] if not n["id"].startswith("__")]
+    assert g["perspectives"] and nodes == ["perspective_failure", "perspective_resource", "perspective_time", "merge"]
+    edges = {(e["source"], e["target"]) for e in g["agents"]["analysis_agent"]["edges"]}
+    assert {("__start__", f"perspective_{p}") for p in ("failure", "resource", "time")} <= edges
+    assert {(f"perspective_{p}", "merge") for p in ("failure", "resource", "time")} <= edges
+
+    res = client.post("/agents/runs", json={"domain": "dispatch", "seed": 42, "faults": ["P1", "P2", "P3", "P4"],
+                                            "items": 10, "level": "L3", "metrics": METRICS, "pace": 0,
+                                            "perspectives": True})
+    snap = res.json()
+    for node in TOP[:5]:
+        snap = step(client, snap["id"])
+    counts = snap["counts"]["analysis_agent"]
+    # 관점마다 AI 4번(집계 3번 + 제출) + 도구 3번 + 근거 검사 1번 + 결과 1줄 = 9, 합치기 1번
+    assert counts == {"perspective_failure": 9, "perspective_resource": 9, "perspective_time": 9, "merge": 1}
+    out = lines(snap, "analysis_agent")
+    assert "찾은 문제 4건" in out[0] and "심어둔 문제 4개 중 3개 찾음" in out[0]   # 가짜 AI는 관점과 무관하게 같은 4건
+    assert out[1] == "관점별: 실패 패턴 4건 · 자원 활용 4건 · 시간 수급 4건"
+    assert out[2].endswith("(실패 패턴·자원 활용·시간 수급)")

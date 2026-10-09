@@ -102,7 +102,13 @@ def analyze_perspectives(pack: DomainPack, instance, decisions: list[DecisionRec
 
     with ThreadPoolExecutor(max(1, len(perspectives))) as pool:
         results = list(pool.map(run, perspectives))
+    body = combine_results(perspectives, results)
+    body["usage"]["seconds"] = round(time.monotonic() - started, 2)   # 병렬이라 관점별 시간의 합이 아니라 전체 경과
+    return body
 
+
+def combine_results(perspectives: list[dict], results: list[dict]) -> dict:
+    """관점별 analyze 결과(실패면 {"error": ...})를 리포트 하나로 (fan-in). LangGraph 합치기 노드도 이것을 쓴다."""
     calls, by_perspective, summary, dropped, usages, per = {}, {}, [], [], [], {}
     for p, r in zip(perspectives, results):
         pid = p["id"]
@@ -123,7 +129,7 @@ def analyze_perspectives(pack: DomainPack, instance, decisions: list[DecisionRec
                     "stop": r["stop"], "feedback_rounds": r.get("feedback_rounds", 0), "usage": r["usage"]}
 
     usage = _sum_usage(usages)
-    usage["seconds"] = round(time.monotonic() - started, 2)      # 병렬이라 관점별 시간의 합이 아니라 전체 경과
+    usage["seconds"] = max((u.get("seconds") or 0 for u in usages), default=0)
     return {
         "summary": "\n".join(summary),
         "findings": merge_findings(by_perspective, {p["id"]: p["name"] for p in perspectives}),

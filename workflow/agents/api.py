@@ -1,6 +1,7 @@
 """LangGraph agents API (M10).
 
 - GET  /agents/graph?level=L3      상위 그래프 + 에이전트 하위 그래프 (레벨에 따라 배정 에이전트 모양이 바뀐다)
+                                    &domain=dispatch&perspectives=true 이면 분석 에이전트를 관점별 병렬 → 합치기로
 - POST /agents/runs                 첫 단계 앞에서 멈춘 새 실행
 - GET  /agents/runs/{id}?after=N    상태 + 에이전트 내부 진행 기록 (N번 이후)
 - POST /agents/runs/{id}/step       다음 단계(에이전트 하나) 실행 / 사람 승인
@@ -25,6 +26,7 @@ class AgentsStart(BaseModel):
     level: str = "L3"
     metrics: list[dict] = Field(default_factory=list)
     llm: Literal["fake", "claude"] = "fake"
+    perspectives: bool = False     # 분석 에이전트를 관점별로 나눠 병렬 실행 (M12-b)
     pace: float = Field(default=0.2, ge=0, le=2)     # 내부 단계 사이 간격 (초)
 
 
@@ -53,6 +55,15 @@ def _fake_llm_factory(ctx):
     return make
 
 
+def _perspectives(domain: str) -> list[dict]:
+    from core.registry import load_pack, load_perspectives
+
+    try:
+        return load_perspectives(load_pack(domain))
+    except KeyError:
+        raise HTTPException(404, f"unknown domain: {domain}")
+
+
 class AgentRuns:
     def __init__(self, demo: bool):
         from langgraph.types import Command
@@ -72,6 +83,8 @@ class AgentRuns:
         levels = load_levels()
         if req.level not in levels:
             raise HTTPException(400, f"unknown harness level: {req.level}")
+        if req.perspectives and not _perspectives(req.domain):
+            raise HTTPException(400, "이 도메인에는 분석 관점 파일(analysis_perspectives.yaml)이 없음")
         config = load_config()
         ctx = AgentContext(llm_config=config, pace=req.pace)
         kind = "fake" if self.demo else req.llm
@@ -99,7 +112,7 @@ class AgentRuns:
         last = ctx.recent(limit=1)
         return {**snap, "steps": values.get("log", []), "events": ctx.recent(after),
                 "counts": ctx.counts(), "last_event": last[0] if last else None, "proposals": proposals,
-                "inputs": {k: values.get(k) for k in ("domain", "seed", "faults", "items", "level")}}
+                "inputs": {k: values.get(k) for k in ("domain", "seed", "faults", "items", "level", "perspectives")}}
 
     def step(self, flow_id: str, req: StepRequest) -> dict:
         return self.runs.step(flow_id, req.action, req.note, self.snapshot)
@@ -117,7 +130,7 @@ def register(app: FastAPI, demo: bool = False) -> None:
         return holder[0]
 
     @app.get("/agents/graph")
-    def agents_graph(level: str = "L3"):
+    def agents_graph(level: str = "L3", domain: str | None = None, perspectives: bool = False):
         reason = _unavailable()
         if reason:
             return {"available": False, "reason": reason}
@@ -128,7 +141,9 @@ def register(app: FastAPI, demo: bool = False) -> None:
         levels = load_levels()
         if level not in levels:
             raise HTTPException(400, f"unknown harness level: {level}")
-        return {"available": True, "demo": demo, "level": level, **describe_all(levels, level)}
+        ps = _perspectives(domain) if perspectives and domain else None
+        return {"available": True, "demo": demo, "level": level, "perspectives": bool(ps),
+                **describe_all(levels, level, ps)}
 
     @app.post("/agents/runs")
     def start_agents(req: AgentsStart):

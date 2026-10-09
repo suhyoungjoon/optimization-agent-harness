@@ -75,6 +75,15 @@ def grounding_problems(finding: dict, calls: dict) -> list[str]:
     return [f"근거 없는 수치 {', '.join(bad)}"] if bad else []
 
 
+def perspective_view(system: str, tools: list[dict], perspective: dict | None) -> tuple[str, list[dict]]:
+    """관점 하나에 맞춘 시스템 프롬프트와 도구 (관점의 질문을 뒤에 붙이고 관점의 도구만 남긴다). 관점이 없으면 그대로."""
+    if not perspective:
+        return system, tools
+    allowed = set(perspective["tools"])
+    return (f"{system}\n\n관점: {perspective['name']}\n{perspective['question'].strip()}",
+            [t for t in tools if t["name"] in allowed])
+
+
 # 공개 전 이름 (하위 호환)
 _submit_tool = report_submit_tool
 _problems = grounding_problems
@@ -87,11 +96,7 @@ def analyze(pack: DomainPack, instance, decisions: list[DecisionRecord], llm: LL
     질문을 시스템 프롬프트 뒤에 붙인다. 없으면 입력이 이전과 같다."""
     dimensions = pack.dimensions()
     tools = Aggregator(decisions, dimensions).tools() + pack.analysis_tools(instance, decisions)
-    system = SYSTEM
-    if perspective:
-        allowed = set(perspective["tools"])
-        tools = [t for t in tools if t["name"] in allowed]
-        system = f"{SYSTEM}\n\n관점: {perspective['name']}\n{perspective['question'].strip()}"
+    system, tools = perspective_view(SYSTEM, tools, perspective)
     metric_names = sorted(pack.metrics(instance, decisions))
 
     def check(submission: dict, calls: dict) -> list[str]:
