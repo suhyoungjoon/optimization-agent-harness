@@ -6,13 +6,14 @@
 from core.analysis.agent import analyze, grounding_problems, report_submit_tool
 from core.analysis.aggregate_tools import Aggregator
 from core.evaluation.compare import compare, consistency
-from core.evaluation.fault_scorer import matches, score
+from core.evaluation.fault_scorer import apply_labels, matches, score
 from core.evaluation.runner import create_ai_run, run_ai_agent, run_rule_agent
 from core.harness.levels import Level, get_level, load_levels
 from core.harness.runner import CORE_REASON_CODES, AbortRun, HarnessRunner, RunOutput
 from core.harness.tracer import Tracer
 from core.improvement.approval import write_params, write_spec
 from core.improvement.changes import apply_params, apply_spec, params_errors, spec_errors, spec_sections
+from core.improvement.constraints import constraint_errors, constraint_violations
 from core.improvement.proposer import finding_slices, propose
 from core.improvement.simulate import simulate_params
 from core.interfaces import DecisionRecord, DomainPack, ToolContext, TraceRecord, Violation
@@ -35,11 +36,12 @@ __all__ = [
     "AnthropicClient", "LLMClient", "LLMResponse", "LoopResult", "ResponseCache", "Usage", "load_config",
     "run_tool_loop", "usage_dict",
     # 실행·비교·채점 (core.evaluation)
-    "compare", "consistency", "create_ai_run", "matches", "run_ai_agent", "run_rule_agent", "score",
+    "apply_labels", "compare", "consistency", "create_ai_run", "matches", "run_ai_agent", "run_rule_agent", "score",
     # 분석 (core.analysis)
     "Aggregator", "analyze", "grounding_problems", "report_submit_tool",
     # 개선 루프 (core.improvement)
-    "apply_params", "apply_spec", "finding_slices", "params_errors", "propose", "simulate_params",
+    "apply_params", "apply_spec", "constraint_errors", "constraint_violations", "finding_slices", "params_errors",
+    "propose", "simulate_params",
     "spec_errors", "spec_sections", "write_params", "write_spec",
     # 저장소 (core.storage)
     "Store", "dataset_id", "to_jsonable",
