@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { DomainAdapter } from "../domains/types";
-import type { Dataset, DecisionRecord, DomainInfo, Finding, Report, Run, ToolCall } from "../types";
+import type { Dataset, DecisionRecord, DomainInfo, Finding, FindingLabel, Report, Run, ToolCall } from "../types";
 import { fmtSeconds, fmtUsd } from "./MetricsPanel";
 import { usePoll } from "./usePoll";
 import { TERMS, tip } from "../terms";
@@ -112,6 +112,7 @@ export default function AnalysisPanel({
                   {current.score.detected}/{current.score.total}
                   {current.score.detection_rate != null && ` · ${(current.score.detection_rate * 100).toFixed(0)}%`}
                 </div>
+                {!!current.score.pending && <div className="tile-note warning-text">원인 확인 대기 {current.score.pending}개</div>}
               </div>
               <div className="tile">
                 <div className="tile-label" title={tip("unmatched")}>{TERMS.unmatched.label}</div>
@@ -146,6 +147,7 @@ export default function AnalysisPanel({
                   dimensionLabels={Object.fromEntries(Object.entries(domain.dimensions.dimensions).map(([k, v]) => [k, v.label]))}
                   valueNames={adapter.valueNames ?? {}}
                   matched={Object.entries(current.score!.faults).filter(([, s]) => s.matched_findings.includes(f.id)).map(([fid]) => fid)}
+                  causeCheck={Object.entries(current.score!.faults).filter(([, s]) => s.confirm_cause && s.matched_findings.includes(f.id)).map(([fid]) => fid)}
                   label={current.score!.labels[f.id]}
                   onLabel={(label) => guard("판정 저장 중", async () => setLabelled(await api.label(current.id, f.id, label)))}
                   focused={focus === f.id}
@@ -190,17 +192,25 @@ export default function AnalysisPanel({
 function AnalysisVerdict({ report }: { report: Report }) {
   const score = report.score!;
   const pending = score.unlabeled;
+  const causePending = score.pending ?? 0;
   return (
     <div className="verdict" role="status" aria-label="결론">
       <span>
         <strong title={tip("detection")}>{TERMS.faults.label} {score.total}개 중 {score.detected}개 찾음</strong>
         {score.detection_rate != null && ` (${(score.detection_rate * 100).toFixed(0)}%)`}
       </span>
-      {Object.entries(score.faults).map(([fid, f]) => (
-        <span key={fid} className={f.detected ? "good-text" : "critical-text"} title={f.matched_findings.join(", ") || "찾지 못함"}>
-          {f.detected ? "✓" : "✕"} {fid} {f.name}
-        </span>
-      ))}
+      {Object.entries(score.faults).map(([fid, f]) => {
+        const state = f.status ?? (f.detected ? "detected" : "missed");
+        const cls = state === "detected" ? "good-text" : state === "pending" ? "warning-text" : "critical-text";
+        const title = state === "pending" ? `근거는 맞음 (${f.matched_findings.join(", ")}) · 원인이 맞는지 사람 확인 필요`
+          : f.matched_findings.join(", ") || "찾지 못함";
+        return (
+          <span key={fid} className={cls} title={title}>
+            {state === "detected" ? "✓" : state === "pending" ? "?" : "✕"} {fid} {f.name}
+          </span>
+        );
+      })}
+      {causePending > 0 && <span className="warning-text">원인 확인 대기 {causePending}개</span>}
       <span className={pending ? "warning-text" : "muted"} title={tip("unmatched")}>
         {pending ? `사람 확인 대기 ${pending}건` : "사람 확인 대기 없음"}
       </span>
@@ -224,6 +234,7 @@ function FindingCard({
   dimensionLabels,
   valueNames,
   matched,
+  causeCheck,
   label,
   onLabel,
   focused,
@@ -237,8 +248,9 @@ function FindingCard({
   dimensionLabels: Record<string, string>;
   valueNames: Record<string, string>;
   matched: string[];
-  label?: "valid" | "false_positive";
-  onLabel: (label: "valid" | "false_positive" | null) => void;
+  causeCheck: string[];      // 이 발견이 맞춘 정답 중 사람이 원인을 확인해야 하는 것
+  label?: FindingLabel;
+  onLabel: (label: FindingLabel | null) => void;
   focused: boolean;
   onFocus: () => void;
 }) {
@@ -248,7 +260,21 @@ function FindingCard({
         <button className="finding-title" onClick={onFocus} aria-pressed={focused}>
           <span className="finding-id">{finding.id}</span> {finding.title}
         </button>
-        {matched.length > 0 ? (
+        {causeCheck.length > 0 ? (
+          <span className="label-buttons">
+            <span className={`small ${label === "cause_ok" ? "good-text" : label === "cause_wrong" ? "critical-text" : "warning-text"}`}
+              title="근거(지표·인용 도구)는 정답과 맞습니다. 원인 설명이 맞는지는 사람이 판정해야 찾은 것으로 셉니다">
+              정답 {causeCheck.join(", ")} 근거 일치 · 원인 확인:
+            </span>
+            <button className={label === "cause_ok" ? "selected" : undefined} onClick={() => onLabel(label === "cause_ok" ? null : "cause_ok")}>
+              원인 맞음
+            </button>
+            <button className={label === "cause_wrong" ? "selected danger" : undefined}
+              onClick={() => onLabel(label === "cause_wrong" ? null : "cause_wrong")}>
+              원인 틀림
+            </button>
+          </span>
+        ) : matched.length > 0 ? (
           <span className="badge good-text">✓ 정답 {matched.join(", ")}과 일치</span>
         ) : (
           <span className="label-buttons">

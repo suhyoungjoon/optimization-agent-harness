@@ -136,6 +136,21 @@ export default function ImprovementPanel({
             {fmtSeconds(batch.meta.usage.seconds)}
           </span>
         )}
+        {batch?.status === "done" && !!batch.meta?.constraints?.length && (
+          <details className="small">
+            <summary>적용한 제약 {batch.meta.constraints.length}개 (사람이 정한 한도)</summary>
+            <ul>
+              {batch.meta.constraints.map((c, i) => (
+                <li key={i}>
+                  {c.type === "param" ? c.path : c.metric}{" "}
+                  {[c.min != null && `최소 ${c.min}`, c.max != null && `최대 ${c.max}`, c.max_drop != null && `감소 ${c.max_drop} 이내`,
+                    c.max_rise != null && `증가 ${c.max_rise} 이내`].filter(Boolean).join(", ")}
+                  <span className="muted"> — {c.source}{c.note ? `: ${c.note}` : ""}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
       </div>
 
       <p className="small muted">
@@ -323,6 +338,9 @@ function ProposalCard({
         <span className={`badge ${p.status === "invalid" ? "critical-text" : p.status === "approved" ? "good-text" : ""}`}>
           {STATUS_LABEL[p.status]}
         </span>
+        {!!sim?.constraint_violations?.length && (
+          <span className="badge warning-text" title="사람이 정한 한도를 넘습니다. 승인 여부는 사람이 판단합니다">⚠ 제약 위반</span>
+        )}
       </header>
       <Gist proposal={p} specs={specs} />
 
@@ -332,6 +350,11 @@ function ProposalCard({
         </ul>
       )}
       {sim?.error && <p className="critical-text small">✕ 미리 돌려보기 실패: {sim.error}</p>}
+      {!!sim?.constraint_violations?.length && (
+        <ul className="warning-text small">
+          {sim.constraint_violations.map((v, i) => <li key={i}>⚠ {v.message}</li>)}
+        </ul>
+      )}
 
       {estimate && (
         <div className="confirm">

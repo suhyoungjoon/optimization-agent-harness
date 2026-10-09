@@ -176,7 +176,12 @@ export interface FaultScore {
   name: string;
   detected: boolean;
   matched_findings: string[];
+  status?: "detected" | "pending" | "missed";   // pending: 근거는 맞고 사람의 원인 확인 대기 (M12-a 이전 채점엔 없음)
+  confirm_cause?: boolean;
 }
+
+// 발견 판정: 정답에 없는 발견은 valid/false_positive, 원인 확인 대상 발견은 cause_ok/cause_wrong
+export type FindingLabel = "valid" | "false_positive" | "cause_ok" | "cause_wrong";
 
 export interface Score {
   faults: Record<string, FaultScore>;
@@ -184,7 +189,8 @@ export interface Score {
   total: number;
   detection_rate: number | null;
   unmatched_findings: string[];
-  labels: Record<string, "valid" | "false_positive">;
+  pending?: number;
+  labels: Record<string, FindingLabel>;
   false_positives: number;
   valid_unmatched: number;
   unlabeled: number;
@@ -230,6 +236,20 @@ export interface Simulation {
   cost_usd?: number;
   run_ids?: Record<string, string>;
   error?: string;
+  constraint_violations?: { index: number; type: "param" | "metric"; message: string }[];
+}
+
+// 사람이 정한 한도 (M12-a). 입력 화면은 이 레포에 없고 API로 받는다
+export interface Constraint {
+  type: "param" | "metric";
+  path?: string;
+  metric?: string;
+  min?: number;
+  max?: number;
+  max_drop?: number;
+  max_rise?: number;
+  source: string;
+  note?: string;
 }
 
 export interface Proposal {
@@ -249,7 +269,7 @@ export interface ProposalBatch {
   report_id: string;
   status: "running" | "done" | "error";
   error?: string | null;
-  meta: { usage: Usage & { seconds?: number }; trials: number; params_version?: number } | null;
+  meta: { usage: Usage & { seconds?: number }; trials: number; params_version?: number; constraints?: Constraint[] } | null;
   proposals: Proposal[];
 }
 

@@ -1,5 +1,5 @@
 import type {
-  CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DomainDefinition, DecisionRecord, DomainInfo, HarnessInfo, HistoryRow, Proposal, ProposalBatch, Report, Run,
+  CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DomainDefinition, DecisionRecord, DomainInfo, FindingLabel, HarnessInfo, HistoryRow, Proposal, ProposalBatch, Report, Run,
   SpecEstimate, TraceRecord, WorkflowGraph, WorkflowRun, AgentsGraph, AgentsRun,
 } from "./types";
 
@@ -75,7 +75,7 @@ export const api = {
   analyze: (runId: string) =>
     request<{ id: string }>("/analysis", { method: "POST", body: JSON.stringify({ run_id: runId }) }),
   report: (id: string) => request<Report>(`/analysis/${id}`),
-  label: (id: string, findingId: string, label: "valid" | "false_positive" | null) =>
+  label: (id: string, findingId: string, label: FindingLabel | null) =>
     request<Report>(`/analysis/${id}/labels`, { method: "POST", body: JSON.stringify({ finding_id: findingId, label }) }),
   propose: (reportId: string) =>
     request<{ id: string }>("/proposals", { method: "POST", body: JSON.stringify({ report_id: reportId }) }),
