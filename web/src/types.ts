@@ -167,6 +167,7 @@ export interface Finding {
   perspectives?: string[];
   perspective_names?: string[];
   alternatives?: FindingAlternative[];
+  related?: string[];   // 구간이 겹치는(한쪽이 더 좁은) 다른 발견 ID
 }
 
 export interface FindingAlternative {

@@ -319,6 +319,11 @@ function FindingCard({
         {(finding.perspective_names ?? []).map((name) => (
           <span key={name} className="chip chip-perspective" title="이 발견을 찾은 관점">관점: {name}</span>
         ))}
+        {(finding.related ?? []).length > 0 && (
+          <span className="chip chip-perspective" title="구간이 겹치는 다른 발견 (한쪽이 다른 쪽을 더 좁힌 구간). 같은 문제를 다른 크기로 본 것일 수 있습니다">
+            관련: {finding.related!.join(", ")}
+          </span>
+        )}
         {Object.entries(finding.slice ?? {}).map(([dim, values]) => (
           <span key={dim} className="chip" title={`${dim}: ${values.join(", ")}`}>
             {dimensionLabels[dim] ?? dim}: {values.map((v) => valueNames[String(v)] ?? v).join(", ")}
