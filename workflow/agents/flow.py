@@ -221,6 +221,9 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
         spec_text = Path(d["pack"].spec_path()).read_text(encoding="utf-8")
         proposals = []
         for p in (out.get("submission") or {}).get("proposals") or []:
+            if not isinstance(p, dict):
+                proposals.append({"body": {"title": str(p)[:80]}, "errors": ["개선안 형식이 아님 (객체가 아님)"], "status": "invalid"})
+                continue
             errors = (params_errors(d["params"], p, dims) if p.get("kind") == "params"
                       else spec_errors(spec_text, p) if p.get("kind") == "spec" else ["알 수 없는 kind"])
             proposals.append({"body": p, "errors": errors, "status": "invalid" if errors else "proposed"})

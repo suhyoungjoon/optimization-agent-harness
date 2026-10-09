@@ -15,7 +15,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from core.llm.client import Usage
-from core.llm.tool_loop import call_ref, tool_result_content
+from core.llm.tool_loop import call_ref, decode_json_args, tool_result_content
 from core.storage.store import to_jsonable
 
 from .context import AgentContext
@@ -105,7 +105,7 @@ def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, to
 
     def run_check(state: ToolAgentState):
         use = next(u for u in last_uses(state) if u["name"] == submit_name)
-        submission = use.get("input") or {}
+        submission = decode_json_args(use.get("input") or {}, submit_tool.get("input_schema") or {})
         problems = check(submission, state.get("calls") or {}) if check else []
         rounds = state.get("feedback_rounds", 0)
         if problems and feedback and rounds < max_feedback:

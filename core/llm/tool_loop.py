@@ -50,6 +50,19 @@ def call_list_text(calls: dict[str, dict]) -> str:
     return ", ".join(f"{c['ref']} {c['name']}" for c in calls.values() if c.get("ref"))
 
 
+def decode_json_args(args: dict, schema: dict) -> dict:
+    """스키마상 배열·객체인 최상위 인자가 JSON 문자열로 오면 풀어 준다 (모델이 가끔 이렇게 보낸다). 못 풀면 그대로."""
+    props = (schema or {}).get("properties") or {}
+    out = dict(args)
+    for key, value in args.items():
+        if isinstance(value, str) and props.get(key, {}).get("type") in ("array", "object"):
+            try:
+                out[key] = json.loads(value)
+            except ValueError:
+                pass
+    return out
+
+
 def run_tool_loop(llm: LLMClient, *, system: str, user: str, tools: list[dict], submit_tool: dict,
                   max_calls: int = 30, salt: str = "",
                   check_submission: Callable[[dict, dict], list[str]] | None = None,
@@ -99,7 +112,7 @@ def run_tool_loop(llm: LLMClient, *, system: str, user: str, tools: list[dict], 
                                  "content": tool_result_content(ref, out), "is_error": is_error})
 
         if submitted is not None:
-            submission = submitted.get("input") or {}
+            submission = decode_json_args(submitted.get("input") or {}, submit_tool.get("input_schema") or {})
             problems = check_submission(submission, result.calls) if check_submission else []
             if problems and result.feedback_rounds < max_feedback:
                 result.feedback_rounds += 1

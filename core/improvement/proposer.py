@@ -123,7 +123,11 @@ def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: di
                            max_calls=max_calls, salt=salt)
 
     proposals = []
-    for p in (result.submission or {}).get("proposals") or []:
+    submitted = (result.submission or {}).get("proposals") or []
+    for p in submitted if isinstance(submitted, list) else [submitted]:
+        if not isinstance(p, dict):
+            proposals.append({"proposal": {"title": str(p)[:80], "kind": "unknown"}, "errors": ["개선안 형식이 아님 (객체가 아님)"]})
+            continue
         errors = (params_errors(params, p, dimensions) if p.get("kind") == "params"
                   else spec_errors(spec_text, p) if p.get("kind") == "spec" else ["알 수 없는 kind"])
         proposals.append({"proposal": p, "errors": errors})
