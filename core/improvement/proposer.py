@@ -10,6 +10,7 @@ from core.llm.client import LLMClient
 from core.llm.tool_loop import run_tool_loop, usage_dict
 
 from .changes import apply_params, params_errors, spec_errors, spec_sections
+from .constraints import constraint_violations
 from .simulate import simulate_params
 
 SUBMIT = "submit_proposals"
@@ -67,9 +68,11 @@ def finding_slices(report: dict) -> dict[str, dict]:
 
 def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: dict, report: dict,
             llm: LLMClient, llm_config: dict, salt: str = "", max_calls: int = 20,
-            feedback: list[str] | None = None) -> dict:
+            feedback: list[str] | None = None, constraints: list[dict] | None = None) -> dict:
     """feedback: 앞선 시도의 개선안이 탈락한 이유 (재시도할 때 같은 안을 다시 내지 않도록 입력에 붙인다).
-    없으면 입력은 이전과 같다 (LLM 캐시 키도 같다)."""
+    constraints: 사람이 정한 한도 (core.improvement.constraints 형식). 입력에 붙이고, simulate_params 도구
+    결과에 위반을 함께 돌려줘 제출 전에 스스로 피하게 한다.
+    둘 다 없으면 입력은 이전과 같다 (LLM 캐시 키도 같다)."""
     slices = finding_slices(report)
     trials: list[dict] = []
 
@@ -83,7 +86,10 @@ def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: di
         errors = params_errors(params, args, dimensions)
         if errors:
             return {"error": "; ".join(errors)}
-        result = simulate_params(pack_factory, instance, params, apply_params(params, args), slices)
+        candidate = apply_params(params, args)
+        result = simulate_params(pack_factory, instance, params, candidate, slices)
+        if constraints:
+            result["constraint_violations"] = constraint_violations(constraints, candidate, result)
         trials.append({"changes": args, "result": result})
         return result
 
@@ -102,6 +108,11 @@ def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: di
                                         ensure_ascii=False, indent=1)
             + "\n\n# 차원\n" + json.dumps({k: v.get("values") for k, v in dimensions.get("dimensions", {}).items()},
                                          ensure_ascii=False))
+    if constraints:
+        user += ("\n\n# 지켜야 할 제약 (현장·운영이 정한 한도, source는 누가 정했는지)\n"
+                 + json.dumps(constraints, ensure_ascii=False, indent=1)
+                 + "\nsimulate_params 결과의 constraint_violations가 비도록 안을 설계하라. "
+                   "어길 수밖에 없으면 rationale에 어떤 제약을 왜 어기는지 적어라.")
     if feedback:
         user += ("\n\n# 이전 시도에서 탈락한 이유\n" + "\n".join(f"- {f}" for f in feedback)
                  + "\n같은 변경을 다시 제안하지 말고, 위 이유를 피하는 안을 제안하라.")
