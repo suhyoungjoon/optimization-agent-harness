@@ -43,28 +43,59 @@ def perspective_errors(perspectives: list[dict], tool_names: set[str]) -> list[s
     return errors
 
 
-def _same_finding(a: dict, b: dict) -> bool:
-    """같은 발견인가: 구간 차원이 서로 같고 값이 겹치며 사유가 겹친다. 구간이 없으면 지표 이름·방향이 같다."""
-    sa, sb = a.get("slice") or {}, b.get("slice") or {}
+def normalized_slice(finding: dict, dimensions: dict | None = None) -> dict[str, set[str]]:
+    """비교용 구간: 값이 그 차원의 선언된 값 전체를 덮는 차원은 뺀다 (조건이 없는 것과 같다).
+    dimensions: DomainPack.dimensions(). 없으면 구간을 그대로 쓴다."""
+    declared = (dimensions or {}).get("dimensions") or {}
+    out = {}
+    for dim, values in (finding.get("slice") or {}).items():
+        vals = set(map(str, values or []))
+        full = set(map(str, (declared.get(dim) or {}).get("values") or []))
+        if full and full <= vals:
+            continue
+        out[dim] = vals
+    return out
+
+
+def _codes_overlap(a: dict, b: dict) -> bool:
+    ca, cb = set(a.get("reason_codes") or []), set(b.get("reason_codes") or [])
+    return not (ca or cb) or bool(ca & cb)
+
+
+def _same_finding(a: dict, b: dict, dimensions: dict | None = None) -> bool:
+    """같은 발견인가: (정리한) 구간 차원이 서로 같고 값이 겹치며 사유가 겹친다. 구간이 없으면 지표 이름·방향이 같다."""
+    sa, sb = normalized_slice(a, dimensions), normalized_slice(b, dimensions)
     if sa or sb:
-        if set(sa) != set(sb):
+        if set(sa) != set(sb) or any(not sa[d] & sb[d] for d in sa):
             return False
-        if any(not set(map(str, sa[d])) & set(map(str, sb[d])) for d in sa):
-            return False
-        ca, cb = set(a.get("reason_codes") or []), set(b.get("reason_codes") or [])
-        return not (ca or cb) or bool(ca & cb)
+        return _codes_overlap(a, b)
     ma, mb = a.get("metric") or {}, b.get("metric") or {}
     return bool(ma.get("name")) and (ma.get("name"), ma.get("direction")) == (mb.get("name"), mb.get("direction"))
 
 
-def merge_findings(by_perspective: dict[str, list[dict]], names: dict[str, str]) -> list[dict]:
+def _narrower(a: dict, b: dict, dimensions: dict | None = None) -> bool:
+    """a의 구간이 b의 구간을 더 좁힌 것인가 (b의 조건을 모두 지키고 차원이 더 있다). 사유가 겹쳐야 하고,
+    둘 다 지표를 적었으면 같은 지표여야 한다 (실패 쪽 발견과 자원 쪽 발견은 구간이 겹쳐도 다른 이야기다)."""
+    ma, mb = (a.get("metric") or {}).get("name"), (b.get("metric") or {}).get("name")
+    if ma and mb and ma != mb:
+        return False
+    sa, sb = normalized_slice(a, dimensions), normalized_slice(b, dimensions)
+    if not sb or not set(sb) < set(sa):
+        return False
+    return all(sa[d] <= sb[d] for d in sb) and _codes_overlap(a, b)
+
+
+def merge_findings(by_perspective: dict[str, list[dict]], names: dict[str, str],
+                   dimensions: dict | None = None) -> list[dict]:
     """관점별 발견 → 합친 발견 목록 (F1…). 먼저 나온 관점의 발견이 대표가 되고, 다른 관점의 같은 발견은
-    alternatives에 해석을 그대로 남긴다. 같은 관점 안의 발견끼리는 합치지 않는다."""
+    alternatives에 해석을 그대로 남긴다. 같은 관점 안의 발견끼리는 합치지 않는다.
+    한 구간이 다른 구간을 더 좁힌 발견끼리는 합치지 않고 related(관련 발견 ID)로 잇는다.
+    dimensions(DomainPack.dimensions())를 주면 값 전체를 덮는 차원은 조건이 없는 것으로 보고 비교한다."""
     groups: list[dict] = []
     for pid, findings in by_perspective.items():
         for f in findings:
             body = {k: v for k, v in f.items() if k != "id"}
-            group = next((g for g in groups if pid not in g["perspectives"] and _same_finding(g, body)), None)
+            group = next((g for g in groups if pid not in g["perspectives"] and _same_finding(g, body, dimensions)), None)
             if group is None:
                 groups.append({**body, "perspectives": [pid], "perspective_names": [names.get(pid, pid)],
                                "alternatives": [], "cited_calls": list(body.get("cited_calls") or [])})
@@ -75,7 +106,11 @@ def merge_findings(by_perspective: dict[str, list[dict]], names: dict[str, str])
                                           **{k: body.get(k) for k in ("title", "description", "hypothesis")},
                                           "cited_calls": list(body.get("cited_calls") or [])})
             group["cited_calls"] += [c for c in body.get("cited_calls") or [] if c not in group["cited_calls"]]
-    return [{**g, "id": f"F{i + 1}"} for i, g in enumerate(groups)]
+    ids = [f"F{i + 1}" for i in range(len(groups))]
+    return [{**g, "id": ids[i],
+             "related": [ids[j] for j, h in enumerate(groups)
+                         if j != i and (_narrower(g, h, dimensions) or _narrower(h, g, dimensions))]}
+            for i, g in enumerate(groups)]
 
 
 def _sum_usage(usages: list[dict]) -> dict:
@@ -102,12 +137,12 @@ def analyze_perspectives(pack: DomainPack, instance, decisions: list[DecisionRec
 
     with ThreadPoolExecutor(max(1, len(perspectives))) as pool:
         results = list(pool.map(run, perspectives))
-    body = combine_results(perspectives, results)
+    body = combine_results(perspectives, results, pack.dimensions())
     body["usage"]["seconds"] = round(time.monotonic() - started, 2)   # 병렬이라 관점별 시간의 합이 아니라 전체 경과
     return body
 
 
-def combine_results(perspectives: list[dict], results: list[dict]) -> dict:
+def combine_results(perspectives: list[dict], results: list[dict], dimensions: dict | None = None) -> dict:
     """관점별 analyze 결과(실패면 {"error": ...})를 리포트 하나로 (fan-in). LangGraph 합치기 노드도 이것을 쓴다."""
     calls, by_perspective, summary, dropped, usages, per = {}, {}, [], [], [], {}
     for p, r in zip(perspectives, results):
@@ -132,7 +167,7 @@ def combine_results(perspectives: list[dict], results: list[dict]) -> dict:
     usage["seconds"] = max((u.get("seconds") or 0 for u in usages), default=0)
     return {
         "summary": "\n".join(summary),
-        "findings": merge_findings(by_perspective, {p["id"]: p["name"] for p in perspectives}),
+        "findings": merge_findings(by_perspective, {p["id"]: p["name"] for p in perspectives}, dimensions),
         "dropped": dropped,
         "calls": calls,
         "stop": "submitted" if any(v["stop"] == "submitted" for v in per.values()) else "failed",

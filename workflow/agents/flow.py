@@ -153,7 +153,8 @@ def analysis_fanout_graph(ctx: AgentContext, perspectives: list[dict], make_llm=
 
     def merge(state: FanState):
         results = state.get("results") or {}
-        report = combine_results(perspectives, [results.get(p["id"], {"error": "결과 없음"}) for p in perspectives])
+        report = combine_results(perspectives, [results.get(p["id"], {"error": "결과 없음"}) for p in perspectives],
+                                 d["pack"].dimensions())
         d["report"] = report
         shared = sum(1 for f in report["findings"] if len(f["perspectives"]) > 1)
         ctx.emit("analysis_agent", "merge", f"발견 {len(report['findings'])}건으로 합침 · 여러 관점이 같이 찾은 발견 {shared}건")

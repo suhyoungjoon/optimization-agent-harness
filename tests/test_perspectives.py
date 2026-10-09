@@ -154,3 +154,44 @@ def test_one_failing_perspective_does_not_sink_the_report(run_p4):
     body = analyze_perspectives(pack, inst, decisions, lambda: FakeLLM(flaky), load_config(), ps)
     assert "API 오류" in body["perspectives"]["time"]["error"]
     assert body["findings"] and sorted(body["findings"][0]["perspectives"]) == ["failure", "resource"]
+
+
+# --- 합치기 보강: 구간 정리, 관련 발견 ----------------------------------------------------
+
+DIMS = {"dimensions": {"branch": {"values": ["A", "B", "C"]}, "hour": {"format": "HH"},
+                       "area_zone": {"values": ["core", "boundary"]}, "media": {"values": ["HFC", "FTTx", "CATV"]}}}
+
+
+def test_merge_ignores_dimension_that_covers_all_values():
+    """area_zone: [boundary, core]는 조건이 없는 것과 같다 → B지점 10시와 같은 발견."""
+    by = {"failure": [f("B지점 10시 (경계·핵심)", {"branch": ["B"], "hour": ["10"], "area_zone": ["boundary", "core"]},
+                        ["CAPACITY"])],
+          "time": [f("B지점 10시", {"branch": ["B"], "hour": ["10"]}, ["CAPACITY"])]}
+    names = {"failure": "실패", "time": "시간"}
+    assert len(merge_findings(by, names)) == 2                       # 차원 값 정의를 모르면 예전처럼
+    merged = merge_findings(by, names, DIMS)
+    assert len(merged) == 1 and merged[0]["perspectives"] == ["failure", "time"]
+    assert merged[0]["slice"]["area_zone"] == ["boundary", "core"]    # AI가 적은 구간은 그대로 둔다 (채점은 원래 구간으로)
+
+
+def test_narrower_slice_is_related_not_merged():
+    by = {"failure": [f("B지점 10시", {"branch": ["B"], "hour": ["10"]}, ["CAPACITY"]),
+                      f("C지점", {"branch": ["C"]}, ["NO_CERT"])],
+          "resource": [f("B지점 10시 FTTx", {"branch": ["B"], "hour": ["10"], "media": ["FTTx"]}, ["CAPACITY"])],
+          "time": [f("10시 전체", {"hour": ["10"]}, ["CAPACITY"]), f("B지점 10시 OUT", {"branch": ["B"], "hour": ["10"]}, ["OUT_OF_AREA"])]}
+    merged = merge_findings(by, {"failure": "실패", "resource": "자원", "time": "시간"}, DIMS)
+    by_title = {m["title"]: m for m in merged}
+    assert len(merged) == 5
+    assert by_title["B지점 10시"]["related"] == ["F3", "F4"]          # 더 좁은 FTTx 구간, 더 넓은 10시 전체
+    assert by_title["B지점 10시 FTTx"]["related"] == ["F1", "F4"]
+    assert by_title["10시 전체"]["related"] == ["F1", "F3"]
+    assert by_title["C지점"]["related"] == [] and by_title["B지점 10시 OUT"]["related"] == []   # 사유가 다르면 관련 아님
+
+
+def test_different_metrics_are_not_related():
+    """자원 쪽 발견(활용률)은 구간이 넓어도 실패 쪽 발견(배정률)의 관련 발견이 아니다."""
+    by = {"failure": [f("B지점 10시", {"branch": ["B"], "hour": ["10"]}, ["CAPACITY"],
+                        metric={"name": "assignment_rate", "direction": "low"})],
+          "resource": [f("B지점 저활용", {"branch": ["B"]}, ["CAPACITY"], metric={"name": "worker_utilization", "direction": "low"})]}
+    merged = merge_findings(by, {"failure": "실패", "resource": "자원"}, DIMS)
+    assert [m["related"] for m in merged] == [[], []]
