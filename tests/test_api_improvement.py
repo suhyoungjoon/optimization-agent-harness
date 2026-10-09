@@ -154,3 +154,27 @@ def test_spec_simulation_runs_ai_before_and_after(client, files):
     assert set(sim["run_ids"]) == {"before", "after"} and sim["items"] == 3
     after_run = client.get(f"/runs/{sim['run_ids']['after']}").json()
     assert after_run["level"] == "L1" and after_run["scope"] == scope
+
+
+def p3_analyst(item, n, messages, tools):
+    if n == 0:
+        return tool_use("worker_stats", {"limit": 3})
+    return tool_use("submit_report", {"summary": "저활용 작업자", "findings": [
+        {"title": "저활용 작업자", "description": "일부 작업자의 활용률이 낮다",
+         "metric": {"name": "worker_utilization", "direction": "low"},
+         "cited_calls": tool_ids(messages, "worker_stats")}]})
+
+
+def test_cause_confirmation_label(tmp_path, files):
+    """원인 확인이 필요한 결함(P3)은 사람이 '원인 맞음'으로 판정해야 탐지로 센다."""
+    client = TestClient(create_app(tmp_path / "h.db", serve_web=False, llm_factory=lambda: FakeLLM(p3_analyst)))
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P3"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    report = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    s = report["score"]
+    assert s["faults"]["P3"]["status"] == "pending" and (s["detected"], s["pending"]) == (0, 1)
+
+    ok = client.post(f"/analysis/{report['id']}/labels", json={"finding_id": "F1", "label": "cause_ok"}).json()
+    assert ok["score"]["faults"]["P3"]["status"] == "detected" and ok["score"]["detected"] == 1
+    wrong = client.post(f"/analysis/{report['id']}/labels", json={"finding_id": "F1", "label": "cause_wrong"}).json()
+    assert wrong["score"]["faults"]["P3"]["status"] == "missed" and wrong["score"]["pending"] == 0

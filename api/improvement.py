@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from core.analysis.agent import analyze
-from core.evaluation.fault_scorer import score
+from core.evaluation.fault_scorer import apply_labels, score
 from core.evaluation.runner import create_ai_run, run_ai_agent
 from core.harness.levels import load_levels
 from core.improvement.approval import write_params, write_spec
@@ -34,7 +34,7 @@ class AnalysisRequest(BaseModel):
 
 class LabelRequest(BaseModel):
     finding_id: str
-    label: Literal["valid", "false_positive"] | None
+    label: Literal["valid", "false_positive", "cause_ok", "cause_wrong"] | None   # cause_*: 원인 확인 대상 발견
 
 
 class ProposalRequest(BaseModel):
@@ -82,6 +82,7 @@ def _with_labels(report: dict) -> dict:
     labels = report.get("labels") or {}
     s = report.get("score")
     if s is not None:
+        s = apply_labels(s, labels)
         unmatched = s.get("unmatched_findings", [])
         s = {**s, "labels": labels,
              "false_positives": sum(labels.get(f) == "false_positive" for f in unmatched),
@@ -130,7 +131,7 @@ def register(app: FastAPI, ctx: Context) -> None:
         try:
             _run, dataset, pack, instance, truth, decisions = _run_context(store, run_id)
             body = analyze(pack, instance, decisions, llm, ctx.llm_config, salt=f"analysis:{run_id}")
-            store.finish_report(report_id, body, score(body["findings"], truth.get("faults", {})))
+            store.finish_report(report_id, body, score(body["findings"], truth.get("faults", {}), body["calls"]))
         except Exception as exc:
             store.fail_report(report_id, repr(exc))
 

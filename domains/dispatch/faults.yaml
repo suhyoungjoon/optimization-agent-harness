@@ -39,6 +39,8 @@ P3:
   answer:
     metric: worker_utilization
     direction: low
+    requires_tools: [worker_stats]   # 작업자별 가능시간·활용률을 근거로 인용한 발견만 (자동 근거 일치)
+    confirm_cause: true              # 원인(가능시간 불일치)이 맞는지는 사람이 판정해야 탐지로 센다
 
 P4:
   name: 경계 지역 수요

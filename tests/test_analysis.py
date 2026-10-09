@@ -167,8 +167,12 @@ def test_ideal_analyst_can_find_all_planted_faults():
 
     report = analyze(pack, inst, decisions, FakeLLM(policy), load_config())
     assert report["dropped"] == [], report["dropped"]
-    result = score(report["findings"], truth["faults"])
-    assert result["detected"] == 4 and result["unmatched_findings"] == []
+    result = score(report["findings"], truth["faults"], report["calls"])
+    assert result["unmatched_findings"] == []
+    # P3는 자동으로는 근거 일치까지(원인 확인 대기), 사람이 원인을 확인하면 4개 모두 탐지
+    assert (result["detected"], result["pending"]) == (3, 1) and result["faults"]["P3"]["matched_findings"] == ["F4"]
+    from core.evaluation.fault_scorer import apply_labels
+    assert apply_labels(result, {"F4": "cause_ok"})["detected"] == 4
 
 
 def test_report_schema_and_grounding_are_public():
@@ -231,3 +235,43 @@ def test_grounding_accepts_ref_number_and_id():
         assert core.grounding_problems({"title": "a", "description": "40건 중 12건", "cited_calls": [cite]}, calls) == []
     problems = core.grounding_problems({"title": "a", "description": "40건", "cited_calls": ["c2"]}, calls)
     assert problems and "c1 aggregate" in problems[0]
+
+
+# --- 2단계 채점: 자동 근거 일치 + 사람 원인 확인 (M12-a) ------------------------------
+
+P3_STRICT = {"metric": "worker_utilization", "direction": "low",
+             "requires_tools": ["worker_stats"], "confirm_cause": True}
+CALLS = {"t1": {"ref": "c1", "name": "aggregate", "input": {}, "output": {}},
+         "t2": {"ref": "c2", "name": "worker_stats", "input": {}, "output": {}}}
+
+
+def test_requires_tools_needs_cited_tool():
+    low = {"metric": {"name": "worker_utilization", "direction": "low"}}
+    assert not matches({**low, "cited_calls": ["t1"]}, P3_STRICT, CALLS)        # 지표만 맞고 지정 도구 인용 없음
+    assert matches({**low, "cited_calls": ["t2"]}, P3_STRICT, CALLS)
+    assert not matches({**low, "cited_calls": ["t2"]}, P3_STRICT)               # 호출 기록이 없으면 확인 불가 → 불인정
+    assert matches({**low, "cited_calls": ["t1"]}, P3)                          # requires_tools가 없으면 이전과 같음
+
+
+def test_confirm_cause_is_pending_until_human_label():
+    from core.evaluation.fault_scorer import apply_labels
+    findings = [{"id": "F1", "slice": {"area_zone": ["boundary"]}, "reason_codes": ["OUT_OF_AREA"]},
+                {"id": "F2", "metric": {"name": "worker_utilization", "direction": "low"}, "cited_calls": ["t2"]}]
+    faults = {"P3": {"name": "가능시간", "answer": P3_STRICT}, "P4": {"name": "경계", "answer": P4}}
+    s = score(findings, faults, CALLS)
+    assert s["faults"]["P3"]["status"] == "pending" and s["faults"]["P3"]["matched_findings"] == ["F2"]
+    assert s["faults"]["P4"]["status"] == "detected"
+    assert (s["detected"], s["pending"], s["total"]) == (1, 1, 2)
+
+    ok = apply_labels(s, {"F2": "cause_ok"})
+    assert ok["faults"]["P3"]["status"] == "detected" and (ok["detected"], ok["pending"]) == (2, 0)
+    wrong = apply_labels(s, {"F2": "cause_wrong"})
+    assert wrong["faults"]["P3"]["status"] == "missed" and (wrong["detected"], wrong["pending"]) == (1, 0)
+    assert wrong["detection_rate"] == pytest.approx(1 / 2)
+    assert apply_labels(s, {})["faults"]["P3"]["status"] == "pending"
+
+
+def test_score_without_new_keys_is_unchanged():
+    findings = [{"id": "F1", "slice": {"area_zone": ["boundary"]}, "reason_codes": ["OUT_OF_AREA"]}]
+    s = score(findings, {"P4": {"name": "경계", "answer": P4}})
+    assert s["faults"]["P4"]["status"] == "detected" and s["detected"] == 1 and s["pending"] == 0

@@ -202,7 +202,7 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
              else kept.append({**f, "cited_calls": analysis_core.cited_call_ids(f, out.get("calls") or {}),
                                "id": f"F{len(kept) + 1}"}))
         d["report"] = {"summary": (out.get("submission") or {}).get("summary", ""), "findings": kept, "dropped": dropped}
-        s = score(kept, d["truth"].get("faults", {}))
+        s = score(kept, d["truth"].get("faults", {}), out.get("calls") or {})
         lines = [f"찾은 문제 {len(kept)}건" + (f" · 심어둔 문제 {s['total']}개 중 {s['detected']}개 찾음" if s["total"] else "")
                  + (f" · 근거 부족으로 뺀 문제 {len(dropped)}건" if dropped else "")]
         lines += [f"{f['id']} {f['title']}" for f in kept[:5]]
