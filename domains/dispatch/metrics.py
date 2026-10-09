@@ -45,6 +45,8 @@ def compute(inst: Instance, decisions: list[DecisionRecord], params: dict) -> di
         "assignment_rate": n / total if total else 0.0,
         "avg_travel_min": sum(travels) / n if n else 0.0,
         "desired_time_match_rate": sum(start == o.desired for _, o, start in placed) / n if n else 0.0,
+        # 희망시각에 맞춰 배정된 건 / 전체 건. 위 비율은 배정된 건 중이라 배정이 늘면 저절로 떨어진다
+        "on_time_rate": sum(start == o.desired for _, o, start in placed) / total if total else 0.0,
         "worker_utilization": busy / available if available else 0.0,
     }
     for stage in range(1, len(params["matching"]["time_window_min"]) + 1):

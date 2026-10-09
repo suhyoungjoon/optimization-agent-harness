@@ -11,6 +11,7 @@ def test_metrics_small_case(small):  # noqa: F811
     # 성공 4건: O1(W1 09:00), O9(W1 15:00), O2(W2 09:00), O3(W2 09:53, 3단계)
     assert m["assignment_rate"] == pytest.approx(4 / 9)
     assert m["desired_time_match_rate"] == pytest.approx(3 / 4)
+    assert m["on_time_rate"] == pytest.approx(3 / 9)       # 희망시각에 배정된 3건 / 전체 9건
     assert m["stage_1_share"] == pytest.approx(3 / 4)
     assert m["stage_2_share"] == 0
     assert m["stage_3_share"] == pytest.approx(1 / 4)
