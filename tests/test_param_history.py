@@ -46,3 +46,12 @@ def test_card_from_old_approval_without_new_keys():
 def test_spec_or_unapproved_proposals_make_no_card():
     assert change_card({**proposal({"action": "approved"}), "kind": "spec"}, REPORT) is None
     assert change_card({**proposal(None), "status": "rejected"}, REPORT) is None
+
+
+def test_change_record_follows_sequential_changes_to_the_same_path():
+    proposal = {"params_changes": [{"path": "matching.time_window_min[2]", "value": 90},
+                                   {"path": "matching.time_window_min[2]", "value": 120}],
+                "override_rules": [{"when": {"hour": ["10"]}, "set": {"matching.time_window_min[2]": 30}}]}
+    rec = change_record(PARAMS, proposal)
+    assert [(c["before"], c["after"]) for c in rec["changes"]] == [(60, 90), (90, 120)]
+    assert rec["override_rules"][0]["before"] == {"matching.time_window_min[2]": 120}   # 전역 값 바뀐 뒤 기준

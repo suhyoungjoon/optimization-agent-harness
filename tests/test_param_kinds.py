@@ -85,5 +85,29 @@ def test_params_view_separates_changeable_from_reference():
 
 
 def test_proposer_shows_only_policy_as_changeable():
-    from core.improvement.proposer import SYSTEM
+    """개선 에이전트의 get_params 결과에 바꿀 수 있는 경로와 참고만 할 경로가 실제로 담긴다."""
+    import json
+
+    from core.improvement.proposer import SYSTEM, propose
+    from core.llm.client import load_config
+    from domains.dispatch.generator import generate
+    from tests.fake_llm import FakeLLM, tool_use
+
+    def policy(item, n, messages, tools):
+        if n == 0:
+            return tool_use("get_params", {})
+        return tool_use("submit_proposals", {"proposals": []})
+
+    llm = FakeLLM(policy)
+    inst, _ = generate(42, ["P4"])
+    propose(lambda p: get_pack(p), inst, PARAMS, "", DIMS, {"summary": "", "findings": []}, llm, load_config())
+    result = next(json.loads(b["content"]) for m in llm.calls[1]["messages"] if m["role"] == "user"
+                  and isinstance(m["content"], list) for b in m["content"] if b.get("type") == "tool_result")
+    assert "matching.area_extension_km" in result["changeable"] and "duration.base_min" not in result["changeable"]
+    assert "duration.base_min" in result["reference_only"]["estimate"]["paths"]
     assert "policy" in SYSTEM
+
+
+def test_nonexistent_path_is_a_validation_error_not_an_exception():
+    assert params_errors(PARAMS, change("nosuch.key", 1), DIMS)
+    assert params_errors(PARAMS, rule("nosuch.key", 1), DIMS)

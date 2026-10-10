@@ -26,9 +26,30 @@ def load_sweep_config(path: str | Path = CONFIG_PATH) -> dict:
     return cfg
 
 
+def _shape_error(current, value) -> str | None:
+    """축 값이 현재 값과 같은 모양인가 (수치 ↔ 수치, 같은 길이의 목록, 같은 키의 사전). 아니면 이유."""
+    is_num = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)   # noqa: E731
+    if is_num(current):
+        return None if is_num(value) else f"수치여야 한다 (받은 값 {value!r})"
+    if isinstance(current, bool):
+        return None if isinstance(value, bool) else f"참·거짓이어야 한다 (받은 값 {value!r})"
+    if isinstance(current, list):
+        if not isinstance(value, list) or len(value) != len(current):
+            return f"길이 {len(current)}인 목록이어야 한다 (받은 값 {value!r})"
+        return next((e for c, v in zip(current, value) if (e := _shape_error(c, v))), None)
+    if isinstance(current, dict):
+        if not isinstance(value, dict) or set(value) != set(current):
+            return f"키가 {sorted(current)}인 사전이어야 한다 (받은 값 {value!r})"
+        return next((e for k in current if (e := _shape_error(current[k], value[k]))), None)
+    return None if type(value) is type(current) else f"{type(current).__name__}여야 한다 (받은 값 {value!r})"
+
+
 def _axis_errors(base_params: dict, axes: list[dict], max_points: int) -> list[str]:
     if not 1 <= len(axes) <= 2:
         return ["축은 1~2개여야 한다"]
+    paths = [str(a.get("path", "")) for a in axes]
+    if len(set(paths)) != len(paths):
+        return [f"같은 파라미터를 두 축에 쓸 수 없다: {paths[0]}"]
     errors = []
     for i, axis in enumerate(axes):
         path, values = str(axis.get("path", "")), axis.get("values")
@@ -44,8 +65,12 @@ def _axis_errors(base_params: dict, axes: list[dict], max_points: int) -> list[s
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             errors.append(f"axes[{i}]: {exc}")
             continue
+        current = get_path(base_params, path)
         for v in values:
-            errors += _check_value(base_params[section], key, v, f"axes[{i}] {path}")
+            if shape := _shape_error(current, v):
+                errors.append(f"axes[{i}] {path}: {shape}")
+            else:
+                errors += _check_value(base_params[section], key, v, f"axes[{i}] {path}")
     if not errors:
         n = 1
         for axis in axes:

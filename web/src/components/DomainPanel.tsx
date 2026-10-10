@@ -217,11 +217,15 @@ function Params({ def, domainName, datasetId, metrics }: {
   useEffect(() => {
     api.paramsHistory(domainName).then(setCards).catch(() => undefined);
   }, [domainName]);
+  const version = String(def.params.version);
   useEffect(() => {
     if (!datasetId) return;
+    let current = true;           // 데이터·규칙 버전이 바뀐 뒤 늦게 온 옛 응답은 버린다
     setSens(null);
-    api.sensitivity(datasetId).then(setSens).catch((e) => setSensError(String(e)));
-  }, [datasetId]);
+    setSensError(null);
+    api.sensitivity(datasetId).then((r) => current && setSens(r)).catch((e) => current && setSensError(String(e)));
+    return () => { current = false; };
+  }, [datasetId, version]);
   const sensMetrics = (sens?.metrics ?? []).map((k) => metrics.find((m) => m.key === k)).filter(Boolean) as MetricSpec[];
   return (
     <div className="domain-stack">

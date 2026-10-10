@@ -7,7 +7,7 @@ M13부터는 승인할 때 결정(decision)에 두 가지를 더 남긴다: 승�
 
 import copy
 
-from core.params import get_path
+from core.params import get_path, set_path
 
 
 def _value(params: dict, path: str):
@@ -20,10 +20,17 @@ def _value(params: dict, path: str):
 def change_record(params: dict, proposal: dict) -> dict:
     """승인 직전의 params로 바뀌는 값의 전후를 기록한다 (decision에 그대로 넣는다).
     구간 조건은 set의 경로마다 그때의 전역 값을 before로 남긴다."""
+    working = copy.deepcopy(params)      # 같은 경로를 여러 번 바꾸면 앞 변경이 반영된 값이 다음 변경의 before
+    changes = []
+    for c in proposal.get("params_changes") or []:
+        changes.append({"path": c["path"], "before": _value(working, c["path"]), "after": copy.deepcopy(c["value"])})
+        try:
+            set_path(working, c["path"], copy.deepcopy(c["value"]))
+        except (ValueError, KeyError, IndexError, TypeError):
+            pass
     return {
-        "changes": [{"path": c["path"], "before": _value(params, c["path"]), "after": copy.deepcopy(c["value"])}
-                    for c in proposal.get("params_changes") or []],
-        "override_rules": [{**copy.deepcopy(r), "before": {p: _value(params, p) for p in (r.get("set") or {})}}
+        "changes": changes,
+        "override_rules": [{**copy.deepcopy(r), "before": {p: _value(working, p) for p in (r.get("set") or {})}}
                            for r in proposal.get("override_rules") or []],
     }
 

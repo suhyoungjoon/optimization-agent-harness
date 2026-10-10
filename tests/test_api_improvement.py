@@ -307,3 +307,24 @@ def test_params_history_card_records_approver_and_values(client, files):
     card = cards[0]
     assert (card["version_before"], card["version_after"]) == (1, 2) and card["approver"] == "김현장"
     assert card["findings"][0]["id"] == "F1" and card["metrics_after"]["assignment_rate"] > card["metrics_before"]["assignment_rate"]
+
+
+def test_stored_non_policy_proposal_is_rechecked_on_simulate_and_forced_approve(client, files, tmp_path):
+    """분류 도입 전에 저장된 안처럼, 추정값을 바꾸는 개선안이 저장돼 있어도 시뮬레이션·강제 승인에서 다시 막힌다."""
+    from core.storage.store import Store
+
+    params_path, _spec = files
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    report = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    batch = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id']}).json()['id']}")
+    ok = batch["proposals"][0]
+    Store(tmp_path / "h.db").update_proposal(ok["id"], body=json.dumps({**ok["body"], "override_rules": [],    # 저장 형식(JSON 문자열)
+        "params_changes": [{"path": "duration.base_min", "value": {"install": 45, "repair": 45}}]}))
+    before = params_path.read_text(encoding="utf-8")
+
+    sim = client.post(f"/proposals/{ok['id']}/simulate", json={})
+    assert sim.status_code == 400 and "추정값" in sim.json()["detail"]
+    forced = client.post(f"/proposals/{ok['id']}/approve", json={"force": True, "note": "강제"})
+    assert forced.status_code == 400 and "추정값" in forced.json()["detail"]
+    assert params_path.read_text(encoding="utf-8") == before                    # 규칙 파일은 그대로

@@ -38,6 +38,11 @@ def test_two_axes_make_a_grid(setup):
     assert len(out["points"]) == 4
     assert {tuple(sorted(p["values"].items())) for p in out["points"]} == {
         (("matching.area_extension_km[2]", a), ("matching.time_window_min[2]", t)) for a in (3, 4) for t in (60, 120)}
+    # 두 축이 실제로 적용됐는지: 조합마다 결과가 다르다
+    got = {(p["values"]["matching.area_extension_km[2]"], p["values"]["matching.time_window_min[2]"]):
+           (count(p, "assignment_rate"), count(p, "on_time_rate")) for p in out["points"]}
+    assert got[(3, 60)] == (1040, 741) and abs(got[(4, 60)][0] - 1174) <= 1
+    assert len(set(got.values())) == 4
 
 
 def test_estimate_axis_is_allowed_but_marked(setup):
@@ -59,6 +64,10 @@ def test_estimate_axis_is_allowed_but_marked(setup):
     ([{"path": "matching.area_extension_km[2]", "values": list(range(6))},
       {"path": "matching.time_window_min[2]", "values": list(range(0, 120, 10))}], "상한"),
     ([{"path": "duration.bounds", "values": [1]}], "바꿀 수 없는 경로"),
+    ([{"path": "matching.area_extension_km[2]", "values": ["4"]}], "수치"),                 # 모양이 다른 값
+    ([{"path": "matching.area_extension_km", "values": [[0, 1]]}], "길이 3"),
+    ([{"path": "duration.base_min", "values": [{"install": 45}]}], "키가"),
+    ([{"path": "matching.area_extension_km[2]", "values": [3]}] * 2, "같은 파라미터"),       # 같은 축 두 번
 ])
 def test_axis_errors(setup, axes, word):
     factory, inst, params = setup
@@ -108,3 +117,19 @@ def test_sweep_api_caches_by_dataset_version_and_axes(tmp_path):
     assert client.post("/params/sweep", json={**body, "dataset_id": "nope"}).status_code == 404
     sens = client.get("/params/sensitivity", params={"dataset_id": ds["id"]}).json()
     assert sens["rows"] and sens["cached"] is False
+
+
+def test_sweep_cache_is_bounded(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import api.improvement
+    from api.main import create_app
+
+    monkeypatch.setattr(api.improvement, "SWEEP_CACHE_MAX", 1)
+    client = TestClient(create_app(tmp_path / "h.db", serve_web=False))
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    a = {"dataset_id": ds["id"], "axes": [{"path": "matching.area_extension_km[2]", "values": [3]}]}
+    b = {"dataset_id": ds["id"], "axes": [{"path": "matching.area_extension_km[2]", "values": [4]}]}
+    client.post("/params/sweep", json=a)
+    client.post("/params/sweep", json=b)                                  # a는 밀려난다
+    assert client.post("/params/sweep", json=a).json()["cached"] is False

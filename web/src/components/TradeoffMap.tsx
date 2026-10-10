@@ -1,7 +1,7 @@
 // 득실 지도 (M13-C): 파라미터를 바꿔 가며 규칙 엔진으로 돌린 점들(탐색), 현재 버전, AI 개선안, 사람이 정한 제약선을 한 장에.
 // 파라미터 튜닝은 정답 찾기가 아니라 교환 곡선 위의 한 점 고르기다. 개선안이 곡선 위 어디에 있는지 보여 준다.
 // 추정값(estimate) 축으로 만든 점은 경고 색·삼각형: 지표가 좋아져도 "가정만 바꾼 가짜 개선"이다.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../api";
 import type { MetricSpec } from "../domains/types";
@@ -44,6 +44,13 @@ function steps(lo: number, hi: number, current: number): number[] {
     vals.add(integer ? Math.round(v) : Math.round(v * 100) / 100);
   }
   return [...vals].sort((a, b) => a - b);
+}
+
+/** 개선안을 돌려본 기준(개선 전 지표)이 탐색의 현재 버전과 같은가. 같은 데이터·같은 규칙이면 같다 */
+function sameBase(before: Record<string, number> | undefined, base: Record<string, number>): boolean {
+  if (!before) return false;
+  const keys = Object.keys(base).filter((k) => k in before);
+  return keys.length > 0 && keys.every((k) => Math.abs(before[k] - base[k]) < 1e-9);
 }
 
 type Kind = "sweep" | "estimate" | "current" | "proposal";
@@ -100,24 +107,30 @@ export default function TradeoffMap({ datasetId, params, proposals, constraints,
     if (options.length && axis2 && !pick(axis2)) setAxis2(options[1]?.path ?? "");
   }, [options]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 결과는 데이터와 규칙 버전에 묶인다. 둘 중 하나가 바뀌면 다시 계산하고, 늦게 온 옛 응답은 버린다
+  const context = `${datasetId}|${String(params?.version ?? "")}`;
+  const latest = useRef(0);
   const run = async () => {
     if (!datasetId) return;
     const axes = [pick(axis1), axis2 && axis2 !== axis1 ? pick(axis2) : undefined].filter(Boolean) as AxisOption[];
     if (!axes.length) return;
+    const ticket = ++latest.current;
     setBusy(true);
     setError(null);
     try {
-      setResult(await api.sweep(datasetId, axes.map((a) => ({ path: a.path, values: a.values }))));
+      const r = await api.sweep(datasetId, axes.map((a) => ({ path: a.path, values: a.values })));
+      if (ticket === latest.current) setResult(r);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (ticket === latest.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      if (ticket === latest.current) setBusy(false);
     }
   };
-  // 처음 열 때 기본 축으로 한 번 (규칙 엔진만, AI 비용 0)
+  // 처음 열 때, 그리고 데이터·규칙 버전이 바뀔 때마다 지금 축으로 (규칙 엔진만, AI 비용 0)
   useEffect(() => {
-    if (datasetId && options.length && !result && !busy) void run();
-  }, [datasetId, options.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    setResult(null);
+    if (datasetId && options.length) void run();
+  }, [context, options.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const specOf = (k: string | undefined) => specs.find((m) => m.key === k);
   const xs = specOf(xKey), ys = specOf(yKey);
@@ -140,13 +153,17 @@ export default function TradeoffMap({ datasetId, params, proposals, constraints,
       label: "현재", violations: result.base.violations, detail: [`규칙 v${result.params_version}`] });
     proposals.forEach((p, i) => {
       const sim = p.simulation;
-      if (p.kind !== "params" || !sim?.after || sim.error) return;
+      // 아직 승인할 수 있는 안만, 그리고 같은 데이터·같은 규칙 기준으로 돌려본 안만 (기준이 다르면 점을 비교할 수 없다)
+      if (p.kind !== "params" || p.status !== "simulated" || !sim?.after || sim.error) return;
+      if (!sameBase(sim.before, result.base.metrics)) return;
       const n = (sim as { items?: number }).items ?? items;
       out.push({ x: scale(xs, sim.after[xKey], n), y: scale(ys, sim.after[yKey], n), kind: "proposal", label: `안${i + 1}`,
         proposalId: p.id, violations: sim.violations_after ?? 0, detail: [p.body.title] });
     });
     return out.filter((d) => Number.isFinite(d.x) && Number.isFinite(d.y));
   }, [result, xKey, yKey, counts, proposals]); // eslint-disable-line react-hooks/exhaustive-deps
+  const hidden = result ? proposals.filter((p) => p.kind === "params" && p.status === "simulated" && p.simulation?.after
+    && !p.simulation.error && !sameBase(p.simulation.before, result.base.metrics)).length : 0;
 
   // 지표 제약선: min·max는 그 값, max_drop·max_rise는 현재 버전 기준
   const lines = constraints.filter((c) => c.type === "metric" && (c.metric === xKey || c.metric === yKey) && result).flatMap((c) => {
@@ -240,6 +257,7 @@ export default function TradeoffMap({ datasetId, params, proposals, constraints,
             <figcaption className="muted small">
               탐색 {result.points.length}개 조합 · {result.seconds.toFixed(1)}초{result.cached ? " (저장된 계산)" : ""} · 규칙 v{result.params_version}
               {" "}· 결과가 같은 조합은 한 점으로 겹칩니다 (표로 보기에 모두 있음)
+              {hidden > 0 && <> · 다른 데이터나 규칙 기준으로 돌려본 개선안 {hidden}건은 비교할 수 없어 표시하지 않았습니다</>}
             </figcaption>
           </figure>
           <Details summary={`표로 보기 (탐색 점 ${result.points.length}개)`}>
