@@ -210,7 +210,13 @@ export default function AnalysisPanel({
               ) : (
                 <p className="muted">결과를 불러오는 중…</p>
               )}
-              {focused && !focused.slice && <p className="muted small">이 문제는 특정 조건이 아니라 지표 전체의 패턴이라 지도에 강조할 곳이 없습니다.</p>}
+              {focused && !focused.slice && !focused.resources && <p className="muted small">이 문제는 특정 조건이 아니라 지표 전체의 패턴이라 지도에 강조할 곳이 없습니다.</p>}
+              {focused?.resources && (
+                <p className="muted small">
+                  {resourceSpecs[focused.resources.kind]?.label ?? focused.resources.kind} {focused.resources.ids.join(", ")}이(가) 맡은
+                  {focused.slice ? " 조건에 맞는" : ""} 항목 {highlight?.length ?? 0}건을 강조했습니다.
+                </p>
+              )}
             </div>
           </div>
         </>
@@ -336,7 +342,8 @@ function FindingCard({
         {finding.resources && (() => {
           const spec = resourceSpecs[finding.resources.kind];
           const traits = Object.entries(finding.resources.traits ?? {})
-            .map(([k, v]) => `${spec?.traits?.[k]?.label ?? k} ${v.join(", ")}`);
+            .filter(([, v]) => v.length > 0)
+            .map(([k, v]) => `${spec?.traits?.[k]?.label ?? k} ${[...new Set(v)].join(", ")}`);   // 정리 전에 저장된 리포트 대비
           return (
             <span className="chip chip-perspective" title="이 발견이 가리키는 자원 (인용한 도구 결과에서 확인됨). 누르면 지도에서 이 자원이 맡은 항목을 강조합니다">
               {spec?.label ?? finding.resources.kind}: {finding.resources.ids.join(", ")}{traits.length ? ` · ${traits.join(" · ")}` : ""}
