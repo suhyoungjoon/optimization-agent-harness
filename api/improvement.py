@@ -20,6 +20,7 @@ from core.evaluation.runner import create_ai_run, run_ai_agent
 from core.harness.levels import load_levels
 from core.improvement.approval import write_params, write_spec
 from core.improvement.changes import apply_params, apply_spec
+from core.improvement.history import change_card, change_record
 from core.improvement.constraints import constraint_errors, constraint_violations
 from core.improvement.memory import analysis_memory_text, collect_memory, proposal_memory_text
 from core.improvement.proposer import finding_slices, propose
@@ -67,6 +68,7 @@ class SimulateRequest(BaseModel):
 class DecisionRequest(BaseModel):
     note: str = ""
     force: bool = False               # 시뮬레이션 없이 승인 (사유를 note에 남긴다)
+    approver: str = ""                # 승인자 이름 (선택, 로그인이 없어 자기 기재. 변경 이력 카드에 보인다)
 
 
 @dataclass
@@ -371,8 +373,10 @@ def register(app: FastAPI, ctx: Context) -> None:
             raise HTTPException(400, "강제 승인에는 사유(note)가 필요함")
         report = store.get_report(p["report_id"])
         pack = load_pack(store.get_run(report["run_id"])["domain"])
-        decision = {"action": "approved", "note": req.note, "forced": req.force, "at": time.time()}
+        decision = {"action": "approved", "note": req.note, "forced": req.force, "at": time.time(),
+                    "approver": req.approver.strip() or None}
         if p["kind"] == "params":
+            decision.update(change_record(load_params(pack), p["body"]))   # 바뀌기 전 값 (변경 이력 카드)
             before, after = write_params(pack.params_path(), p["body"])
             decision.update(params_version_before=before, params_version_after=after)
         else:
@@ -387,6 +391,19 @@ def register(app: FastAPI, ctx: Context) -> None:
             raise HTTPException(400, f"이미 결정됨: {p['status']}")
         return store.update_proposal(proposal_id, status="rejected",
                                      decision={"action": "rejected", "note": req.note, "at": time.time()})
+
+    @app.get("/params/history")
+    def params_history(domain: str):
+        """변경 이력 카드: 승인으로 params 버전이 오를 때마다 하나 (최근 것부터)."""
+        cards = []
+        for p in store.decided_proposals():
+            report = store.get_report(p["report_id"])
+            run = store.get_run(report["run_id"]) if report else None
+            if not run or run["domain"] != domain:
+                continue
+            if card := change_card(p, report):
+                cards.append(card)
+        return sorted(cards, key=lambda c: c["version_after"] or 0, reverse=True)
 
     # --- 이력 ---
     @app.get("/history")

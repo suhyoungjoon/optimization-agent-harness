@@ -20,6 +20,8 @@ from core.improvement.constraints import constraint_errors, constraint_violation
 from core.improvement.memory import analysis_memory_text, build_memory, collect_memory, proposal_memory_text
 from core.improvement.proposer import finding_slices, propose
 from core.improvement.simulate import simulate_params
+from core.improvement.sweep import load_sweep_config, sensitivity, sweep_params
+from core.improvement.history import change_card, change_record
 from core.interfaces import DecisionRecord, DomainPack, ToolContext, TraceRecord, Violation
 from core.llm.client import AnthropicClient, LLMClient, LLMResponse, ResponseCache, Usage, load_config
 from core.llm.tool_loop import LoopResult, run_tool_loop, usage_dict
@@ -51,6 +53,8 @@ __all__ = [
     "apply_params", "apply_spec", "constraint_errors", "constraint_violations", "finding_slices", "params_errors",
     "propose", "simulate_params", "analysis_memory_text", "build_memory", "collect_memory", "proposal_memory_text",
     "spec_errors", "spec_sections", "write_params", "write_spec",
+    # 파라미터 가시화 (M13): 탐색·민감도, 변경 이력 카드
+    "change_card", "change_record", "load_sweep_config", "sensitivity", "sweep_params",
     # 저장소 (core.storage)
     "Store", "dataset_id", "to_jsonable",
 ]
