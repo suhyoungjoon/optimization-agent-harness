@@ -144,3 +144,61 @@ def test_propose_feedback_is_added_to_input_only_when_given(pack, spec_text):
     assert first_feedback.startswith(first_plain)                      # 기존 입력 뒤에만 붙는다
     assert "validation 평균 assignment_rate 개선 +0.0000" in first_feedback
     assert out["stop"] == "submitted"
+
+
+def test_propose_constraints_go_to_input_and_simulation_tool(pack, spec_text):
+    """현장 제약은 입력에 붙고, 개선 에이전트의 직접 시뮬레이션 결과에도 위반이 함께 돌아온다 (M12-a)."""
+    inst, _ = generate(42, ["P4"])
+    report = {"summary": "경계", "findings": [{"id": "F1", "title": "경계 지역 실패", "description": "",
+                                             "slice": {"area_zone": ["boundary"]}}]}
+    constraints = [{"type": "param", "path": "matching.area_extension_km[2]", "max": 4, "source": "현장 담당자",
+                    "note": "4km 넘으면 출동 불가"}]
+    too_far = {"params_changes": [{"path": "matching.area_extension_km[2]", "value": 5}]}
+
+    def policy(item, n, messages, tools):
+        if n == 0:
+            return tool_use("simulate_params", too_far)
+        return tool_use("submit_proposals", {"proposals": [
+            {"title": "경계 지역만 +1km", "kind": "params", "rationale": "x", "target_findings": ["F1"],
+             "override_rules": [BOUNDARY_RULE]}]})
+
+    plain, constrained = FakeLLM(policy), FakeLLM(policy)
+    p_out = propose(get_pack, inst, pack.params, spec_text, pack.dimensions(), report, plain, load_config())
+    c_out = propose(get_pack, inst, pack.params, spec_text, pack.dimensions(), report, constrained, load_config(),
+                    constraints=constraints)
+    first_plain = plain.calls[0]["messages"][0]["content"]
+    first_constrained = constrained.calls[0]["messages"][0]["content"]
+    assert "지켜야 할 제약" not in first_plain and first_constrained.startswith(first_plain)
+    assert "4km 넘으면 출동 불가" in first_constrained
+
+    sim_plain = next(c for c in p_out["calls"].values() if c["name"] == "simulate_params")["output"]
+    sim_constrained = next(c for c in c_out["calls"].values() if c["name"] == "simulate_params")["output"]
+    assert "constraint_violations" not in sim_plain                    # 제약이 없으면 결과도 이전과 같다
+    assert len(sim_constrained["constraint_violations"]) == 1
+
+
+def test_submission_given_as_json_string_is_decoded(pack, spec_text):
+    """모델이 배열 인자를 JSON 문자열로 보내는 경우가 있다 (실제 API에서 관찰). 스키마가 배열·객체면 풀어서 쓴다."""
+    import json
+    inst, _ = generate(42, ["P4"])
+    report = {"summary": "경계", "findings": [{"id": "F1", "title": "경계 지역 실패", "description": "",
+                                             "slice": {"area_zone": ["boundary"]}}]}
+    proposals = [{"title": "경계 지역만 +1km", "kind": "params", "rationale": "x", "target_findings": ["F1"],
+                  "override_rules": [BOUNDARY_RULE]}]
+
+    def policy(item, n, messages, tools):
+        return tool_use("submit_proposals", {"proposals": json.dumps(proposals, ensure_ascii=False)})
+
+    out = propose(get_pack, inst, pack.params, spec_text, pack.dimensions(), report, FakeLLM(policy), load_config())
+    assert [p["proposal"]["title"] for p in out["proposals"]] == ["경계 지역만 +1km"] and out["proposals"][0]["errors"] == []
+
+
+def test_undecodable_items_are_marked_invalid_not_crash(pack, spec_text):
+    inst, _ = generate(42, ["P4"])
+    report = {"summary": "", "findings": []}
+
+    def policy(item, n, messages, tools):
+        return tool_use("submit_proposals", {"proposals": ["그냥 문장"]})
+
+    out = propose(get_pack, inst, pack.params, spec_text, pack.dimensions(), report, FakeLLM(policy), load_config())
+    assert len(out["proposals"]) == 1 and out["proposals"][0]["errors"]

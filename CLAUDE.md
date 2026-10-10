@@ -9,7 +9,7 @@
 1. **코어는 도메인을 모른다.** `core/` 안에 작업자, 지시서, 지점 같은 dispatch 용어가 나오면 안 된다. 도메인 접근은 `core/interfaces.py`의 `DomainPack`을 통해서만 한다.
 2. **규칙·파라미터·프롬프트는 파일로 분리한다.** 가중치, 매칭 범위, 기준값을 코드에 하드코딩하지 말고 `params.yaml`, `domain-spec.md`에서 읽는다.
 3. **필수조건 판정은 항상 `DomainPack.validate()`가 한다.** LLM의 자체 판단으로 위반 여부를 결정하지 않는다.
-4. **모든 실행은 재현 가능해야 한다.** seed, 데이터셋 ID, 하네스 레벨, 모델명, params 버전을 run 메타데이터로 저장한다.
+4. **모든 실행은 재현 가능해야 한다.** seed, 데이터셋 ID, 하네스 레벨, 모델명, params 버전을 run 메타데이터로 저장한다. 분석·개선 에이전트가 이전 회차의 기억(사람의 판단)을 읽으면 쓴 기억(항목과 해시)도 리포트·개선안 묶음에 저장한다.
 5. **하네스 레벨은 코드 분기가 아니라 `configs/harness_levels.yaml` 플래그로 제어한다.**
 6. **처음부터 과하게 범용화하지 않는다.** 현재 마일스톤에 필요한 것만 만든다. 두 번째 도메인이 요구할 때 인터페이스를 넓힌다.
 
@@ -73,7 +73,7 @@ python -m api.main --demo demo/bundle   # 시연 모드: 저장된 AI 결과만 
 python -m scripts.rehearsal_bundle      # API 키 없이 쓰는 리허설 번들 (가짜 LLM) → demo/rehearsal
 node scripts/record_demo.mjs --stills   # 시연 장면 녹화 (시연 모드 서버에 대해, runs/recordings)
 ```
-AI agent 실행에는 `.env`의 `ANTHROPIC_API_KEY`가 필요하다. 모델·effort·캐시는 `configs/llm.yaml`, 최종 측정 때는 `LLM_CACHE=0`으로 입력 해시 캐시를 끈다.
+AI agent 실행에는 API 키가 필요하다: 환경변수 또는 `.env`의 `OAH_ANTHROPIC_API_KEY`(우선) 또는 `ANTHROPIC_API_KEY`. 모델·effort·캐시는 `configs/llm.yaml`(배정은 기본값, 분석·개선안은 `roles`의 역할별 모델), 최종 측정 때는 `LLM_CACHE=0`으로 입력 해시 캐시를 끈다. 실험할 때만 모델을 바꾸려면 `LLM_MODEL`, `LLM_THINKING`(adaptive | off), `LLM_EFFORT`(low~max | none)로 덮어쓴다 (쓴 모델은 사용량 기록 `usage.model`에 남는다).
 (명령어가 바뀌면 이 섹션을 갱신한다.)
 
 ## 작업 방식

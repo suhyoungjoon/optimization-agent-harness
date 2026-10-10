@@ -6,10 +6,11 @@
 
 from core.interfaces import DecisionRecord, DomainPack
 from core.llm.client import LLMClient
-from core.llm.tool_loop import run_tool_loop, usage_dict
+from core.llm.tool_loop import call_list_text, resolve_call, run_tool_loop, usage_dict
 
 from .aggregate_tools import Aggregator
 from .grounding import numbers_in, unsupported_numbers
+from .resources import resource_problems, resources_schema, strip_bad_resources
 
 SUBMIT = "submit_report"
 
@@ -18,15 +19,32 @@ SYSTEM = """너는 최적화 결과 분석가다. 주어진 실행 결과에서 
 규칙:
 - 반드시 도구로 데이터를 조회한다. 추측하지 않는다.
 - 발견의 설명에 쓰는 모든 수치는 cited_calls에 넣은 도구 결과에 그대로 있어야 한다. 도구 결과에 없는 수치를 계산해 쓰지 않는다.
+- cited_calls에는 근거가 된 도구 결과의 호출 번호(결과 맨 앞의 call_ref, 예: "c3")를 적는다.
 - 발견 하나는 패턴 하나다. 전체 평균과 뚜렷이 다른 구간만 발견으로 올린다. 3~6개가 적당하다.
 - slice에는 패턴이 나타나는 구간을 선언된 차원과 값으로 적는다 (overview 도구로 확인).
 - 실패가 아니라 자원 쪽 패턴(예: 활용률이 낮은 자원)이면 metric에 지표 이름과 방향을 적는다.
 - 끝나면 submit_report 도구로 제출한다."""
 
 
+def _slice_schema(dimensions: dict) -> dict:
+    """구간 칸: 선언된 차원만 (값 목록이 선언된 차원은 그 값만). 판정은 slice_problems가 하고 이것은 안내다."""
+    declared = dimensions.get("dimensions") or {}
+    if not declared:
+        return {"type": "object", "description": "차원 → 값 목록",
+                "additionalProperties": {"type": "array", "items": {"type": "string"}}}
+    props = {}
+    for name, spec in declared.items():
+        items = {"type": "string"}
+        if spec.get("values"):
+            items["enum"] = [str(v) for v in spec["values"]]
+        props[name] = {"type": "array", "items": items, "description": spec.get("label", name)}
+    return {"type": "object", "description": "선언된 차원 → 값 목록", "properties": props, "additionalProperties": False}
+
+
 def report_submit_tool(dimensions: dict, metric_names: list[str]) -> dict:
-    """분석 리포트 제출 도구 정의. 다른 분석 agent(예: 관점별 agent)도 같은 리포트 형식을 쓰도록 공개한다."""
-    return {
+    """분석 리포트 제출 도구 정의. 다른 분석 agent(예: 관점별 agent)도 같은 리포트 형식을 쓰도록 공개한다.
+    도메인이 자원을 선언했으면 발견에 resources 칸이 생긴다 (M12-d)."""
+    tool = {
         "name": SUBMIT,
         "description": "분석 리포트를 제출한다.",
         "input_schema": {
@@ -38,8 +56,7 @@ def report_submit_tool(dimensions: dict, metric_names: list[str]) -> dict:
                     "properties": {
                         "title": {"type": "string"},
                         "description": {"type": "string", "description": "수치는 인용한 도구 결과에서만"},
-                        "slice": {"type": "object", "description": "차원 → 값 목록",
-                                  "additionalProperties": {"type": "array", "items": {"type": "string"}}},
+                        "slice": _slice_schema(dimensions),
                         "reason_codes": {"type": "array", "items": {"type": "string",
                                                                     "enum": sorted(dimensions.get("reason_codes", {}))}},
                         "metric": {"type": "object", "properties": {
@@ -47,7 +64,7 @@ def report_submit_tool(dimensions: dict, metric_names: list[str]) -> dict:
                             "direction": {"type": "string", "enum": ["low", "high"]}}},
                         "hypothesis": {"type": "string", "description": "원인 가설"},
                         "cited_calls": {"type": "array", "items": {"type": "string"},
-                                        "description": "근거가 된 도구 호출의 tool_use id"},
+                                        "description": "근거가 된 도구 결과의 호출 번호 (call_ref, 예: c3)"},
                     },
                     "required": ["title", "description", "cited_calls"],
                 }},
@@ -55,17 +72,111 @@ def report_submit_tool(dimensions: dict, metric_names: list[str]) -> dict:
             "required": ["summary", "findings"],
         },
     }
+    schema = resources_schema(dimensions)
+    if schema:
+        tool["input_schema"]["properties"]["findings"]["items"]["properties"]["resources"] = schema
+    return tool
+
+
+RESOURCES_RULE = ("\n- 특정 자원(선언된 자원 종류)에 대한 패턴이면 resources에 종류와 id를 적는다. "
+                  "id와 속성 값은 인용한 도구 결과에 있는 그대로 적는다. 자원 id를 slice에 적지 않는다.")
+
+
+def analysis_system(dimensions: dict) -> str:
+    """분석 시스템 프롬프트. 도메인이 자원을 선언했을 때만 자원 칸 안내를 붙인다 (없으면 이전과 같다)."""
+    return SYSTEM.replace("\n- 끝나면 submit_report", RESOURCES_RULE + "\n- 끝나면 submit_report") \
+        if (dimensions or {}).get("resources") else SYSTEM
+
+
+def cited_call_ids(finding: dict, calls: dict) -> list[str]:
+    """발견이 인용한 호출(호출 번호·tool_use id 모두 허용)을 tool_use id 목록으로. 없는 인용은 뺀다."""
+    return [cid for c in finding.get("cited_calls") or [] if (cid := resolve_call(c, calls))]
 
 
 def grounding_problems(finding: dict, calls: dict) -> list[str]:
     """발견 하나의 근거 검사. 인용한 도구 호출이 없거나, 설명의 수치가 인용 결과에 없으면 문제 목록을 돌려준다."""
-    cited = [c for c in finding.get("cited_calls") or [] if c in calls]
+    cited = cited_call_ids(finding, calls)
     if not cited:
-        return ["인용한 도구 호출이 없거나 존재하지 않는 id"]
+        listing = call_list_text(calls)
+        return ["인용한 도구 호출이 없거나 존재하지 않는 호출 번호" + (f" (인용할 수 있는 호출: {listing})" if listing else "")]
     sources = [n for c in cited for n in numbers_in(calls[c]["output"]) + numbers_in(calls[c]["input"])]
     sources += numbers_in(finding.get("slice") or {})
     bad = unsupported_numbers(f"{finding.get('title', '')} {finding.get('description', '')}", sources)
     return [f"근거 없는 수치 {', '.join(bad)}"] if bad else []
+
+
+def perspective_view(system: str, tools: list[dict], perspective: dict | None) -> tuple[str, list[dict]]:
+    """관점 하나에 맞춘 시스템 프롬프트와 도구 (관점의 질문을 뒤에 붙이고 관점의 도구만 남긴다). 관점이 없으면 그대로."""
+    if not perspective:
+        return system, tools
+    allowed = set(perspective["tools"])
+    return (f"{system}\n\n관점: {perspective['name']}\n{perspective['question'].strip()}",
+            [t for t in tools if t["name"] in allowed])
+
+
+def slice_problems(finding: dict, dimensions: dict) -> list[str]:
+    """구간 검사: 선언되지 않은 차원, 값 목록이 선언된 차원의 목록 밖 값. dimensions: DomainPack.dimensions()."""
+    declared = dimensions.get("dimensions") or {}
+    bad_dims, bad_values = [], []
+    for dim, values in (finding.get("slice") or {}).items():
+        if dim not in declared:
+            bad_dims.append(dim)
+            continue
+        allowed = {str(v) for v in declared[dim].get("values") or []}
+        if allowed:
+            bad_values += [f"{dim}={v}" for v in values or [] if str(v) not in allowed]
+    problems = []
+    if bad_dims:
+        problems.append(f"선언되지 않은 차원 {', '.join(bad_dims)} (쓸 수 있는 차원: {', '.join(declared)}). "
+                        "선언된 차원으로 바꾸거나 구간에서 빼고 설명에 적는다")
+    if bad_values:
+        problems.append(f"선언되지 않은 값 {', '.join(bad_values)} (overview로 차원별 값을 확인)")
+    return problems
+
+
+def strip_bad_slice(finding: dict, dimensions: dict) -> dict:
+    """구간에서 선언되지 않은 차원·값을 빼고, 뺀 것을 slice_removed에 남긴다 (발견 자체는 둔다)."""
+    declared = dimensions.get("dimensions") or {}
+    kept, removed = {}, {}
+    for dim, values in (finding.get("slice") or {}).items():
+        allowed = {str(v) for v in (declared.get(dim) or {}).get("values") or []}
+        if dim not in declared:
+            removed[dim] = values
+            continue
+        good = [v for v in values or [] if not allowed or str(v) in allowed]
+        bad = [v for v in values or [] if allowed and str(v) not in allowed]
+        if good:
+            kept[dim] = good
+        if bad:
+            removed[dim] = bad
+    if not removed:
+        return finding
+    return {**finding, "slice": kept, "slice_removed": removed}
+
+
+def submission_problems(submission: dict, calls: dict, dimensions: dict) -> list[str]:
+    """제출 검사 (돌려보낼 문제 목록): 발견마다 근거 검사 + 구간 검사."""
+    issues = []
+    for i, f in enumerate(submission.get("findings") or []):
+        issues += [f"findings[{i}] '{f.get('title', '')}': {p}"
+                   for p in grounding_problems(f, calls) + slice_problems(f, dimensions)
+                   + resource_problems(f, calls, dimensions)]
+    return issues
+
+
+def finalize_findings(findings: list[dict], calls: dict, dimensions: dict) -> tuple[list[dict], list[dict]]:
+    """최종 발견 정리 → (남긴 발견, 뺀 발견). 근거가 없는 발견은 빼고, 구간의 잘못된 항목만 있는 발견은
+    그 항목을 빼고 남긴다 (발견 내용은 맞을 수 있다). 남긴 발견은 인용을 tool_use id로 바꾸고 F1…를 붙인다."""
+    kept, dropped = [], []
+    for f in findings:
+        problems = grounding_problems(f, calls)
+        if problems:
+            dropped.append({"finding": f, "problems": problems})
+        else:
+            kept.append({**strip_bad_resources(strip_bad_slice(f, dimensions), calls, dimensions),
+                         "cited_calls": cited_call_ids(f, calls),
+                         "id": f"F{len(kept) + 1}"})
+    return kept, dropped
 
 
 # 공개 전 이름 (하위 호환)
@@ -74,29 +185,24 @@ _problems = grounding_problems
 
 
 def analyze(pack: DomainPack, instance, decisions: list[DecisionRecord], llm: LLMClient, llm_config: dict,
-            salt: str = "", max_calls: int = 30) -> dict:
+            salt: str = "", max_calls: int = 30, memory_text: str = "", perspective: dict | None = None) -> dict:
+    """memory_text: 이전 회차에서 사람이 내린 판정 (core.improvement.memory.analysis_memory_text). 비면 입력이 이전과 같다.
+    perspective: 관점 하나 ({id, name, question, tools}, core.analysis.perspectives). 주면 그 관점의 도구만 주고
+    질문을 시스템 프롬프트 뒤에 붙인다. 없으면 입력이 이전과 같다."""
     dimensions = pack.dimensions()
     tools = Aggregator(decisions, dimensions).tools() + pack.analysis_tools(instance, decisions)
+    system, tools = perspective_view(analysis_system(dimensions), tools, perspective)
     metric_names = sorted(pack.metrics(instance, decisions))
 
     def check(submission: dict, calls: dict) -> list[str]:
-        issues = []
-        for i, f in enumerate(submission.get("findings") or []):
-            issues += [f"findings[{i}] '{f.get('title', '')}': {p}" for p in grounding_problems(f, calls)]
-        return issues
+        return submission_problems(submission, calls, dimensions)
 
     user = ("실행 결과를 분석해 실패 패턴과 원인 가설을 찾아라. 먼저 overview로 전체와 차원을 확인하라.\n"
-            f"분석 대상 항목 수: {len(decisions)}")
-    result = run_tool_loop(llm, system=SYSTEM, user=user, tools=tools, submit_tool=report_submit_tool(dimensions, metric_names),
+            f"분석 대상 항목 수: {len(decisions)}") + memory_text
+    result = run_tool_loop(llm, system=system, user=user, tools=tools, submit_tool=report_submit_tool(dimensions, metric_names),
                            max_calls=max_calls, salt=salt, check_submission=check)
 
-    kept, dropped = [], []
-    for f in (result.submission or {}).get("findings") or []:
-        problems = grounding_problems(f, result.calls)
-        if problems:
-            dropped.append({"finding": f, "problems": problems})
-        else:
-            kept.append({**f, "id": f"F{len(kept) + 1}"})
+    kept, dropped = finalize_findings((result.submission or {}).get("findings") or [], result.calls, dimensions)
     return {
         "summary": (result.submission or {}).get("summary", ""),
         "findings": kept,

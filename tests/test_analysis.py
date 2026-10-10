@@ -167,8 +167,12 @@ def test_ideal_analyst_can_find_all_planted_faults():
 
     report = analyze(pack, inst, decisions, FakeLLM(policy), load_config())
     assert report["dropped"] == [], report["dropped"]
-    result = score(report["findings"], truth["faults"])
-    assert result["detected"] == 4 and result["unmatched_findings"] == []
+    result = score(report["findings"], truth["faults"], report["calls"])
+    assert result["unmatched_findings"] == []
+    # P3는 자동으로는 근거 일치까지(원인 확인 대기), 사람이 원인을 확인하면 4개 모두 탐지
+    assert (result["detected"], result["pending"]) == (3, 1) and result["faults"]["P3"]["matched_findings"] == ["F4"]
+    from core.evaluation.fault_scorer import apply_labels
+    assert apply_labels(result, {"F4": "cause_ok"})["detected"] == 4
 
 
 def test_report_schema_and_grounding_are_public():
@@ -184,3 +188,137 @@ def test_report_schema_and_grounding_are_public():
     assert core.grounding_problems({"title": "a", "description": "40건 중 12건", "cited_calls": ["t1"]}, calls) == []
     assert core.grounding_problems({"title": "a", "description": "40건 중 13건", "cited_calls": ["t1"]}, calls)
     assert core.grounding_problems({"title": "a", "description": "x", "cited_calls": []}, calls)
+
+
+# --- 근거 인용 번호 (실제 모델은 긴 tool_use id 대신 순번을 적는 경향이 있다) -----------
+
+def test_tool_results_show_short_call_refs(run_p4):
+    """도구 결과마다 짧은 호출 번호(c1, c2 …)를 보여 주고, calls에도 같은 번호를 남긴다."""
+    pack, inst, decisions, _ = run_p4
+    llm = FakeLLM(scripted([lambda m: tool_use("overview", {}),
+                            lambda m: tool_use("aggregate", {"group_by": ["area_zone"]}),
+                            lambda m: tool_use("submit_report", {"summary": "없음", "findings": []})]))
+    report = analyze(pack, inst, decisions, llm, load_config(), salt="t")
+    assert [c["ref"] for c in report["calls"].values()] == ["c1", "c2"]
+    second = last_tool_output(llm.calls[2]["messages"])
+    assert second["call_ref"] == "c2" and second["rows"]
+
+
+def test_analyze_accepts_call_refs_and_lists_them_on_rejection(run_p4):
+    pack, inst, decisions, _ = run_p4
+    zone = {}
+
+    def submit(cite):
+        def step(messages):
+            if not zone:
+                zone.update({r["area_zone"]: r for r in last_tool_output(messages)["rows"]})
+            b = zone["boundary"]
+            return tool_use("submit_report", {"summary": "경계", "findings": [
+                {"title": "경계 지역 OUT_OF_AREA", "description": f"경계 지역 {b['items']}건 중 {b['failed']}건 실패",
+                 "slice": {"area_zone": ["boundary"]}, "reason_codes": ["OUT_OF_AREA"], "cited_calls": [cite]}]})
+        return step
+
+    # 처음엔 없는 번호(c9)를 인용 → 반려 메시지에 인용할 수 있는 호출 목록 → c1로 고쳐 제출
+    llm = FakeLLM(scripted([lambda m: tool_use("aggregate", {"group_by": ["area_zone"]}), submit("c9"), submit("c1")]))
+    report = analyze(pack, inst, decisions, llm, load_config(), salt="t")
+    feedback = llm.calls[2]["messages"][-1]["content"][-1]["content"]
+    assert "c1 aggregate" in feedback
+    assert [f["title"] for f in report["findings"]] == ["경계 지역 OUT_OF_AREA"] and not report["dropped"]
+    call_id = next(iter(report["calls"]))
+    assert report["findings"][0]["cited_calls"] == [call_id]      # 저장할 때는 원래 tool_use id로 바꾼다 (화면이 id로 찾음)
+
+
+def test_grounding_accepts_ref_number_and_id():
+    import core
+    calls = {"toolu_x": {"ref": "c1", "name": "aggregate", "input": {}, "output": {"items": 40, "failed": 12}}}
+    for cite in ("toolu_x", "c1", "1"):
+        assert core.grounding_problems({"title": "a", "description": "40건 중 12건", "cited_calls": [cite]}, calls) == []
+    problems = core.grounding_problems({"title": "a", "description": "40건", "cited_calls": ["c2"]}, calls)
+    assert problems and "c1 aggregate" in problems[0]
+
+
+# --- 2단계 채점: 자동 근거 일치 + 사람 원인 확인 (M12-a) ------------------------------
+
+P3_STRICT = {"metric": "worker_utilization", "direction": "low",
+             "requires_tools": ["worker_stats"], "confirm_cause": True}
+CALLS = {"t1": {"ref": "c1", "name": "aggregate", "input": {}, "output": {}},
+         "t2": {"ref": "c2", "name": "worker_stats", "input": {}, "output": {}}}
+
+
+def test_requires_tools_needs_cited_tool():
+    low = {"metric": {"name": "worker_utilization", "direction": "low"}}
+    assert not matches({**low, "cited_calls": ["t1"]}, P3_STRICT, CALLS)        # 지표만 맞고 지정 도구 인용 없음
+    assert matches({**low, "cited_calls": ["t2"]}, P3_STRICT, CALLS)
+    assert not matches({**low, "cited_calls": ["t2"]}, P3_STRICT)               # 호출 기록이 없으면 확인 불가 → 불인정
+    assert matches({**low, "cited_calls": ["t1"]}, P3)                          # requires_tools가 없으면 이전과 같음
+
+
+def test_confirm_cause_is_pending_until_human_label():
+    from core.evaluation.fault_scorer import apply_labels
+    findings = [{"id": "F1", "slice": {"area_zone": ["boundary"]}, "reason_codes": ["OUT_OF_AREA"]},
+                {"id": "F2", "metric": {"name": "worker_utilization", "direction": "low"}, "cited_calls": ["t2"]}]
+    faults = {"P3": {"name": "가능시간", "answer": P3_STRICT}, "P4": {"name": "경계", "answer": P4}}
+    s = score(findings, faults, CALLS)
+    assert s["faults"]["P3"]["status"] == "pending" and s["faults"]["P3"]["matched_findings"] == ["F2"]
+    assert s["faults"]["P4"]["status"] == "detected"
+    assert (s["detected"], s["pending"], s["total"]) == (1, 1, 2)
+
+    ok = apply_labels(s, {"F2": "cause_ok"})
+    assert ok["faults"]["P3"]["status"] == "detected" and (ok["detected"], ok["pending"]) == (2, 0)
+    wrong = apply_labels(s, {"F2": "cause_wrong"})
+    assert wrong["faults"]["P3"]["status"] == "missed" and (wrong["detected"], wrong["pending"]) == (1, 0)
+    assert wrong["detection_rate"] == pytest.approx(1 / 2)
+    assert apply_labels(s, {})["faults"]["P3"]["status"] == "pending"
+
+
+def test_score_without_new_keys_is_unchanged():
+    findings = [{"id": "F1", "slice": {"area_zone": ["boundary"]}, "reason_codes": ["OUT_OF_AREA"]}]
+    s = score(findings, {"P4": {"name": "경계", "answer": P4}})
+    assert s["faults"]["P4"]["status"] == "detected" and s["detected"] == 1 and s["pending"] == 0
+
+
+# --- 구간 검사: 선언되지 않은 차원·값 ----------------------------------------------------
+
+def test_slice_problems_checks_declared_dimensions():
+    from core.analysis.agent import slice_problems
+
+    dims = get_pack().dimensions()
+    assert slice_problems({"slice": {"branch": ["B"], "hour": ["10"]}}, dims) == []
+    assert slice_problems({}, dims) == []
+    problems = slice_problems({"slice": {"branch": ["B"], "worker_id": ["WB01"], "available": ["13:00-18:00"]}}, dims)
+    assert len(problems) == 1 and "worker_id" in problems[0] and "available" in problems[0]
+    assert "branch" in problems[0]                                   # 쓸 수 있는 차원을 알려 준다
+    bad_value = slice_problems({"slice": {"branch": ["B", "Z"]}}, dims)
+    assert len(bad_value) == 1 and "Z" in bad_value[0]
+    assert slice_problems({"slice": {"hour": ["10", "16"]}}, dims) == []   # 값 목록이 없는 차원은 값을 보지 않는다
+
+
+def test_analyze_returns_undeclared_dimension_and_strips_it_if_unfixed(run_p4):
+    """선언되지 않은 차원은 한 번 고쳐 오게 하고, 그래도 남으면 발견은 두고 그 구간 항목만 뺀다 (뺀 것은 기록)."""
+    pack, inst, decisions, _ = run_p4
+
+    def submit(messages):
+        call_id = next(b["id"] for m in messages if m["role"] == "assistant" for b in m["content"]
+                       if b.get("type") == "tool_use" and b["name"] == "aggregate")
+        return tool_use("submit_report", {"summary": "s", "findings": [
+            {"title": "경계 지역 OUT_OF_AREA", "description": "경계 지역 실패 집중",
+             "slice": {"area_zone": ["boundary"], "worker_id": ["WB01"]}, "reason_codes": ["OUT_OF_AREA"],
+             "cited_calls": [call_id]}]})
+
+    llm = FakeLLM(scripted([lambda m: tool_use("aggregate", {"group_by": ["area_zone"]}), submit, submit]))
+    report = analyze(pack, inst, decisions, llm, load_config(), salt="t")
+    feedback = llm.calls[2]["messages"][-1]["content"][-1]["content"]
+    assert "선언되지 않은 차원 worker_id" in feedback and "area_zone" in feedback
+    assert report["feedback_rounds"] == 1 and not report["dropped"]
+    finding = report["findings"][0]
+    assert finding["slice"] == {"area_zone": ["boundary"]} and finding["slice_removed"] == {"worker_id": ["WB01"]}
+
+
+def test_report_schema_lists_declared_dimensions():
+    from core.analysis.agent import report_submit_tool
+
+    dims = get_pack().dimensions()
+    slice_schema = report_submit_tool(dims, ["assignment_rate"])["input_schema"]["properties"]["findings"]["items"]["properties"]["slice"]
+    assert set(slice_schema["properties"]) == set(dims["dimensions"]) and slice_schema["additionalProperties"] is False
+    assert slice_schema["properties"]["branch"]["items"]["enum"] == ["A", "B", "C"]
+    assert "enum" not in slice_schema["properties"]["hour"]["items"]

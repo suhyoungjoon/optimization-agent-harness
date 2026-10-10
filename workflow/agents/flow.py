@@ -20,13 +20,14 @@ from langgraph.types import interrupt
 
 from core.analysis import agent as analysis_core
 from core.analysis.aggregate_tools import Aggregator
+from core.analysis.perspectives import combine_results
 from core.evaluation.fault_scorer import score
 from core.harness.levels import Level
 from core.improvement import proposer as proposer_core
 from core.improvement.approval import write_params, write_spec
 from core.improvement.changes import apply_params, apply_spec, params_errors, spec_errors, spec_sections
 from core.improvement.simulate import simulate_params
-from core.registry import load_pack, load_params
+from core.registry import load_pack, load_params, load_perspectives
 
 from ..graph import (APPROVED, IMPROVED, NO_MORE, NOT_IMPROVED, REJECTED, HAS_PROPOSALS, _better, _fmt,
                      _primary, _worse, describe)
@@ -42,6 +43,7 @@ class AgentsState(TypedDict, total=False):
     items: int
     level: str
     metrics: list[dict]
+    perspectives: bool          # 분석 에이전트를 관점별로 나눠 병렬 실행 (M12-b)
     queue: list[int]            # 아직 미리 돌려보지 않은 제안 번호
     proposal: int               # 지금 다루는 제안 번호
     improved: bool
@@ -56,7 +58,8 @@ NODES: dict[str, dict] = {
     "evaluate": {"label": "평가", "kind": "rule", "description": "AI 결정을 규칙 위반·지표로 채점하고 규칙 방식과 비교한다"},
     "rule_full": {"label": "규칙 방식 전체 실행", "kind": "rule", "description": "분석할 재료로 전체 기간을 규칙 방식으로 배정한다"},
     "analysis_agent": {"label": "분석 에이전트", "kind": "ai", "agent": True,
-                       "description": "LangGraph 하위 그래프: AI 응답 ⇄ 집계 도구 → 근거 검사 (근거 없는 숫자는 고쳐 오게)"},
+                       "description": "LangGraph 하위 그래프: AI 응답 ⇄ 집계 도구 → 근거 검사 (근거 없는 숫자는 고쳐 오게). "
+                                      "관점별 분석이면 관점마다 따로(병렬) 돌리고 합친다"},
     "proposal_agent": {"label": "개선 제안 에이전트", "kind": "ai", "agent": True,
                        "description": "LangGraph 하위 그래프: AI 응답 ⇄ 규칙 조회·시험 계산 도구 → 바꿀 수 있는 범위 검사"},
     "simulate": {"label": "미리 돌려보기", "kind": "rule",
@@ -77,26 +80,91 @@ def _line(state: AgentsState, name: str, violations: int, metrics: dict) -> str:
 
 # --- 분석·개선 제안 에이전트 (공통 하위 그래프 build_tool_agent 사용) -------------------------
 
-def analysis_agent_graph(ctx: AgentContext, llm=None):
+ANALYSIS_USER = "실행 결과를 분석해 실패 패턴과 원인 가설을 찾아라. 먼저 overview로 전체와 차원을 확인하라.\n분석 대상 항목 수: {n}"
+
+
+def analysis_agent_graph(ctx: AgentContext, llm=None, perspective: dict | None = None):
+    """perspective가 있으면 그 관점의 도구·질문만 가진 분석 에이전트 (관점 노드 하나로 바깥 그래프에 들어간다)."""
     d = ctx.data
     pack, full = d.get("pack"), d.get("full_rule") or []
     dims = pack.dimensions() if pack else {"dimensions": {}}
     tools = (Aggregator(full, dims).tools() + pack.analysis_tools(d["instance"], full)) if pack else []
+    system, tools = analysis_core.perspective_view(analysis_core.analysis_system(dims), tools, perspective)
     metric_names = sorted(pack.metrics(d["instance"], full)) if pack else []
 
     def check(submission: dict, calls: dict) -> list[str]:
-        issues = []
-        for i, f in enumerate(submission.get("findings") or []):
-            issues += [f"findings[{i}] '{f.get('title', '')}': {p}" for p in analysis_core.grounding_problems(f, calls)]
-        return issues
+        return analysis_core.submission_problems(submission, calls, dims)
 
     def tool_text(name, args, out):
         rows = len(out.get("rows", [])) if isinstance(out, dict) else 0
         return f"{name} {json.dumps(args, ensure_ascii=False)[:90]} → {rows}행"
 
-    return build_tool_agent(ctx, "analysis_agent", llm=llm, system=analysis_core.SYSTEM, tools=tools,
+    return build_tool_agent(ctx, "analysis_agent", llm=llm, system=system, tools=tools,
                             submit_tool=analysis_core.report_submit_tool(dims, metric_names), check=check,
-                            check_label="근거 검사", salt="lg-analysis", tool_text=tool_text)
+                            check_label="근거 검사", salt="lg-analysis", tool_text=tool_text,
+                            node_name=_perspective_node(perspective) if perspective else None)
+
+
+def _perspective_node(p: dict) -> str:
+    return f"perspective_{p['id']}"
+
+
+def _analysis_result(ctx: AgentContext, out: dict, llm) -> dict:
+    """분석 하위 그래프의 마지막 상태 → core.analysis.agent.analyze와 같은 모양의 결과 (근거 없는 발견은 뺀다)."""
+    calls = out.get("calls") or {}
+    dims = ctx.data["pack"].dimensions() if ctx.data.get("pack") else {}
+    kept, dropped = analysis_core.finalize_findings((out.get("submission") or {}).get("findings") or [], calls, dims)
+    usage = {**out["usage"].to_dict(llm.model, ctx.llm_config), "llm_calls": out.get("llm_calls", 0)}
+    return {"summary": (out.get("submission") or {}).get("summary", ""), "findings": kept, "dropped": dropped,
+            "calls": calls, "stop": out.get("stop") or "no_submit", "feedback_rounds": out.get("feedback_rounds", 0),
+            "usage": usage}
+
+
+class FanState(TypedDict, total=False):
+    results: Annotated[dict, operator.or_]     # 관점 id → 결과 (관점 노드들이 병렬로 채운다)
+
+
+def analysis_fanout_graph(ctx: AgentContext, perspectives: list[dict], make_llm=None):
+    """관점별 분석: START → 관점 노드들(병렬, fan-out) → 합치기(fan-in) → END.
+    관점 노드 하나가 관점 하나의 분석 에이전트(하위 그래프)를 돌린다. 한 관점이 실패해도 합치기는 나머지로 한다."""
+    d = ctx.data
+
+    def perspective_node(p: dict):
+        def run(state: FanState):
+            node = _perspective_node(p)
+            try:
+                llm = make_llm()
+                out = run_tool_agent(analysis_agent_graph(ctx, llm, perspective=p),
+                                     ANALYSIS_USER.format(n=len(d["full_rule"])))
+                result = _analysis_result(ctx, out, llm)
+                ctx.emit("analysis_agent", node, f"발견 {len(result['findings'])}건"
+                         + (f" · 근거 부족으로 뺌 {len(result['dropped'])}건" if result["dropped"] else ""))
+            except Exception as exc:  # 한 관점의 실패가 리포트 전체를 막지 않게
+                result = {"error": f"{type(exc).__name__}: {exc}"}
+                ctx.emit("analysis_agent", node, f"✕ 실패: {result['error'][:120]}")
+            return {"results": {p["id"]: result}}
+        return run
+
+    def merge(state: FanState):
+        results = state.get("results") or {}
+        report = combine_results(perspectives, [results.get(p["id"], {"error": "결과 없음"}) for p in perspectives],
+                                 d["pack"].dimensions())
+        d["report"] = report
+        shared = sum(1 for f in report["findings"] if len(f["perspectives"]) > 1)
+        ctx.emit("analysis_agent", "merge", f"발견 {len(report['findings'])}건으로 합침 · 여러 관점이 같이 찾은 발견 {shared}건")
+        return {}
+
+    g = StateGraph(FanState)
+    for p in perspectives:
+        node = _perspective_node(p)
+        g.add_node(node, perspective_node(p), metadata={"label": f"관점: {p['name']}", "kind": "ai",
+                                                        "description": p["question"].strip()})
+        g.add_edge(START, node)
+        g.add_edge(node, "merge")
+    g.add_node("merge", merge, metadata={"label": "합치기", "kind": "rule",
+                                         "description": "같은 구간·사유의 발견은 하나로 합치고, 관점마다 다른 해석은 나란히 남긴다"})
+    g.add_edge("merge", END)
+    return g.compile()
 
 
 def proposal_agent_graph(ctx: AgentContext, llm=None):
@@ -192,34 +260,48 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
                                          pack.metrics(d["instance"], d["full_rule"]))])
 
     def analysis_agent(state: AgentsState):
-        out = run_tool_agent(analysis_agent_graph(ctx, ctx.make_llm()),
-                             "실행 결과를 분석해 실패 패턴과 원인 가설을 찾아라. 먼저 overview로 전체와 차원을 확인하라.\n"
-                             f"분석 대상 항목 수: {len(d['full_rule'])}")
-        kept, dropped = [], []
-        for f in (out.get("submission") or {}).get("findings") or []:
-            problems = analysis_core.grounding_problems(f, out.get("calls") or {})
-            (dropped.append({"finding": f, "problems": problems}) if problems
-             else kept.append({**f, "id": f"F{len(kept) + 1}"}))
-        d["report"] = {"summary": (out.get("submission") or {}).get("summary", ""), "findings": kept, "dropped": dropped}
-        s = score(kept, d["truth"].get("faults", {}))
+        perspectives = load_perspectives(d["pack"]) if state.get("perspectives") else []
+        if perspectives:
+            analysis_fanout_graph(ctx, perspectives, lambda: ctx.make_llm("analysis")).invoke({})
+            report = d["report"]
+        else:
+            llm = ctx.make_llm("analysis")
+            report = _analysis_result(ctx, run_tool_agent(analysis_agent_graph(ctx, llm),
+                                                          ANALYSIS_USER.format(n=len(d["full_rule"]))), llm)
+            d["report"] = report
+        kept, dropped = report["findings"], report["dropped"]
+        s = score(kept, d["truth"].get("faults", {}), report["calls"])
         lines = [f"찾은 문제 {len(kept)}건" + (f" · 심어둔 문제 {s['total']}개 중 {s['detected']}개 찾음" if s["total"] else "")
+                 + (f"·확인 대기 {s['pending']}개" if s.get("pending") else "")
                  + (f" · 근거 부족으로 뺀 문제 {len(dropped)}건" if dropped else "")]
-        lines += [f"{f['id']} {f['title']}" for f in kept[:5]]
+        if perspectives:
+            per = report["perspectives"]
+            lines.append("관점별: " + " · ".join(f"{v['name']} {'✕ 실패' if v['error'] else str(v['findings']) + '건'}"
+                                               for v in per.values()))
+        lines += [f"{f['id']} {f['title']}" + (f" ({'·'.join(f['perspective_names'])})" if f.get("perspective_names") else "")
+                  for f in kept[:5]]
+        cost = report["usage"].get("cost_usd")
+        if cost is not None:
+            lines.append(f"비용 ${cost:.4f} · 모델 {report['usage'].get('model')}")
         return _step("analysis_agent", lines, detected=s["detected"], total=s["total"])
 
     def proposal_agent(state: AgentsState):
         report = d["report"]
-        findings = [{k: f.get(k) for k in ("id", "title", "description", "slice", "reason_codes", "metric", "hypothesis")}
+        findings = [{k: f.get(k) for k in proposer_core.FINDING_SUMMARY_KEYS
+                     if f.get(k) is not None or k in proposer_core.BASE_KEYS}
                     for f in report["findings"]]
         dims = d["pack"].dimensions()
         user = ("# 분석 리포트\n" + json.dumps({"summary": report.get("summary"), "findings": findings},
                                             ensure_ascii=False, indent=1)
                 + "\n\n# 차원\n" + json.dumps({k: v.get("values") for k, v in dims.get("dimensions", {}).items()},
                                              ensure_ascii=False))
-        out = run_tool_agent(proposal_agent_graph(ctx, ctx.make_llm()), user)
+        out = run_tool_agent(proposal_agent_graph(ctx, ctx.make_llm("proposals")), user)
         spec_text = Path(d["pack"].spec_path()).read_text(encoding="utf-8")
         proposals = []
         for p in (out.get("submission") or {}).get("proposals") or []:
+            if not isinstance(p, dict):
+                proposals.append({"body": {"title": str(p)[:80]}, "errors": ["개선안 형식이 아님 (객체가 아님)"], "status": "invalid"})
+                continue
             errors = (params_errors(d["params"], p, dims) if p.get("kind") == "params"
                       else spec_errors(spec_text, p) if p.get("kind") == "spec" else ["알 수 없는 kind"])
             proposals.append({"body": p, "errors": errors, "status": "invalid" if errors else "proposed"})
@@ -317,10 +399,12 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
                      interrupt_before=[n for n in fns if n != "human_review"])
 
 
-def describe_all(levels: dict[str, Level], level: str) -> dict:
-    """상위 그래프와 에이전트 하위 그래프 (화면 그림용). 데이터 없이 구조만 만든다."""
+def describe_all(levels: dict[str, Level], level: str, perspectives: list[dict] | None = None) -> dict:
+    """상위 그래프와 에이전트 하위 그래프 (화면 그림용). 데이터 없이 구조만 만든다.
+    perspectives를 주면 분석 에이전트를 관점별 병렬(fan-out) → 합치기(fan-in) 모양으로 그린다."""
     ctx = AgentContext()
+    analysis = analysis_fanout_graph(ctx, perspectives) if perspectives else analysis_agent_graph(ctx)
     return {"top": describe(build_flow(ctx, levels)),
             "agents": {"dispatch_agent": describe(build_dispatch_agent(ctx, levels[level])),
-                       "analysis_agent": describe(analysis_agent_graph(ctx)),
+                       "analysis_agent": describe(analysis),
                        "proposal_agent": describe(proposal_agent_graph(ctx))}}

@@ -28,6 +28,8 @@ export interface TraceRecord {
 
 export interface Dimensions {
   dimensions: Record<string, { label: string; values?: string[]; format?: string }>;
+  // 자원 단위 발견 (M12-d): 발견의 resources에 적을 수 있는 자원 종류
+  resources?: Record<string, { label: string; id_field: string; traits?: Record<string, { label: string }> }>;
   reason_codes: Record<string, string>;
   violation_rules: Record<string, string>;
 }
@@ -163,6 +165,38 @@ export interface Finding {
   metric?: { name: string; direction: "low" | "high" };
   hypothesis?: string;
   cited_calls: string[];
+  // 관점별 분석 (M12-b): 이 발견을 찾은 관점과, 같은 발견에 대한 다른 관점의 해석
+  perspectives?: string[];
+  perspective_names?: string[];
+  alternatives?: FindingAlternative[];
+  related?: string[];   // 구간이 겹치는(한쪽이 더 좁은) 다른 발견 ID
+  slice_removed?: Record<string, string[]>;   // 선언되지 않은 차원·값이라 구간에서 뺀 것
+  resources?: FindingResources;               // 자원 단위 발견 (M12-d)
+  resources_removed?: { kind?: string; ids?: string[]; traits?: Record<string, string[]> };   // 인용 결과에 없어 뺀 것
+}
+
+export interface FindingResources {
+  kind: string;
+  ids: string[];
+  traits?: Record<string, string[]>;
+}
+
+export interface FindingAlternative {
+  perspective: string;
+  perspective_name: string;
+  title: string;
+  description: string;
+  hypothesis?: string | null;
+  cited_calls: string[];
+}
+
+export interface PerspectiveResult {
+  name: string;
+  error: string | null;
+  findings: number;
+  dropped: number;
+  stop: string | null;
+  usage?: Usage & { llm_calls?: number; seconds?: number };
 }
 
 export interface ToolCall {
@@ -170,13 +204,19 @@ export interface ToolCall {
   input: unknown;
   output: unknown;
   is_error: boolean;
+  perspective?: string;
 }
 
 export interface FaultScore {
   name: string;
   detected: boolean;
   matched_findings: string[];
+  status?: "detected" | "pending" | "missed";   // pending: 근거는 맞고 사람의 원인 확인 대기 (M12-a 이전 채점엔 없음)
+  confirm_cause?: boolean;
 }
+
+// 발견 판정: 정답에 없는 발견은 valid/false_positive, 원인 확인 대상 발견은 cause_ok/cause_wrong
+export type FindingLabel = "valid" | "false_positive" | "cause_ok" | "cause_wrong";
 
 export interface Score {
   faults: Record<string, FaultScore>;
@@ -184,10 +224,34 @@ export interface Score {
   total: number;
   detection_rate: number | null;
   unmatched_findings: string[];
-  labels: Record<string, "valid" | "false_positive">;
+  pending?: number;
+  labels: Record<string, FindingLabel>;
   false_positives: number;
   valid_unmatched: number;
   unlabeled: number;
+}
+
+// 회차 간 장기 기억 (M12-c): 사람이 내린 판단을 다음 회차 에이전트 입력으로
+export interface MemoryItem {
+  id: string;
+  title: string;
+  at?: number;
+  params_version?: number | null;
+  stale?: boolean;
+  // 반려 개선안
+  kind?: "params" | "spec";
+  change?: string;
+  reason?: string;
+  // 발견 판정
+  label?: FindingLabel;
+  hypothesis?: string | null;
+}
+
+export interface Memory {
+  rejections: MemoryItem[];
+  judgments: MemoryItem[];
+  item_ids: string[];
+  version: string | null;
 }
 
 export interface Report {
@@ -203,6 +267,8 @@ export interface Report {
     stop: string;
     feedback_rounds: number;
     usage: Usage & { llm_calls?: number; seconds?: number };
+    memory?: Memory | null;
+    perspectives?: Record<string, PerspectiveResult>;
   } | null;
   score: Score | null;
 }
@@ -230,6 +296,20 @@ export interface Simulation {
   cost_usd?: number;
   run_ids?: Record<string, string>;
   error?: string;
+  constraint_violations?: { index: number; type: "param" | "metric"; message: string }[];
+}
+
+// 사람이 정한 한도 (M12-a). 입력 화면은 이 레포에 없고 API로 받는다
+export interface Constraint {
+  type: "param" | "metric";
+  path?: string;
+  metric?: string;
+  min?: number;
+  max?: number;
+  max_drop?: number;
+  max_rise?: number;
+  source: string;
+  note?: string;
 }
 
 export interface Proposal {
@@ -249,7 +329,7 @@ export interface ProposalBatch {
   report_id: string;
   status: "running" | "done" | "error";
   error?: string | null;
-  meta: { usage: Usage & { seconds?: number }; trials: number; params_version?: number } | null;
+  meta: { usage: Usage & { seconds?: number }; trials: number; params_version?: number; constraints?: Constraint[]; memory?: Memory | null } | null;
   proposals: Proposal[];
 }
 
@@ -325,6 +405,7 @@ export interface AgentsGraph {
   reason?: string;
   demo?: boolean;
   level?: string;
+  perspectives?: boolean;
   top: { nodes: (WorkflowNode & { agent?: boolean })[]; edges: WorkflowEdge[] };
   agents: Record<string, { nodes: WorkflowNode[]; edges: WorkflowEdge[] }>;
 }
@@ -344,5 +425,5 @@ export interface AgentsRun extends Omit<WorkflowRun, "ids" | "inputs" | "approva
   counts: Record<string, Record<string, number>>;
   last_event: AgentEvent | null;
   proposals: { title: string; kind: string; status: string; errors: string[] }[];
-  inputs: { domain?: string; seed?: number; faults?: string[]; items?: number; level?: string };
+  inputs: { domain?: string; seed?: number; faults?: string[]; items?: number; level?: string; perspectives?: boolean };
 }

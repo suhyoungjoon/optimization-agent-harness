@@ -11,6 +11,16 @@ dimensions:
   difficulty:    {label: 난이도,   values: [none, pole, outdoor, high_risk]}  # 일반, 승주, 옥외, 고위험
   area_zone:     {label: 관할 경계 여부, values: [core, boundary], description: 고객 좌표가 관할 경계 근처(boundary)인지}
 
+resources:                      # 자원 단위 발견 (M12-d): 분석 발견의 resources 칸에 적을 수 있는 자원
+  worker:
+    label: 작업자
+    id_field: worker_id         # DecisionRecord.decision에서 이 자원을 가리키는 키 (화면 강조용)
+    traits:                     # 발견에 함께 적을 수 있는 자원 속성 (값은 인용한 도구 결과에 있어야 한다)
+      available: {label: 가능시간}
+      skills: {label: 기술}
+      certs: {label: 자격}
+      branch: {label: 지점}
+
 reason_codes:                   # DecisionRecord.reason_code (status가 success가 아닐 때)
   NO_SKILL: 해당 매체 기술을 보유한 후보 없음
   NO_CERT: 난이도(승주·고위험)에 필요한 자격을 보유한 후보 없음

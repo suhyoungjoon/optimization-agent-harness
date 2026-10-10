@@ -323,6 +323,22 @@ class Store:
         return [self.get_proposal(i) for i in ids]
 
 
+    # --- 장기 기억(M12-c)용 조회: 사람이 내린 판단 ---
+    def rejected_proposals(self, domain: str) -> list[dict]:
+        with self.lock:
+            ids = [r["id"] for r in self.conn.execute(
+                "SELECT p.id FROM proposals p JOIN reports r ON p.report_id = r.id JOIN runs u ON r.run_id = u.run_id"
+                " WHERE p.status = 'rejected' AND u.domain = ? ORDER BY p.updated_at", (domain,))]
+        return [self.get_proposal(i) for i in ids]
+
+    def labeled_reports(self, domain: str) -> list[dict]:
+        """판정이 하나라도 있는 끝난 리포트. params_version은 분석한 실행의 규칙 버전."""
+        with self.lock:
+            rows = [tuple(r) for r in self.conn.execute(
+                "SELECT r.id, u.params_version FROM reports r JOIN runs u ON r.run_id = u.run_id"
+                " WHERE r.status = 'done' AND r.labels != '{}' AND u.domain = ? ORDER BY r.created_at", (domain,))]
+        return [{**self.get_report(rid), "params_version": version} for rid, version in rows]
+
     # --- 재생(시연 모드, cached=true)용 조회 ---
     def done_runs(self, dataset_id: str, agent: str, level: str | None, scope: list[str] | None) -> list[dict]:
         """같은 데이터셋·agent·레벨·범위로 끝난 실행 (명세 시뮬레이션용 실행은 제외), 오래된 순."""

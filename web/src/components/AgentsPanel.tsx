@@ -36,7 +36,7 @@ export default function AgentsPanel({
 }) {
   const [form, setForm] = useState({
     seed, faults: faults.length ? faults : domain.faults.map((f) => f.id), items: 10, level,
-    llm: "fake" as "fake" | "claude", pace: 0.2,
+    llm: "fake" as "fake" | "claude", pace: 0.2, perspectives: false,
   });
   const [graph, setGraph] = useState<AgentsGraph | null>(null);
   const [flowId, setFlowId] = useState<string | null>(null);
@@ -48,11 +48,14 @@ export default function AgentsPanel({
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   // 실행 중에는 그 실행의 레벨, 아니면 고른 레벨의 그래프 (레벨을 바꾸면 배정 에이전트 그림이 바로 바뀐다)
-  const runLevel = run && run.status !== "done" ? run.inputs.level ?? form.level : form.level;
+  const inFlight = !!run && run.status !== "done";
+  const runLevel = inFlight && run ? run.inputs.level ?? form.level : form.level;
+  // 관점별 분석이면 분석 에이전트 그림이 "관점 노드들(병렬) → 합치기"로 바뀐다 (M12-b)
+  const runPerspectives = inFlight && run ? !!run.inputs.perspectives : form.perspectives;
 
   useEffect(() => {
-    api.agentsGraph(runLevel).then(setGraph).catch((e) => setError(String(e)));
-  }, [runLevel]);
+    api.agentsGraph(runLevel, domain.name, runPerspectives).then(setGraph).catch((e) => setError(String(e)));
+  }, [runLevel, runPerspectives, domain.name]);
 
   const polled = usePoll<AgentsRun>(flowId ? () => api.agentsGet(flowId, lastI.current) : null,
     (r) => r.status !== "running", [flowId, tick], 300);
@@ -160,6 +163,11 @@ export default function AgentsPanel({
             <option value="fake">가짜 AI (리허설)</option>
             <option value="claude">Claude API (비용)</option>
           </select>
+        </label>
+        <label title="분석 에이전트를 관점(실패 패턴·자원 활용·시간 수급)마다 따로 동시에 돌린 뒤 합칩니다 (LangGraph fan-out/fan-in). AI 비용은 관점 수만큼 늘어납니다">
+          <input type="checkbox" checked={form.perspectives} disabled={inFlight}
+            onChange={(e) => { setForm({ ...form, perspectives: e.target.checked }); setPicked("analysis_agent"); }} />{" "}
+          관점별 분석
         </label>
         <label title="내부 단계 사이 간격. 가짜 AI는 너무 빨라 눈으로 따라가기 어렵다">
           속도{" "}
@@ -285,6 +293,8 @@ function AgentInside({ graph, agent, run, events, live }: {
       <p className="muted small">
         {dispatch
           ? "지시서마다 이 그래프를 한 바퀴 돈다. 레벨을 올리면 조회 도구 → 자동 검사·다시 시도 → 위험 결정 막기 → 과정 저장 노드가 붙는다."
+          : agent === "analysis_agent" && graph?.perspectives
+          ? "관점별 분석: 관점 노드들이 동시에 돈다(fan-out). 관점 노드 하나가 그 관점의 도구·질문만 가진 분석 에이전트(AI 응답 ⇄ 도구 → 근거 검사)다. 합치기(fan-in)는 같은 구간·사유의 발견을 하나로 묶고 관점마다 다른 해석은 나란히 남긴다."
           : "AI 응답 ⇄ 도구를 오가다 제출하면 검사한다. 분석·개선 제안 에이전트가 같은 틀(build_tool_agent)을 쓴다."}
       </p>
       <GraphCanvas ariaLabel={`${AGENT_NAMES[agent] ?? agent} 내부 그래프`} nodes={sub.nodes} edges={sub.edges}

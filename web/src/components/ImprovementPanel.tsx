@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../api";
 import type { DomainAdapter, MetricSpec, Scope } from "../domains/types";
-import type { HarnessInfo, HistoryRow, Proposal, ProposalBatch, SpecEstimate } from "../types";
+import type { HarnessInfo, HistoryRow, Memory, Proposal, ProposalBatch, SpecEstimate } from "../types";
 import { fmtMetric, fmtSeconds, fmtUsd } from "./MetricsPanel";
 import { usePoll } from "./usePoll";
 import { TERMS, tip } from "../terms";
@@ -63,6 +63,7 @@ export default function ImprovementPanel({
   const batch = polledBatch?.id === batchId ? polledBatch : null;
   const [current, setCurrent] = useState<{ params: Record<string, unknown>; spec_sections: Record<string, string> } | null>(null);
   const [history, setHistory] = useState<HistoryRow[]>([]);
+  const [memory, setMemory] = useState<Memory | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -71,6 +72,7 @@ export default function ImprovementPanel({
   const reload = () => {
     api.params(domainName).then(setCurrent).catch(() => undefined);
     api.history().then(setHistory).catch(() => undefined);
+    api.memory(domainName).then(setMemory).catch(() => undefined);
   };
   useEffect(reload, [domainName, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -136,12 +138,53 @@ export default function ImprovementPanel({
             {fmtSeconds(batch.meta.usage.seconds)}
           </span>
         )}
+        {batch?.status === "done" && !!batch.meta?.constraints?.length && (
+          <details className="small">
+            <summary>적용한 제약 {batch.meta.constraints.length}개 (사람이 정한 한도)</summary>
+            <ul>
+              {batch.meta.constraints.map((c, i) => (
+                <li key={i}>
+                  {c.type === "param" ? c.path : c.metric}{" "}
+                  {[c.min != null && `최소 ${c.min}`, c.max != null && `최대 ${c.max}`, c.max_drop != null && `감소 ${c.max_drop} 이내`,
+                    c.max_rise != null && `증가 ${c.max_rise} 이내`].filter(Boolean).join(", ")}
+                  <span className="muted"> — {c.source}{c.note ? `: ${c.note}` : ""}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+        {batch?.status === "done" && batch.meta && "memory" in batch.meta && (
+          <span className="muted small" title="이전 회차에서 사람이 반려한 개선안과 사유를 이 제안을 만들 때 AI에게 알려 주었습니다">
+            {batch.meta.memory ? `사용한 기억 ${batch.meta.memory.rejections.length}건` : "기억 없이 만듦"}
+          </span>
+        )}
       </div>
 
       <p className="small muted">
         <span title={tip("history")}>반영 {approved.length}회 · 반려 {history.length - approved.length}건</span>
         {lastCycle && <> · 마지막 개선 한 바퀴 {fmtUsd(lastCycle.llm_cost_usd)}{cycleSeconds != null && ` · ${fmtSeconds(cycleSeconds)}`}</>}
       </p>
+      {memory && memory.item_ids.length > 0 && (
+        <details className="small">
+          <summary title="사람이 내린 판단은 다음 회차 AI 입력으로 돌아갑니다. 반려 사유는 개선 제안에, 발견 판정은 문제 찾기에">
+            기억 (다음 회차 AI에게 알려 줄 사람의 판단) · 반려 {memory.rejections.length}건 · 판정 {memory.judgments.length}건
+          </summary>
+          <ul>
+            {memory.rejections.map((r) => (
+              <li key={r.id}>
+                [반려] {r.title} <span className="muted">({r.change}) — {r.reason || "사유 없음"}</span>
+                {r.stale && <span className="warning-text"> · 이전 규칙(v{r.params_version}) 기준</span>}
+              </li>
+            ))}
+            {memory.judgments.map((j) => (
+              <li key={j.id}>
+                [{j.label === "false_positive" ? "잘못 짚음" : j.label === "cause_ok" ? "원인 맞음" : "원인 틀림"}] {j.title}
+                {j.stale && <span className="warning-text"> · 이전 규칙(v{j.params_version}) 기준</span>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       <Details summary="상세보기 (개선 한 바퀴 비용·시간, 사람이 할 때와 비교)">
       <div className="tiles">
         <div className="tile tile-cost">
@@ -323,6 +366,9 @@ function ProposalCard({
         <span className={`badge ${p.status === "invalid" ? "critical-text" : p.status === "approved" ? "good-text" : ""}`}>
           {STATUS_LABEL[p.status]}
         </span>
+        {!!sim?.constraint_violations?.length && (
+          <span className="badge warning-text" title="사람이 정한 한도를 넘습니다. 승인 여부는 사람이 판단합니다">⚠ 제약 위반</span>
+        )}
       </header>
       <Gist proposal={p} specs={specs} />
 
@@ -332,6 +378,11 @@ function ProposalCard({
         </ul>
       )}
       {sim?.error && <p className="critical-text small">✕ 미리 돌려보기 실패: {sim.error}</p>}
+      {!!sim?.constraint_violations?.length && (
+        <ul className="warning-text small">
+          {sim.constraint_violations.map((v, i) => <li key={i}>⚠ {v.message}</li>)}
+        </ul>
+      )}
 
       {estimate && (
         <div className="confirm">

@@ -94,6 +94,57 @@ def test_env_overrides_cache(monkeypatch):
     assert load_config()["cache"] is False
 
 
+def test_env_overrides_model_thinking_effort(monkeypatch):
+    """실험할 때만 모델을 바꾼다 (설정 파일은 그대로). 사용한 모델은 사용량 기록에 남는다."""
+    base = load_config()
+    monkeypatch.setenv("LLM_MODEL", "claude-sonnet-5-5")
+    monkeypatch.setenv("LLM_THINKING", "adaptive")
+    monkeypatch.setenv("LLM_EFFORT", "medium")
+    c = load_config()
+    assert (c["model"], c["thinking"], c["effort"]) == ("claude-sonnet-5-5", "adaptive", "medium")
+    monkeypatch.setenv("LLM_EFFORT", "none")                 # 깊이를 보내지 않음
+    assert load_config()["effort"] is None
+    monkeypatch.delenv("LLM_MODEL"); monkeypatch.delenv("LLM_THINKING"); monkeypatch.delenv("LLM_EFFORT")
+    assert load_config()["model"] == base["model"]
+
+
+def test_role_config_overrides_base(monkeypatch, tmp_path):
+    """역할(analysis, proposals)마다 모델을 따로 쓴다. 역할이 없으면 기본값(배정 기준선). 환경변수는 역할보다 우선."""
+    for k in ("LLM_MODEL", "LLM_THINKING", "LLM_EFFORT"):
+        monkeypatch.delenv(k, raising=False)
+    path = tmp_path / "llm.yaml"
+    path.write_text("""model: base-model
+thinking: "off"
+effort: null
+max_tokens: 100
+roles:
+  analysis: {model: small-model, thinking: adaptive, effort: medium}
+  proposals: {model: big-model, thinking: adaptive, effort: medium}
+""", encoding="utf-8")
+    base = load_config(path)
+    assert (base["model"], base["thinking"], base["effort"]) == ("base-model", "off", None)
+    a = load_config(path, role="analysis")
+    assert (a["model"], a["thinking"], a["effort"], a["max_tokens"]) == ("small-model", "adaptive", "medium", 100)
+    assert load_config(path, role="proposals")["model"] == "big-model"
+    assert load_config(path, role="unknown")["model"] == "base-model"
+    monkeypatch.setenv("LLM_MODEL", "exp-model")
+    assert load_config(path, role="analysis")["model"] == "exp-model"
+
+
+def test_repo_config_keeps_assignment_baseline():
+    """배정 기준선은 Haiku 4.5, 생각 끔. 분석·개선안은 모델 비교 실험 결과에 따라 역할별로 (실험 보고서 6.9절)."""
+    import os
+    if any(os.environ.get(k) for k in ("LLM_MODEL", "LLM_THINKING", "LLM_EFFORT")):
+        pytest.skip("실험용 환경변수가 설정되어 있음")
+    assert load_config()["model"] == "claude-haiku-4-5"
+    assert load_config(role="analysis")["model"] == "claude-haiku-5-5"
+    assert load_config(role="proposals")["model"] == "claude-opus-5-5"
+
+
+def test_usage_dict_records_model(config):
+    assert Usage().to_dict("claude-haiku-4-5", config)["model"] == "claude-haiku-4-5"
+
+
 def test_usage_cost(config):
     usage = Usage()
     tokens = {"input_tokens": 1_000_000, "output_tokens": 100_000,
@@ -132,3 +183,14 @@ def test_env_path_reads_api_key_from_given_file(tmp_path, monkeypatch):
         assert client.api is not None                   # 클라이언트 생성만 하고 API는 호출하지 않는다
     finally:
         os.environ.pop("ANTHROPIC_API_KEY", None)       # load_dotenv가 넣은 값이 다른 테스트로 새지 않게
+
+
+def test_api_key_prefers_oah_env(monkeypatch):
+    from core.llm.client import api_key_from_env
+    monkeypatch.delenv("OAH_ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert api_key_from_env() is None
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "generic")
+    assert api_key_from_env() == "generic"
+    monkeypatch.setenv("OAH_ANTHROPIC_API_KEY", "oah")
+    assert api_key_from_env() == "oah"

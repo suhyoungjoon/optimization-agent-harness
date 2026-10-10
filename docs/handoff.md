@@ -132,6 +132,38 @@ def write_params(params_path, proposal: dict) -> tuple[int, int]   # 파일에 �
 def write_spec(spec_path, proposal: dict) -> None
 ```
 
+### 2.8-1 개선 제약 — `core/improvement/constraints.py` (M12-a)
+
+사람(현장·운영)이 정한 한도를 개선안과 시뮬레이션 결과에 대조한다. 위반은 **표시만** 하고 승인은 사람이 정한다. 현장 의견 대화를 다루는 별도 레포는 대화로 정리한 제약을 이 형식으로 넘긴다.
+
+```python
+# 제약 형식 (목록). source(누가)는 필수, note(왜)는 선택
+[{"type": "param", "path": "matching.area_extension_km[2]", "max": 4,
+  "source": "현장 담당자", "note": "강남 3km 초과 시 이동 30분 이상"},          # min / max
+ {"type": "metric", "metric": "on_time_rate", "max_drop": 0.03, "source": "운영팀"}]   # min / max / max_drop / max_rise
+
+def constraint_errors(constraints, params: dict, metric_names: list[str]) -> list[str]   # 형식 오류 (빈 목록 = 통과)
+def constraint_violations(constraints, candidate_params: dict, simulation: dict | None = None) -> list[dict]
+# → [{"index": i, "type": "param"|"metric", "message": "...(출처: ...)"}]
+# param: 전역 값과 구간 조건(override_rules의 set)으로 바꾼 값을 모두 본다. 경로가 목록이면 모든 원소
+# metric: min·max는 개선 후 값, max_drop·max_rise는 simulation의 before 대비 변화량. simulation이 없으면 보지 않음
+```
+
+전달 방법:
+- **패키지**: `propose(..., constraints=제약)` — 개선 에이전트 입력에 붙고, 에이전트의 `simulate_params` 도구 결과에 `constraint_violations`가 함께 돌아간다. 제약이 없으면 입력·LLM 캐시 키는 이전과 같다.
+- **API**: `POST /proposals {"report_id": ..., "constraints": [...]}` (형식이 틀리면 400). 개선안 묶음 `meta.constraints`에 저장되고, `POST /proposals/{id}/simulate` 결과에 `constraint_violations`가 붙는다 (명세 개선안은 지표 제약만).
+
+### 2.8-2 회차 간 장기 기억 — `core/improvement/memory.py` (M12-c)
+
+```python
+def collect_memory(store, domain, params_version=None, limit=10) -> dict   # 기존 기록에서 반려 개선안·발견 판정을 모음
+def build_memory(rejections, judgments, params_version, limit=10) -> dict   # {"rejections", "judgments", "item_ids", "version"}
+def analysis_memory_text(memory) -> str    # analyze(..., memory_text=...)에 넘길 문단 (없으면 "")
+def proposal_memory_text(memory) -> str    # propose(..., memory_text=...)에 넘길 문단 (없으면 "")
+```
+
+`Store.rejected_proposals(domain)`, `Store.labeled_reports(domain)`이 출처다. 다른 레포가 자기 저장소를 쓴다면 `build_memory`에 같은 형식의 항목 목록을 직접 넘긴다. 쓴 기억 dict를 실행 기록에 함께 저장해야 재현할 수 있다 (`CLAUDE.md` 원칙 4).
+
 ### 2.9 params 버전 관리
 
 - `params.yaml`의 최상위 `version: int`. `write_params`가 승인 때 +1 하고 ruamel.yaml로 주석을 보존해 쓴다.
@@ -151,7 +183,9 @@ AI agent 러너 전용이다. 규칙 엔진·개선 루프 단계는 트레이�
 ### 2.11 LLM 클라이언트 — `core/llm/client.py`, `core/llm/tool_loop.py`
 
 ```python
-def load_config(path: Path = <configs/llm.yaml>) -> dict      # 환경변수 LLM_CACHE가 cache를 덮어씀
+def load_config(path: Path = <configs/llm.yaml>, role: str | None = None) -> dict
+# role: roles.<role>(model·thinking·effort·max_tokens)을 기본값 위에 덮음 (analysis, proposals). 없으면 기본값(배정)
+# 환경변수 LLM_CACHE가 cache를, LLM_MODEL·LLM_THINKING·LLM_EFFORT가 역할 설정보다 우선해 덮어씀
 class LLMClient(Protocol):
     model: str
     def create(self, *, system: list[dict], messages: list[dict], tools: list[dict], salt: str = "") -> LLMResponse
@@ -175,7 +209,8 @@ def run_tool_loop(llm, *, system: str, user: str, tools: list[dict], submit_tool
 
 | 모듈 | 공개 이름 | 역할 |
 |---|---|---|
-| `core/analysis/agent.py` | `analyze(pack, instance, decisions, llm, llm_config, salt="", max_calls=30) -> dict`, `report_submit_tool(dimensions, metric_names)`, `grounding_problems(finding, calls)` | 분석 agent. 발견의 수치가 인용한 도구 결과에 없으면 제외(`core/analysis/grounding.py`). 리포트 제출 도구 정의와 발견 하나의 근거 검사를 공개해 다른 분석 agent(관점별 agent 등)도 같은 형식·검사를 쓸 수 있다 |
+| `core/analysis/agent.py` | `analyze(pack, instance, decisions, llm, llm_config, salt="", max_calls=30) -> dict`, `report_submit_tool(dimensions, metric_names)`, `grounding_problems(finding, calls)`, `slice_problems(finding, dimensions)`, `submission_problems(submission, calls, dimensions)`, `finalize_findings(findings, calls, dimensions)` | 분석 agent. 발견의 수치가 인용한 도구 결과에 없으면 제외(`core/analysis/grounding.py`). 구간에 선언되지 않은 차원·값이 있으면 한 번 고쳐 오게 하고, 남으면 그 항목만 빼서 `slice_removed`에 남긴다. 리포트 제출 도구 정의와 발견 하나의 근거·구간 검사를 공개해 다른 분석 agent(관점별 agent 등)도 같은 형식·검사를 쓸 수 있다 |
+| `core/analysis/resources.py` | `resource_spec_errors(dimensions)`, `resource_problems(finding, calls, dimensions)`, `strip_bad_resources(finding, calls, dimensions)`, `resources_text(resources)` | 자원 단위 발견 (M12-d). 발견의 `resources: {kind, ids, traits}`를 도메인의 `dimensions()["resources"]` 선언과 인용한 도구 결과로 검사한다. 분석 agent의 제출 검사·최종 정리(`submission_problems`, `finalize_findings`)가 이것을 부른다 |
 | `core/improvement/proposer.py` | `propose(pack_factory, instance, params, spec_text, dimensions, report, llm, llm_config, salt="", max_calls=20, feedback=None) -> dict`, `finding_slices(report)` | 개선 agent. `simulate_params`를 도구로 쓰고, 제출안을 `params_errors`/`spec_errors`로 재검사. `feedback`(앞선 시도의 탈락 이유 목록)을 주면 입력 끝에 붙인다(없으면 입력·캐시 키가 이전과 같다) |
 | `core/evaluation/fault_scorer.py` | `score(findings, faults) -> dict`, `matches(finding, answer)` | 정답표 대조 탐지율 |
 | `core/evaluation/runner.py` | `run_rule_agent(store, pack, dataset, params, scope=None, group_id=None) -> run_id`, `run_ai_agent(...)`, `create_ai_run(...)` | 실행 + validate + metrics + 저장 |
@@ -378,10 +413,10 @@ overrides:                        # 구간 조건
 |---|---|---|
 | 0. 실행 | 데이터셋 재생성 → solve → validate → metrics → 저장 | `core/evaluation/runner.py` `run_rule_agent` |
 | 1. 분석 | 집계 도구로 발견 도출, 근거 없는 수치는 제외 | `core/analysis/agent.py` `analyze`, `grounding.py` |
-| 1-1. 채점 | 정답표 대조 (화면용) | `core/evaluation/fault_scorer.py` `score` |
-| 2. 제안 | LLM이 `get_params`/`get_spec`/`simulate_params` 도구로 시험 후 `submit_proposals` | `core/improvement/proposer.py` `propose` |
+| 1-1. 채점 | 정답표 대조 (화면용). 2단계: 자동 근거 일치(`requires_tools`) + 사람 원인 확인(`confirm_cause` → `labels`의 `cause_ok`/`cause_wrong`, `apply_labels`) | `core/evaluation/fault_scorer.py` `score`·`apply_labels` |
+| 2. 제안 | LLM이 `get_params`/`get_spec`/`simulate_params` 도구로 시험 후 `submit_proposals`. 제약이 있으면 입력과 시뮬레이션 도구 결과에 포함 | `core/improvement/proposer.py` `propose` |
 | 3. 허용 범위 검사 | 제출안마다 `params_errors`(경로 차단 + `check_params`) 또는 `spec_errors` → 오류가 있으면 invalid로 표시 | `core/improvement/changes.py`, `core/params.py` |
-| 4. 시뮬레이션 | params 안: 규칙 엔진 전후 재실행(`simulate_params`, 비용 없음). spec 안: AI agent를 전·후 명세로 2회 실행(비용, 확인 필요) | `core/improvement/simulate.py`, `api/improvement.py` `simulate`·`_simulate_spec_job` |
+| 4. 시뮬레이션 | params 안: 규칙 엔진 전후 재실행(`simulate_params`, 비용 없음). spec 안: AI agent를 전·후 명세로 2회 실행(비용, 확인 필요). 묶음에 제약이 있으면 `constraint_violations` 표시 | `core/improvement/simulate.py`, `core/improvement/constraints.py`, `api/improvement.py` `simulate`·`_simulate_spec_job` |
 | 5. 승인 | 시뮬레이션을 마친 안만(강제 승인은 사유 필수). params → `write_params`(version +1), spec → `write_spec` | `api/improvement.py` `approve`, `core/improvement/approval.py` |
 | 6. 후처리 | 같은 종류의 다른 미결 안을 `stale`로 표시, 이력 조회 | `core/storage/store.py` `mark_stale`, `decided_proposals`, `GET /history` |
 
@@ -474,7 +509,7 @@ overrides:                        # 구간 조건
 | 런타임 의존성 | `pyyaml`, `ruamel.yaml`, `anthropic`, `fastapi`, `pydantic`, `uvicorn` (fastapi 계열은 코어만 쓸 때도 설치된다) |
 | 개발 의존성 (`[dev]`) | `pytest`, `httpx` |
 | 패키지 데이터 | `configs/*.yaml`, `domains/dispatch/*.yaml`·`*.md`·`geo/*.geojson` |
-| 환경변수 | `ANTHROPIC_API_KEY`(LLM 사용 시, `.env` 가능), `LLM_CACHE=0`(캐시 끄기), `HARNESS_DB`(API·스크립트의 DB 경로), `HOST`·`PORT`(API 서버) |
+| 환경변수 | `OAH_ANTHROPIC_API_KEY`(우선) 또는 `ANTHROPIC_API_KEY`(LLM 사용 시, `.env` 가능), `LLM_CACHE=0`(캐시 끄기), `HARNESS_DB`(API·스크립트의 DB 경로), `HOST`·`PORT`(API 서버) |
 
 설치:
 

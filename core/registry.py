@@ -51,6 +51,14 @@ def load_faults(pack: DomainPack) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
+def load_perspectives(pack: DomainPack) -> list[dict]:
+    """analysis_perspectives.yaml의 관점 목록 (관점별 분석, core.analysis.perspectives). 파일이 없으면 빈 목록."""
+    path = Path(pack.params_path()).parent / "analysis_perspectives.yaml"
+    if not path.is_file():
+        return []
+    return (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("perspectives") or []
+
+
 def list_faults(pack: DomainPack) -> list[dict]:
     """심을 수 있는 결함의 ID와 이름. 정답(answer)은 노출하지 않는다."""
     return [{"id": fid, "name": spec.get("name", fid)} for fid, spec in load_faults(pack).items()]

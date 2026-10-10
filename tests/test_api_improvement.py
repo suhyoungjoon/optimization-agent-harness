@@ -3,6 +3,7 @@
 import json
 import shutil
 import time
+from pathlib import Path
 
 import pytest
 import yaml
@@ -57,6 +58,7 @@ def files(tmp_path, monkeypatch):
     params, spec = tmp_path / "params.yaml", tmp_path / "domain-spec.md"
     shutil.copy(DispatchPack.params_path(None), params)
     shutil.copy(DispatchPack.spec_path(None), spec)
+    shutil.copy(Path(DispatchPack.params_path(None)).parent / "analysis_perspectives.yaml", tmp_path)   # 관점별 분석
     monkeypatch.setattr(DispatchPack, "params_path", lambda self: str(params))
     monkeypatch.setattr(DispatchPack, "spec_path", lambda self: str(spec))
     return params, spec
@@ -154,3 +156,136 @@ def test_spec_simulation_runs_ai_before_and_after(client, files):
     assert set(sim["run_ids"]) == {"before", "after"} and sim["items"] == 3
     after_run = client.get(f"/runs/{sim['run_ids']['after']}").json()
     assert after_run["level"] == "L1" and after_run["scope"] == scope
+
+
+def p3_analyst(item, n, messages, tools):
+    if n == 0:
+        return tool_use("worker_stats", {"limit": 3})
+    return tool_use("submit_report", {"summary": "저활용 작업자", "findings": [
+        {"title": "저활용 작업자", "description": "일부 작업자의 활용률이 낮다",
+         "metric": {"name": "worker_utilization", "direction": "low"},
+         "cited_calls": tool_ids(messages, "worker_stats")}]})
+
+
+def test_cause_confirmation_label(tmp_path, files):
+    """원인 확인이 필요한 결함(P3)은 사람이 '원인 맞음'으로 판정해야 탐지로 센다."""
+    client = TestClient(create_app(tmp_path / "h.db", serve_web=False, llm_factory=lambda: FakeLLM(p3_analyst)))
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P3"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    report = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    s = report["score"]
+    assert s["faults"]["P3"]["status"] == "pending" and (s["detected"], s["pending"]) == (0, 1)
+
+    ok = client.post(f"/analysis/{report['id']}/labels", json={"finding_id": "F1", "label": "cause_ok"}).json()
+    assert ok["score"]["faults"]["P3"]["status"] == "detected" and ok["score"]["detected"] == 1
+    wrong = client.post(f"/analysis/{report['id']}/labels", json={"finding_id": "F1", "label": "cause_wrong"}).json()
+    assert wrong["score"]["faults"]["P3"]["status"] == "missed" and wrong["score"]["pending"] == 0
+
+
+AREA_LIMIT = {"type": "param", "path": "matching.area_extension_km[2]", "max": 3, "source": "현장 담당자",
+              "note": "관할 밖 3km까지만 출동 가능"}
+
+
+def test_constraints_are_stored_and_checked_in_simulation(client):
+    """제약은 개선안 묶음에 남고, 시뮬레이션 결과에 위반이 표시된다. 위반이 있어도 승인은 사람이 정한다."""
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    report = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+
+    bad = client.post("/proposals", json={"report_id": report["id"], "constraints": [{**AREA_LIMIT, "max": "3km"}]})
+    assert bad.status_code == 400 and "숫자" in bad.text
+
+    bat = client.post("/proposals", json={"report_id": report["id"], "constraints": [AREA_LIMIT]}).json()
+    batch = wait(client, f"/proposals/batches/{bat['id']}")
+    assert batch["meta"]["constraints"] == [AREA_LIMIT]
+    boundary = batch["proposals"][0]                                  # 경계 지역만 3단계 4km → 제약(3km) 위반
+    sim = client.post(f"/proposals/{boundary['id']}/simulate", json={}).json()["simulation"]
+    assert len(sim["constraint_violations"]) == 1 and "구간 조건" in sim["constraint_violations"][0]["message"]
+    approved = client.post(f"/proposals/{boundary['id']}/approve", json={"note": "현장과 재협의 완료"})
+    assert approved.status_code == 200 and approved.json()["status"] == "approved"
+
+
+def test_no_constraints_no_violation_field(client):
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    report = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    batch = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id']}).json()['id']}")
+    assert "constraints" not in (batch["meta"] or {})
+    sim = client.post(f"/proposals/{batch['proposals'][0]['id']}/simulate", json={}).json()["simulation"]
+    assert "constraint_violations" not in sim
+
+
+def test_second_cycle_gets_human_judgments_as_memory(tmp_path, files):
+    """1회차의 오탐 판정과 반려 사유가 2회차 분석·개선 에이전트 입력으로 들어가고, 쓴 기억이 기록된다 (M12-c)."""
+    llms = []
+
+    def factory():
+        llms.append(FakeLLM(analyst_or_proposer))
+        return llms[-1]
+
+    client = TestClient(create_app(tmp_path / "h.db", serve_web=False, llm_factory=factory))
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+
+    # 1회차: 분석 → 오탐 판정, 개선안 → 명세안 반려
+    first = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    assert first["body"]["memory"]["item_ids"] == []                       # 처음에는 기억이 없다
+    client.post(f"/analysis/{first['id']}/labels", json={"finding_id": "F2", "label": "false_positive"})
+    batch = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': first['id']}).json()['id']}")
+    spec = next(p for p in batch["proposals"] if p["kind"] == "spec")
+    client.post(f"/proposals/{spec['id']}/reject", json={"note": "AI 재실행 비용 대비 효과 불명"})
+
+    memory = client.get("/memory", params={"domain": "dispatch"}).json()
+    assert len(memory["judgments"]) == 1 and len(memory["rejections"]) == 1
+
+    # 2회차: 분석 입력에 오탐 판정, 개선안 입력에 반려 사유
+    second = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    assert len(second["body"]["memory"]["item_ids"]) == 2 and second["body"]["memory"]["version"]
+    analysis_input = llms[-1].calls[0]["messages"][0]["content"]
+    assert "중심 지역 용량 부족" in analysis_input and "잘못 짚음" in analysis_input
+    batch2 = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': second['id']}).json()['id']}")
+    assert batch2["meta"]["memory"]["version"] == second["body"]["memory"]["version"]
+    assert "AI 재실행 비용 대비 효과 불명" in llms[-1].calls[0]["messages"][0]["content"]
+
+    # 기억 없이 (비교 실험용)
+    plain = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id'], 'use_memory': False}).json()['id']}")
+    assert plain["body"]["memory"] is None
+    assert "잘못 짚음" not in llms[-1].calls[0]["messages"][0]["content"]
+
+
+def test_llm_factory_receives_role(tmp_path, files):
+    """분석과 개선안 에이전트는 역할별 모델로 만든다 (configs/llm.yaml의 roles)."""
+    roles = []
+
+    def factory(role=None):
+        roles.append(role)
+        return FakeLLM(analyst_or_proposer)
+
+    client = TestClient(create_app(tmp_path / "h.db", serve_web=False, llm_factory=factory))
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    report = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id']}).json()['id']}")
+    assert roles == ["analysis", "proposals"]
+    llm = client.get("/harness/levels").json()["llm"]
+    assert set(llm["roles"]) >= {"analysis", "proposals"} and llm["roles"]["proposals"]["model"]
+
+
+def test_perspective_analysis(tmp_path, files):
+    """관점별 분석: 관점마다 클라이언트를 따로 만들고, 같은 발견은 하나로 합쳐 채점한다."""
+    roles = []
+
+    def factory(role=None):
+        roles.append(role)
+        return FakeLLM(analyst_or_proposer)
+
+    client = TestClient(create_app(tmp_path / "h.db", serve_web=False, llm_factory=factory))
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    rep = client.post("/analysis", json={"run_id": run["run_id"], "perspectives": True, "use_memory": False})
+    report = wait(client, f"/analysis/{rep.json()['id']}")
+    assert report["status"] == "done", report.get("error")
+    body = report["body"]
+    assert roles == ["analysis"] * 3 and set(body["perspectives"]) == {"failure", "resource", "time"}
+    assert [len(f["perspectives"]) for f in body["findings"]] == [3, 3]      # 세 관점이 같은 두 발견을 냄
+    assert report["score"]["detected"] == 1 and body["usage"]["llm_calls"] == 6

@@ -11,7 +11,7 @@ from typing import Any
 
 @dataclass
 class AgentContext:
-    make_llm: Any = None                  # () → LLMClient (실제 Claude 또는 가짜 AI). 에이전트를 실행할 때마다 새로 만든다
+    make_llm: Any = None                  # (role=None) → LLMClient (실제 Claude 또는 가짜 AI). role: None(배정), "analysis", "proposals"
     llm_config: dict = field(default_factory=dict)
     pace: float = 0.0                     # 내부 단계 사이 간격 (초). 가짜 AI는 너무 빨라 화면에서 못 따라가므로
     data: dict = field(default_factory=dict)   # pack, instance, truth, scope, 결정 목록 등

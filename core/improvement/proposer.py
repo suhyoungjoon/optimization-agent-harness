@@ -10,6 +10,7 @@ from core.llm.client import LLMClient
 from core.llm.tool_loop import run_tool_loop, usage_dict
 
 from .changes import apply_params, params_errors, spec_errors, spec_sections
+from .constraints import constraint_violations
 from .simulate import simulate_params
 
 SUBMIT = "submit_proposals"
@@ -39,6 +40,10 @@ _EDITS = {"type": "array", "items": {"type": "object", "properties": {
     "section": {"type": "string"}, "text": {"type": "string"}}, "required": ["section", "text"]}}
 
 
+BASE_KEYS = ("id", "title", "description", "slice", "reason_codes", "metric", "hypothesis")
+# 개선 에이전트에 넘기는 발견 요약. resources는 적힌 발견에만 넣는다 (없으면 입력이 이전과 같다)
+FINDING_SUMMARY_KEYS = BASE_KEYS + ("resources",)
+
 def _submit_tool() -> dict:
     return {
         "name": SUBMIT,
@@ -67,9 +72,13 @@ def finding_slices(report: dict) -> dict[str, dict]:
 
 def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: dict, report: dict,
             llm: LLMClient, llm_config: dict, salt: str = "", max_calls: int = 20,
-            feedback: list[str] | None = None) -> dict:
+            feedback: list[str] | None = None, constraints: list[dict] | None = None,
+            memory_text: str = "") -> dict:
     """feedback: 앞선 시도의 개선안이 탈락한 이유 (재시도할 때 같은 안을 다시 내지 않도록 입력에 붙인다).
-    없으면 입력은 이전과 같다 (LLM 캐시 키도 같다)."""
+    constraints: 사람이 정한 한도 (core.improvement.constraints 형식). 입력에 붙이고, simulate_params 도구
+    결과에 위반을 함께 돌려줘 제출 전에 스스로 피하게 한다.
+    memory_text: 이전 회차에서 사람이 반려한 개선안 (core.improvement.memory.proposal_memory_text).
+    모두 없으면 입력은 이전과 같다 (LLM 캐시 키도 같다)."""
     slices = finding_slices(report)
     trials: list[dict] = []
 
@@ -83,7 +92,10 @@ def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: di
         errors = params_errors(params, args, dimensions)
         if errors:
             return {"error": "; ".join(errors)}
-        result = simulate_params(pack_factory, instance, params, apply_params(params, args), slices)
+        candidate = apply_params(params, args)
+        result = simulate_params(pack_factory, instance, params, candidate, slices)
+        if constraints:
+            result["constraint_violations"] = constraint_violations(constraints, candidate, result)
         trials.append({"changes": args, "result": result})
         return result
 
@@ -96,12 +108,18 @@ def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: di
          "description": "파라미터 변경을 임시 적용해 규칙 엔진으로 재실행하고 전후 지표와 발견 구간별 실패율을 돌려준다.",
          "input_schema": {"type": "object", "properties": {"params_changes": _CHANGES, "override_rules": _RULES}}},
     ]
-    findings = [{k: f.get(k) for k in ("id", "title", "description", "slice", "reason_codes", "metric", "hypothesis")}
+    findings = [{k: f.get(k) for k in FINDING_SUMMARY_KEYS if f.get(k) is not None or k in BASE_KEYS}
                 for f in report.get("findings", [])]
     user = ("# 분석 리포트\n" + json.dumps({"summary": report.get("summary"), "findings": findings},
                                         ensure_ascii=False, indent=1)
             + "\n\n# 차원\n" + json.dumps({k: v.get("values") for k, v in dimensions.get("dimensions", {}).items()},
                                          ensure_ascii=False))
+    if constraints:
+        user += ("\n\n# 지켜야 할 제약 (현장·운영이 정한 한도, source는 누가 정했는지)\n"
+                 + json.dumps(constraints, ensure_ascii=False, indent=1)
+                 + "\nsimulate_params 결과의 constraint_violations가 비도록 안을 설계하라. "
+                   "어길 수밖에 없으면 rationale에 어떤 제약을 왜 어기는지 적어라.")
+    user += memory_text
     if feedback:
         user += ("\n\n# 이전 시도에서 탈락한 이유\n" + "\n".join(f"- {f}" for f in feedback)
                  + "\n같은 변경을 다시 제안하지 말고, 위 이유를 피하는 안을 제안하라.")
@@ -109,7 +127,11 @@ def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: di
                            max_calls=max_calls, salt=salt)
 
     proposals = []
-    for p in (result.submission or {}).get("proposals") or []:
+    submitted = (result.submission or {}).get("proposals") or []
+    for p in submitted if isinstance(submitted, list) else [submitted]:
+        if not isinstance(p, dict):
+            proposals.append({"proposal": {"title": str(p)[:80], "kind": "unknown"}, "errors": ["개선안 형식이 아님 (객체가 아님)"]})
+            continue
         errors = (params_errors(params, p, dimensions) if p.get("kind") == "params"
                   else spec_errors(spec_text, p) if p.get("kind") == "spec" else ["알 수 없는 kind"])
         proposals.append({"proposal": p, "errors": errors})

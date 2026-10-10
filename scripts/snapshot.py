@@ -20,7 +20,8 @@ from pathlib import Path
 from api.main import DEFAULT_DB, ROOT
 from core.registry import DOMAINS_DIR, list_domains, load_pack
 
-DOMAIN_FILES = ("params.yaml", "domain-spec.md", "faults.yaml", "dimensions.yaml")
+DOMAIN_FILES = ("params.yaml", "domain-spec.md", "faults.yaml", "dimensions.yaml", "analysis_perspectives.yaml")
+OPTIONAL_FILES = ("analysis_perspectives.yaml",)   # 없는 도메인도 있다 (관점별 분석, M12-b)
 FROM_GIT = ("params.yaml", "domain-spec.md")
 
 
@@ -77,6 +78,8 @@ def export_bundle(db_path: str | Path, out: str | Path, git_ref: str | None = "H
         target.mkdir(parents=True)
         for name in DOMAIN_FILES:
             path = folder / name if (folder / name).is_file() else DOMAINS_DIR / domain / name
+            if name in OPTIONAL_FILES and not path.is_file():
+                continue
             # 커밋된 버전은 레포 안의 원래 위치에서 찾는다 (작업 파일 위치가 바뀌어 있어도)
             text = _git_show(git_ref, DOMAINS_DIR / domain / name) if git_ref and name in FROM_GIT else None
             sources[f"{domain}/{name}"] = f"git:{git_ref}" if text is not None else "working tree"

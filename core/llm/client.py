@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 CONFIG_PATH = ROOT / "configs" / "llm.yaml"
 DEFAULT_CACHE_PATH = ROOT / "runs" / "llm_cache.sqlite"
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+API_KEY_ENVS = ("OAH_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY")   # 앞의 것이 우선
 
 
 def load_dotenv(path: Path = ROOT / ".env") -> None:
@@ -32,11 +33,30 @@ def load_dotenv(path: Path = ROOT / ".env") -> None:
                 os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
-def load_config(path: Path = CONFIG_PATH) -> dict:
+def api_key_from_env() -> str | None:
+    """API 키를 API_KEY_ENVS 순서대로 찾는다. 없으면 None (SDK 기본 동작에 맡김)."""
+    return next((os.environ[name] for name in API_KEY_ENVS if os.environ.get(name)), None)
+
+
+ROLE_KEYS = ("model", "thinking", "effort", "max_tokens")
+
+
+def load_config(path: Path = CONFIG_PATH, role: str | None = None) -> dict:
+    """role: 역할별 설정(roles.<role>)을 기본값 위에 덮는다 (예: analysis, proposals). 없으면 기본값.
+    실험용 환경변수(LLM_MODEL 등)는 역할보다 우선한다."""
     config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    override = ((config.get("roles") or {}).get(role) or {}) if role else {}
+    config.update({k: v for k, v in override.items() if k in ROLE_KEYS})
     env_cache = os.environ.get("LLM_CACHE")
     if env_cache is not None:
         config["cache"] = env_cache not in ("0", "false", "False", "")
+    # 실험용 덮어쓰기 (설정 파일은 그대로). 사용한 모델은 사용량 기록(usage.model)에 남는다
+    if os.environ.get("LLM_MODEL"):
+        config["model"] = os.environ["LLM_MODEL"]
+    if os.environ.get("LLM_THINKING"):
+        config["thinking"] = os.environ["LLM_THINKING"]
+    if os.environ.get("LLM_EFFORT"):
+        config["effort"] = None if os.environ["LLM_EFFORT"] in ("none", "null") else os.environ["LLM_EFFORT"]
     return config
 
 
@@ -90,7 +110,7 @@ class Usage:
         return cost / 1_000_000
 
     def to_dict(self, model: str, config: dict) -> dict:
-        return {"calls": self.calls, "cached_calls": self.cached_calls, **self.tokens,
+        return {"model": model, "calls": self.calls, "cached_calls": self.cached_calls, **self.tokens,
                 "cost_usd": self.cost_usd(model, config)}
 
 
@@ -133,7 +153,7 @@ class AnthropicClient:
             import anthropic  # 실제 호출 때만 필요
 
             load_dotenv(Path(env_path)) if env_path is not None else load_dotenv()
-            api = anthropic.Anthropic()
+            api = anthropic.Anthropic(api_key=api_key_from_env())
         self.api = api
 
     def create(self, *, system: list[dict], messages: list[dict], tools: list[dict],

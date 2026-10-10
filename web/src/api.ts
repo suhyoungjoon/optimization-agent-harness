@@ -1,5 +1,5 @@
 import type {
-  CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DomainDefinition, DecisionRecord, DomainInfo, HarnessInfo, HistoryRow, Proposal, ProposalBatch, Report, Run,
+  CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DomainDefinition, DecisionRecord, DomainInfo, FindingLabel, HarnessInfo, Memory, HistoryRow, Proposal, ProposalBatch, Report, Run,
   SpecEstimate, TraceRecord, WorkflowGraph, WorkflowRun, AgentsGraph, AgentsRun,
 } from "./types";
 
@@ -24,9 +24,10 @@ export interface RunOptions {
 }
 
 export const api = {
-  agentsGraph: (level: string) => request<AgentsGraph>(`/agents/graph?level=${level}`),
+  agentsGraph: (level: string, domain?: string, perspectives = false) =>
+    request<AgentsGraph>(`/agents/graph?level=${level}` + (perspectives && domain ? `&domain=${domain}&perspectives=true` : "")),
   agentsStart: (body: { domain: string; seed: number; faults: string[]; items: number; level: string; metrics: unknown[];
-    llm: "fake" | "claude"; pace: number }) => request<AgentsRun>("/agents/runs", { method: "POST", body: JSON.stringify(body) }),
+    llm: "fake" | "claude"; pace: number; perspectives?: boolean }) => request<AgentsRun>("/agents/runs", { method: "POST", body: JSON.stringify(body) }),
   agentsGet: (id: string, after = -1) => request<AgentsRun>(`/agents/runs/${id}?after=${after}`),
   agentsStep: (id: string, action: "next" | "approve" | "reject", note = "") =>
     request<AgentsRun>(`/agents/runs/${id}/step`, { method: "POST", body: JSON.stringify({ action, note }) }),
@@ -72,10 +73,10 @@ export const api = {
   // --- M4: 분석·개선 ---
   params: (domain: string) =>
     request<{ params: Record<string, unknown>; spec_sections: Record<string, string> }>(`/domains/${domain}/params`),
-  analyze: (runId: string) =>
-    request<{ id: string }>("/analysis", { method: "POST", body: JSON.stringify({ run_id: runId }) }),
+  analyze: (runId: string, opts: { perspectives?: boolean } = {}) =>
+    request<{ id: string }>("/analysis", { method: "POST", body: JSON.stringify({ run_id: runId, ...opts }) }),
   report: (id: string) => request<Report>(`/analysis/${id}`),
-  label: (id: string, findingId: string, label: "valid" | "false_positive" | null) =>
+  label: (id: string, findingId: string, label: FindingLabel | null) =>
     request<Report>(`/analysis/${id}/labels`, { method: "POST", body: JSON.stringify({ finding_id: findingId, label }) }),
   propose: (reportId: string) =>
     request<{ id: string }>("/proposals", { method: "POST", body: JSON.stringify({ report_id: reportId }) }),
@@ -89,6 +90,7 @@ export const api = {
   reject: (id: string, note: string) =>
     request<Proposal>(`/proposals/${id}/reject`, { method: "POST", body: JSON.stringify({ note }) }),
   history: () => request<HistoryRow[]>("/history"),
+  memory: (domain: string) => request<Memory>(`/memory?domain=${encodeURIComponent(domain)}`),
 
   // 진행 상황 SSE. 닫는 함수를 돌려준다.
   stream: (runId: string, onEvent: (e: { status: string; done?: number; total?: number }) => void) => {
