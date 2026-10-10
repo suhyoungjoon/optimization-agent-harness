@@ -92,8 +92,10 @@ def sweep_params(pack_factory, instance, base_params: dict, axes: list[dict], me
 
 
 def _steps(lo, hi, n: int, current) -> list:
-    """허용 범위 [lo, hi]를 n단계로 (정수 범위면 정수로). 현재 값은 항상 포함."""
+    """허용 범위 [lo, hi]를 n단계로 (정수 범위면 정수로, 좁으면 모든 정수). 현재 값은 항상 포함."""
     integer = all(isinstance(x, int) and not isinstance(x, bool) for x in (lo, hi, current))
+    if integer and hi - lo <= 2 * n:     # 좁은 정수 범위는 모든 값 (반올림으로 빠지는 값이 없게)
+        return sorted(set(range(lo, hi + 1)) | {current})
     raw = [lo + (hi - lo) * i / (n - 1) for i in range(n)] if n > 1 else [lo]
     vals = {round(v) if integer else round(v, 4) for v in raw} | {current}
     return sorted(vals)
