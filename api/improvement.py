@@ -3,6 +3,7 @@
 분석 agent에게는 정답표를 주지 않는다. 채점 결과는 사람이 보는 화면에만 나간다.
 """
 
+import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,7 @@ from core.improvement.constraints import constraint_errors, constraint_violation
 from core.improvement.memory import analysis_memory_text, collect_memory, proposal_memory_text
 from core.improvement.proposer import finding_slices, propose
 from core.improvement.simulate import simulate_params
+from core.improvement.sweep import sensitivity, sweep_params
 from core.interfaces import DecisionRecord
 from core.registry import load_pack, load_params, load_perspectives
 from core.storage.store import Store
@@ -40,6 +42,12 @@ class AnalysisRequest(BaseModel):
 class LabelRequest(BaseModel):
     finding_id: str
     label: Literal["valid", "false_positive", "cause_ok", "cause_wrong"] | None   # cause_*: 원인 확인 대상 발견
+
+
+class SweepRequest(BaseModel):
+    dataset_id: str
+    axes: list[dict]                       # [{path, values}] 1~2개
+    metrics: list[str] | None = None       # 없으면 도메인 지표 전부
 
 
 class ProposalRequest(BaseModel):
@@ -114,6 +122,43 @@ def estimate_spec_cost(store: Store, level: str, items: int) -> dict:
 
 def register(app: FastAPI, ctx: Context) -> None:
     store = ctx.store
+    sweep_cache: dict[str, dict] = {}     # (데이터셋, params 버전, 축) → 결과. 규칙 엔진이라 다시 계산해도 비용 0
+
+    # --- 파라미터 탐색 (M13) ---
+    def _sweep_context(dataset_id: str):
+        dataset = store.get_dataset(dataset_id)
+        if dataset is None:
+            raise HTTPException(404, f"unknown dataset: {dataset_id}")
+        params = load_params(load_pack(dataset["domain"]))
+        pack = load_pack(dataset["domain"], params)
+        instance, _truth = pack.generate(dataset["seed"], dataset["faults"])
+        return dataset, params, instance, (lambda p: load_pack(dataset["domain"], p))
+
+    def _cached(key: str, compute):
+        if key in sweep_cache:
+            return {**sweep_cache[key], "cached": True}
+        try:
+            result = compute()
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        sweep_cache[key] = result
+        return {**result, "cached": False}
+
+    @app.post("/params/sweep")
+    def params_sweep(req: SweepRequest):
+        """파라미터를 1~2개 축으로 바꿔 가며 규칙 엔진으로 돌린 점 목록 (AI 비용 0)."""
+        dataset, params, instance, factory = _sweep_context(req.dataset_id)
+        key = json.dumps(["sweep", req.dataset_id, params.get("version"), req.axes, req.metrics], sort_keys=True)
+        out = _cached(key, lambda: sweep_params(factory, instance, params, req.axes, req.metrics))
+        return {**out, "dataset_id": req.dataset_id, "params_version": params.get("version")}
+
+    @app.get("/params/sensitivity")
+    def params_sensitivity(dataset_id: str):
+        """policy 파라미터별 1차원 민감도: 허용 범위를 몇 단계로 돌려 지표가 움직인 폭."""
+        dataset, params, instance, factory = _sweep_context(dataset_id)
+        key = json.dumps(["sensitivity", dataset_id, params.get("version")])
+        out = _cached(key, lambda: sensitivity(factory, instance, params))
+        return {**out, "dataset_id": dataset_id, "params_version": params.get("version")}
 
     # --- 분석 ---
     @app.post("/analysis")
