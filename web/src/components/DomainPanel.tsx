@@ -13,7 +13,7 @@ const SECTIONS: { id: Section; label: string; term?: TermKey }[] = [
   { id: "data", label: "데이터" },
   { id: "faults", label: TERMS.faults.label, term: "faults" },
 ];
-const META = new Set(["bounds", "docs"]);
+const META = new Set(["bounds", "docs", "kinds"]);
 
 /** 도메인 탭 (읽기 전용): 규칙 agent가 판단에 쓰는 데이터와 룰을 보여준다. 도메인과 무관한 파일 계약만 읽는다. */
 export default function DomainPanel({

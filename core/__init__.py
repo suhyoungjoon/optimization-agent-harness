@@ -23,7 +23,8 @@ from core.improvement.simulate import simulate_params
 from core.interfaces import DecisionRecord, DomainPack, ToolContext, TraceRecord, Violation
 from core.llm.client import AnthropicClient, LLMClient, LLMResponse, ResponseCache, Usage, load_config
 from core.llm.tool_loop import LoopResult, run_tool_loop, usage_dict
-from core.params import apply_overrides, check_params, get_path, parse_path, path_errors, set_path
+from core.params import (KINDS, apply_overrides, check_params, get_path, kind_errors, param_kind, params_view,
+                         parse_path, path_errors, set_path)
 from core.registry import list_domains, list_faults, load_faults, load_pack, load_params, load_perspectives
 from core.storage.store import Store, dataset_id, to_jsonable
 
@@ -31,7 +32,8 @@ __all__ = [
     # 계약 (core.interfaces)
     "DecisionRecord", "DomainPack", "ToolContext", "TraceRecord", "Violation",
     # 파라미터: 경로 접근, 구간 조건, 허용 범위 검사 (core.params)
-    "apply_overrides", "check_params", "get_path", "parse_path", "path_errors", "set_path",
+    "KINDS", "apply_overrides", "check_params", "get_path", "kind_errors", "param_kind", "params_view", "parse_path",
+    "path_errors", "set_path",
     # 도메인 팩 로딩 (core.registry)
     "list_domains", "list_faults", "load_faults", "load_pack", "load_params", "load_perspectives",
     # 하네스 (core.harness)

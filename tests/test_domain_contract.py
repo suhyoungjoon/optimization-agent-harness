@@ -13,7 +13,7 @@ import pytest
 import yaml
 
 from core.interfaces import DecisionRecord, Violation
-from core.params import check_params
+from core.params import SECTION_META, check_params
 
 DOMAINS_DIR = Path(__file__).resolve().parent.parent / "domains"
 
@@ -80,7 +80,7 @@ def test_every_param_has_docs(domain):
     """모든 파라미터에 설명(docs)이 있어야 한다: 화면과 개선 agent가 의미를 알 수 있게."""
     params = load_yaml(domain, "params.yaml")
     missing = [f"{name}.{key}" for name, section in params.items() if name not in ("version", "overrides")
-               for key in section if key not in ("bounds", "docs") and key not in (section.get("docs") or {})]
+               for key in section if key not in SECTION_META and key not in (section.get("docs") or {})]
     assert not missing, f"docs가 없는 파라미터: {missing}"
 
 

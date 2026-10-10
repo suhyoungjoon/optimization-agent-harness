@@ -27,6 +27,7 @@ from core.improvement import proposer as proposer_core
 from core.improvement.approval import write_params, write_spec
 from core.improvement.changes import apply_params, apply_spec, params_errors, spec_errors, spec_sections
 from core.improvement.simulate import simulate_params
+from core.params import params_view
 from core.registry import load_pack, load_params, load_perspectives
 
 from ..graph import (APPROVED, IMPROVED, NO_MORE, NOT_IMPROVED, REJECTED, HAS_PROPOSALS, _better, _fmt,
@@ -175,7 +176,7 @@ def proposal_agent_graph(ctx: AgentContext, llm=None):
     slices = proposer_core.finding_slices(report)
 
     def get_params(args):
-        return {"params": params}
+        return {"params": params, **params_view(params)}
 
     def get_spec(args):
         return {"sections": spec_sections(spec_text)}
