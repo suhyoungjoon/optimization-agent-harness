@@ -153,6 +153,31 @@ def constraint_violations(constraints, candidate_params: dict, simulation: dict 
 - **패키지**: `propose(..., constraints=제약)` — 개선 에이전트 입력에 붙고, 에이전트의 `simulate_params` 도구 결과에 `constraint_violations`가 함께 돌아간다. 제약이 없으면 입력·LLM 캐시 키는 이전과 같다.
 - **API**: `POST /proposals {"report_id": ..., "constraints": [...]}` (형식이 틀리면 400). 개선안 묶음 `meta.constraints`에 저장되고, `POST /proposals/{id}/simulate` 결과에 `constraint_violations`가 붙는다 (명세 개선안은 지표 제약만).
 
+### 2.8-3 파라미터 분류·탐색·변경 이력 — `core/params.py`, `core/improvement/sweep.py`, `history.py` (M13)
+
+```yaml
+# params.yaml 섹션마다 (선택). 없으면 policy
+kinds: {<키>: policy | estimate | fixed | governance}
+```
+
+```python
+from core import KINDS, param_kind, kind_errors, params_view, sweep_params, sensitivity, change_record, change_card
+
+param_kind(params, "duration.base_min")        # "estimate"
+params_errors(params, proposal, dims)           # policy가 아닌 값을 바꾸면 분류별 사유 (전역·구간 조건 모두)
+params_view(params)                             # {"changeable": [...], "reference_only": {kind: {reason, paths}}}
+
+sweep_params(pack_factory, instance, base_params, axes=[{"path": "matching.area_extension_km[2]", "values": [3, 4]}],
+             metrics=None, max_points=None)    # {axes(분류 포함), points, base, warnings, seconds}. 상한은 configs/sweep.yaml
+sensitivity(pack_factory, instance, base_params)   # {rows: [{path, values, points, ranges, flat_around_current}], ...}
+
+change_record(params, proposal)                 # 승인 직전에 decision에 넣을 {changes, override_rules(before 포함)}
+change_card(proposal, report)                   # 승인된 params 개선안 → 변경 이력 카드 (아니면 None)
+```
+
+- 새 레포의 추정값 보정 경로(실적으로 `estimate` 값을 고치는 일)는 이 분류를 전제로 한다. 개선 에이전트는 `estimate`를 바꿀 수 없으므로, 보정은 실적 근거와 함께 사람이 승인하는 별도 경로로 만든다.
+- API: `POST /params/sweep {dataset_id, axes, metrics?}`, `GET /params/sensitivity?dataset_id=`, `GET /params/history?domain=`, 승인 `POST /proposals/{id}/approve {note, approver}`.
+
 ### 2.8-2 회차 간 장기 기억 — `core/improvement/memory.py` (M12-c)
 
 ```python
