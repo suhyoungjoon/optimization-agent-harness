@@ -209,7 +209,7 @@ def run_tool_loop(llm, *, system: str, user: str, tools: list[dict], submit_tool
 
 | 모듈 | 공개 이름 | 역할 |
 |---|---|---|
-| `core/analysis/agent.py` | `analyze(pack, instance, decisions, llm, llm_config, salt="", max_calls=30) -> dict`, `report_submit_tool(dimensions, metric_names)`, `grounding_problems(finding, calls)` | 분석 agent. 발견의 수치가 인용한 도구 결과에 없으면 제외(`core/analysis/grounding.py`). 리포트 제출 도구 정의와 발견 하나의 근거 검사를 공개해 다른 분석 agent(관점별 agent 등)도 같은 형식·검사를 쓸 수 있다 |
+| `core/analysis/agent.py` | `analyze(pack, instance, decisions, llm, llm_config, salt="", max_calls=30) -> dict`, `report_submit_tool(dimensions, metric_names)`, `grounding_problems(finding, calls)`, `slice_problems(finding, dimensions)`, `submission_problems(submission, calls, dimensions)`, `finalize_findings(findings, calls, dimensions)` | 분석 agent. 발견의 수치가 인용한 도구 결과에 없으면 제외(`core/analysis/grounding.py`). 구간에 선언되지 않은 차원·값이 있으면 한 번 고쳐 오게 하고, 남으면 그 항목만 빼서 `slice_removed`에 남긴다. 리포트 제출 도구 정의와 발견 하나의 근거·구간 검사를 공개해 다른 분석 agent(관점별 agent 등)도 같은 형식·검사를 쓸 수 있다 |
 | `core/improvement/proposer.py` | `propose(pack_factory, instance, params, spec_text, dimensions, report, llm, llm_config, salt="", max_calls=20, feedback=None) -> dict`, `finding_slices(report)` | 개선 agent. `simulate_params`를 도구로 쓰고, 제출안을 `params_errors`/`spec_errors`로 재검사. `feedback`(앞선 시도의 탈락 이유 목록)을 주면 입력 끝에 붙인다(없으면 입력·캐시 키가 이전과 같다) |
 | `core/evaluation/fault_scorer.py` | `score(findings, faults) -> dict`, `matches(finding, answer)` | 정답표 대조 탐지율 |
 | `core/evaluation/runner.py` | `run_rule_agent(store, pack, dataset, params, scope=None, group_id=None) -> run_id`, `run_ai_agent(...)`, `create_ai_run(...)` | 실행 + validate + metrics + 저장 |

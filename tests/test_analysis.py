@@ -275,3 +275,50 @@ def test_score_without_new_keys_is_unchanged():
     findings = [{"id": "F1", "slice": {"area_zone": ["boundary"]}, "reason_codes": ["OUT_OF_AREA"]}]
     s = score(findings, {"P4": {"name": "경계", "answer": P4}})
     assert s["faults"]["P4"]["status"] == "detected" and s["detected"] == 1 and s["pending"] == 0
+
+
+# --- 구간 검사: 선언되지 않은 차원·값 ----------------------------------------------------
+
+def test_slice_problems_checks_declared_dimensions():
+    from core.analysis.agent import slice_problems
+
+    dims = get_pack().dimensions()
+    assert slice_problems({"slice": {"branch": ["B"], "hour": ["10"]}}, dims) == []
+    assert slice_problems({}, dims) == []
+    problems = slice_problems({"slice": {"branch": ["B"], "worker_id": ["WB01"], "available": ["13:00-18:00"]}}, dims)
+    assert len(problems) == 1 and "worker_id" in problems[0] and "available" in problems[0]
+    assert "branch" in problems[0]                                   # 쓸 수 있는 차원을 알려 준다
+    bad_value = slice_problems({"slice": {"branch": ["B", "Z"]}}, dims)
+    assert len(bad_value) == 1 and "Z" in bad_value[0]
+    assert slice_problems({"slice": {"hour": ["10", "16"]}}, dims) == []   # 값 목록이 없는 차원은 값을 보지 않는다
+
+
+def test_analyze_returns_undeclared_dimension_and_strips_it_if_unfixed(run_p4):
+    """선언되지 않은 차원은 한 번 고쳐 오게 하고, 그래도 남으면 발견은 두고 그 구간 항목만 뺀다 (뺀 것은 기록)."""
+    pack, inst, decisions, _ = run_p4
+
+    def submit(messages):
+        call_id = next(b["id"] for m in messages if m["role"] == "assistant" for b in m["content"]
+                       if b.get("type") == "tool_use" and b["name"] == "aggregate")
+        return tool_use("submit_report", {"summary": "s", "findings": [
+            {"title": "경계 지역 OUT_OF_AREA", "description": "경계 지역 실패 집중",
+             "slice": {"area_zone": ["boundary"], "worker_id": ["WB01"]}, "reason_codes": ["OUT_OF_AREA"],
+             "cited_calls": [call_id]}]})
+
+    llm = FakeLLM(scripted([lambda m: tool_use("aggregate", {"group_by": ["area_zone"]}), submit, submit]))
+    report = analyze(pack, inst, decisions, llm, load_config(), salt="t")
+    feedback = llm.calls[2]["messages"][-1]["content"][-1]["content"]
+    assert "선언되지 않은 차원 worker_id" in feedback and "area_zone" in feedback
+    assert report["feedback_rounds"] == 1 and not report["dropped"]
+    finding = report["findings"][0]
+    assert finding["slice"] == {"area_zone": ["boundary"]} and finding["slice_removed"] == {"worker_id": ["WB01"]}
+
+
+def test_report_schema_lists_declared_dimensions():
+    from core.analysis.agent import report_submit_tool
+
+    dims = get_pack().dimensions()
+    slice_schema = report_submit_tool(dims, ["assignment_rate"])["input_schema"]["properties"]["findings"]["items"]["properties"]["slice"]
+    assert set(slice_schema["properties"]) == set(dims["dimensions"]) and slice_schema["additionalProperties"] is False
+    assert slice_schema["properties"]["branch"]["items"]["enum"] == ["A", "B", "C"]
+    assert "enum" not in slice_schema["properties"]["hour"]["items"]

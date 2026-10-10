@@ -340,6 +340,11 @@ function FindingCard({
       </div>
       <Details summary={`상세보기 (설명${finding.hypothesis ? " · 추정 원인" : ""}${finding.alternatives?.length ? ` · 다른 관점의 해석 ${finding.alternatives.length}건` : ""} · ${TERMS.evidence.label} ${finding.cited_calls.length}건)`}>
         <p>{finding.description}</p>
+        {finding.slice_removed && (
+          <p className="muted small" title="AI가 선언되지 않은 차원·값으로 구간을 적어 그 항목만 뺐습니다 (지도 강조·정답 대조에 쓰지 않음)">
+            구간에서 뺀 항목: {Object.entries(finding.slice_removed).map(([d, v]) => `${d}=${v.join(", ")}`).join(" · ")}
+          </p>
+        )}
         {finding.hypothesis && (
           <p className="muted">추정 원인{finding.alternatives?.length ? ` (${finding.perspective_names?.[0]})` : ""}: {finding.hypothesis}</p>
         )}

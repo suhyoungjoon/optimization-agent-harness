@@ -25,6 +25,21 @@ SYSTEM = """너는 최적화 결과 분석가다. 주어진 실행 결과에서 
 - 끝나면 submit_report 도구로 제출한다."""
 
 
+def _slice_schema(dimensions: dict) -> dict:
+    """구간 칸: 선언된 차원만 (값 목록이 선언된 차원은 그 값만). 판정은 slice_problems가 하고 이것은 안내다."""
+    declared = dimensions.get("dimensions") or {}
+    if not declared:
+        return {"type": "object", "description": "차원 → 값 목록",
+                "additionalProperties": {"type": "array", "items": {"type": "string"}}}
+    props = {}
+    for name, spec in declared.items():
+        items = {"type": "string"}
+        if spec.get("values"):
+            items["enum"] = [str(v) for v in spec["values"]]
+        props[name] = {"type": "array", "items": items, "description": spec.get("label", name)}
+    return {"type": "object", "description": "선언된 차원 → 값 목록", "properties": props, "additionalProperties": False}
+
+
 def report_submit_tool(dimensions: dict, metric_names: list[str]) -> dict:
     """분석 리포트 제출 도구 정의. 다른 분석 agent(예: 관점별 agent)도 같은 리포트 형식을 쓰도록 공개한다."""
     return {
@@ -39,8 +54,7 @@ def report_submit_tool(dimensions: dict, metric_names: list[str]) -> dict:
                     "properties": {
                         "title": {"type": "string"},
                         "description": {"type": "string", "description": "수치는 인용한 도구 결과에서만"},
-                        "slice": {"type": "object", "description": "차원 → 값 목록",
-                                  "additionalProperties": {"type": "array", "items": {"type": "string"}}},
+                        "slice": _slice_schema(dimensions),
                         "reason_codes": {"type": "array", "items": {"type": "string",
                                                                     "enum": sorted(dimensions.get("reason_codes", {}))}},
                         "metric": {"type": "object", "properties": {
@@ -84,6 +98,69 @@ def perspective_view(system: str, tools: list[dict], perspective: dict | None) -
             [t for t in tools if t["name"] in allowed])
 
 
+def slice_problems(finding: dict, dimensions: dict) -> list[str]:
+    """구간 검사: 선언되지 않은 차원, 값 목록이 선언된 차원의 목록 밖 값. dimensions: DomainPack.dimensions()."""
+    declared = dimensions.get("dimensions") or {}
+    bad_dims, bad_values = [], []
+    for dim, values in (finding.get("slice") or {}).items():
+        if dim not in declared:
+            bad_dims.append(dim)
+            continue
+        allowed = {str(v) for v in declared[dim].get("values") or []}
+        if allowed:
+            bad_values += [f"{dim}={v}" for v in values or [] if str(v) not in allowed]
+    problems = []
+    if bad_dims:
+        problems.append(f"선언되지 않은 차원 {', '.join(bad_dims)} (쓸 수 있는 차원: {', '.join(declared)}). "
+                        "선언된 차원으로 바꾸거나 구간에서 빼고 설명에 적는다")
+    if bad_values:
+        problems.append(f"선언되지 않은 값 {', '.join(bad_values)} (overview로 차원별 값을 확인)")
+    return problems
+
+
+def strip_bad_slice(finding: dict, dimensions: dict) -> dict:
+    """구간에서 선언되지 않은 차원·값을 빼고, 뺀 것을 slice_removed에 남긴다 (발견 자체는 둔다)."""
+    declared = dimensions.get("dimensions") or {}
+    kept, removed = {}, {}
+    for dim, values in (finding.get("slice") or {}).items():
+        allowed = {str(v) for v in (declared.get(dim) or {}).get("values") or []}
+        if dim not in declared:
+            removed[dim] = values
+            continue
+        good = [v for v in values or [] if not allowed or str(v) in allowed]
+        bad = [v for v in values or [] if allowed and str(v) not in allowed]
+        if good:
+            kept[dim] = good
+        if bad:
+            removed[dim] = bad
+    if not removed:
+        return finding
+    return {**finding, "slice": kept, "slice_removed": removed}
+
+
+def submission_problems(submission: dict, calls: dict, dimensions: dict) -> list[str]:
+    """제출 검사 (돌려보낼 문제 목록): 발견마다 근거 검사 + 구간 검사."""
+    issues = []
+    for i, f in enumerate(submission.get("findings") or []):
+        issues += [f"findings[{i}] '{f.get('title', '')}': {p}"
+                   for p in grounding_problems(f, calls) + slice_problems(f, dimensions)]
+    return issues
+
+
+def finalize_findings(findings: list[dict], calls: dict, dimensions: dict) -> tuple[list[dict], list[dict]]:
+    """최종 발견 정리 → (남긴 발견, 뺀 발견). 근거가 없는 발견은 빼고, 구간의 잘못된 항목만 있는 발견은
+    그 항목을 빼고 남긴다 (발견 내용은 맞을 수 있다). 남긴 발견은 인용을 tool_use id로 바꾸고 F1…를 붙인다."""
+    kept, dropped = [], []
+    for f in findings:
+        problems = grounding_problems(f, calls)
+        if problems:
+            dropped.append({"finding": f, "problems": problems})
+        else:
+            kept.append({**strip_bad_slice(f, dimensions), "cited_calls": cited_call_ids(f, calls),
+                         "id": f"F{len(kept) + 1}"})
+    return kept, dropped
+
+
 # 공개 전 이름 (하위 호환)
 _submit_tool = report_submit_tool
 _problems = grounding_problems
@@ -100,23 +177,14 @@ def analyze(pack: DomainPack, instance, decisions: list[DecisionRecord], llm: LL
     metric_names = sorted(pack.metrics(instance, decisions))
 
     def check(submission: dict, calls: dict) -> list[str]:
-        issues = []
-        for i, f in enumerate(submission.get("findings") or []):
-            issues += [f"findings[{i}] '{f.get('title', '')}': {p}" for p in grounding_problems(f, calls)]
-        return issues
+        return submission_problems(submission, calls, dimensions)
 
     user = ("실행 결과를 분석해 실패 패턴과 원인 가설을 찾아라. 먼저 overview로 전체와 차원을 확인하라.\n"
             f"분석 대상 항목 수: {len(decisions)}") + memory_text
     result = run_tool_loop(llm, system=system, user=user, tools=tools, submit_tool=report_submit_tool(dimensions, metric_names),
                            max_calls=max_calls, salt=salt, check_submission=check)
 
-    kept, dropped = [], []
-    for f in (result.submission or {}).get("findings") or []:
-        problems = grounding_problems(f, result.calls)
-        if problems:
-            dropped.append({"finding": f, "problems": problems})
-        else:
-            kept.append({**f, "cited_calls": cited_call_ids(f, result.calls), "id": f"F{len(kept) + 1}"})
+    kept, dropped = finalize_findings((result.submission or {}).get("findings") or [], result.calls, dimensions)
     return {
         "summary": (result.submission or {}).get("summary", ""),
         "findings": kept,

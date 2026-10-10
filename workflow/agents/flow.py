@@ -93,10 +93,7 @@ def analysis_agent_graph(ctx: AgentContext, llm=None, perspective: dict | None =
     metric_names = sorted(pack.metrics(d["instance"], full)) if pack else []
 
     def check(submission: dict, calls: dict) -> list[str]:
-        issues = []
-        for i, f in enumerate(submission.get("findings") or []):
-            issues += [f"findings[{i}] '{f.get('title', '')}': {p}" for p in analysis_core.grounding_problems(f, calls)]
-        return issues
+        return analysis_core.submission_problems(submission, calls, dims)
 
     def tool_text(name, args, out):
         rows = len(out.get("rows", [])) if isinstance(out, dict) else 0
@@ -115,11 +112,8 @@ def _perspective_node(p: dict) -> str:
 def _analysis_result(ctx: AgentContext, out: dict, llm) -> dict:
     """분석 하위 그래프의 마지막 상태 → core.analysis.agent.analyze와 같은 모양의 결과 (근거 없는 발견은 뺀다)."""
     calls = out.get("calls") or {}
-    kept, dropped = [], []
-    for f in (out.get("submission") or {}).get("findings") or []:
-        problems = analysis_core.grounding_problems(f, calls)
-        (dropped.append({"finding": f, "problems": problems}) if problems
-         else kept.append({**f, "cited_calls": analysis_core.cited_call_ids(f, calls), "id": f"F{len(kept) + 1}"}))
+    dims = ctx.data["pack"].dimensions() if ctx.data.get("pack") else {}
+    kept, dropped = analysis_core.finalize_findings((out.get("submission") or {}).get("findings") or [], calls, dims)
     usage = {**out["usage"].to_dict(llm.model, ctx.llm_config), "llm_calls": out.get("llm_calls", 0)}
     return {"summary": (out.get("submission") or {}).get("summary", ""), "findings": kept, "dropped": dropped,
             "calls": calls, "stop": out.get("stop") or "no_submit", "feedback_rounds": out.get("feedback_rounds", 0),

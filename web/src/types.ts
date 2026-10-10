@@ -168,6 +168,7 @@ export interface Finding {
   perspective_names?: string[];
   alternatives?: FindingAlternative[];
   related?: string[];   // 구간이 겹치는(한쪽이 더 좁은) 다른 발견 ID
+  slice_removed?: Record<string, string[]>;   // 선언되지 않은 차원·값이라 구간에서 뺀 것
 }
 
 export interface FindingAlternative {

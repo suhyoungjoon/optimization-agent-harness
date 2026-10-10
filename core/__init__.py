@@ -3,7 +3,8 @@
 설명과 계약은 docs/handoff.md.
 """
 
-from core.analysis.agent import analyze, grounding_problems, report_submit_tool
+from core.analysis.agent import (analyze, finalize_findings, grounding_problems, report_submit_tool, slice_problems,
+                                 strip_bad_slice, submission_problems)
 from core.analysis.aggregate_tools import Aggregator
 from core.analysis.perspectives import analyze_perspectives, merge_findings, perspective_errors
 from core.evaluation.compare import compare, consistency
@@ -40,8 +41,8 @@ __all__ = [
     # 실행·비교·채점 (core.evaluation)
     "apply_labels", "compare", "consistency", "create_ai_run", "matches", "run_ai_agent", "run_rule_agent", "score",
     # 분석 (core.analysis)
-    "Aggregator", "analyze", "analyze_perspectives", "grounding_problems", "merge_findings", "perspective_errors",
-    "report_submit_tool",
+    "Aggregator", "analyze", "analyze_perspectives", "finalize_findings", "grounding_problems", "merge_findings",
+    "perspective_errors", "report_submit_tool", "slice_problems", "strip_bad_slice", "submission_problems",
     # 개선 루프 (core.improvement)
     "apply_params", "apply_spec", "constraint_errors", "constraint_violations", "finding_slices", "params_errors",
     "propose", "simulate_params", "analysis_memory_text", "build_memory", "collect_memory", "proposal_memory_text",
