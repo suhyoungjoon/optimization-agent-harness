@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import type { DataFocus, DomainAdapter, DomainData } from "../domains/types";
+import type { DataFocus, DomainAdapter, DomainData, MetricSpec } from "../domains/types";
 import { CORE_REASON_NAMES, TERMS, tip, type TermKey } from "../terms";
-import type { Dataset, DomainDefinition, DomainFault, HistoryRow } from "../types";
+import type { ChangeCard, Dataset, DomainDefinition, DomainFault, ParamKind, Sensitivity, SensitivityRow } from "../types";
+import { fmtMetric } from "./MetricsPanel";
 
 type Section = "overview" | "params" | "rules" | "spec" | "data" | "faults";
 const SECTIONS: { id: Section; label: string; term?: TermKey }[] = [
@@ -31,12 +32,10 @@ export default function DomainPanel({
 }) {
   const [section, setSection] = useState<Section>("overview");
   const [def, setDef] = useState<DomainDefinition | null>(null);
-  const [history, setHistory] = useState<HistoryRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api.definition(domainName).then(setDef).catch((e) => setError(String(e)));
-    api.history().then(setHistory).catch(() => undefined);
   }, [domainName]);
 
   if (error) return <section className="panel"><p className="critical-text">✕ {error}</p></section>;
@@ -54,7 +53,7 @@ export default function DomainPanel({
         <span className="muted small">읽기 전용 · 규칙은 개선 제안 탭에서 제안을 승인해야만 바뀝니다</span>
       </nav>
       {section === "overview" && <Overview def={def} dataset={dataset} busy={busy} onGenerate={onGenerate} />}
-      {section === "params" && <Params def={def} history={history} />}
+      {section === "params" && <Params def={def} domainName={domainName} datasetId={dataset?.id ?? null} metrics={adapter.metrics} />}
       {section === "rules" && <Rules def={def} adapter={adapter} />}
       {section === "spec" && <Spec def={def} />}
       {section === "data" && (
@@ -142,39 +141,130 @@ function show(value: unknown): string {
   return String(value);
 }
 
-function Params({ def, history }: { def: DomainDefinition; history: HistoryRow[] }) {
+const KIND_INFO: Record<ParamKind, { label: string; tip: string }> = {
+  policy: { label: "정책", tip: "정책 손잡이. AI 개선안이 허용 범위 안에서 바꿀 수 있다" },
+  estimate: { label: "추정값", tip: "현실 추정값. 실적 근거가 있을 때 사람이 바꾼다. 개선안이 바꾸면 가정만 바뀌어 적용 불가" },
+  fixed: { label: "고정", tip: "고정값. 바꾸지 않는다" },
+  governance: { label: "통제", tip: "승인 조건 같은 통제 설정. AI가 자기 가드레일을 풀 수 없게 개선안으로 바꿀 수 없다" },
+};
+
+// 민감도 한 칸: 허용 범위 안에서 값을 바꿨을 때 지표의 최소~최대 (건수). 폭이 0이면 의미 없는 손잡이
+function SpreadCell({ rows, path, metric, spec }: { rows: SensitivityRow[]; path: string; metric: string; spec?: MetricSpec }) {
+  const own = rows.filter((r) => r.path === path || r.path.startsWith(`${path}[`));
+  if (!own.length) return <td className="muted">–</td>;
+  return (
+    <td className="num-cell wrap small">
+      {own.map((r) => {
+        const range = r.ranges[metric];
+        if (!range) return null;
+        const lo = spec?.format === "pct" ? Math.round(range.min * r.items) : range.min;
+        const hi = spec?.format === "pct" ? Math.round(range.max * r.items) : range.max;
+        const idx = r.path.slice(path.length);
+        return (
+          <div key={r.path} title={`${r.path}: 허용 범위 ${r.bounds[0]}~${r.bounds[1]}를 ${r.values.length}단계로`}>
+            {idx && <span className="muted">{idx} </span>}
+            {lo === hi ? <span className="muted">변화 없음</span> : `${lo.toLocaleString()} ~ ${hi.toLocaleString()}`}
+            {lo !== hi && r.flat_around_current && (
+              <span className="muted" title="현재 값을 포함한 이 구간에서는 값을 바꿔도 결과가 같습니다"> ({r.flat_around_current[0]}~{r.flat_around_current[1]} 변화 없음)</span>
+            )}
+          </div>
+        );
+      })}
+    </td>
+  );
+}
+
+const shown = (v: unknown) => (v === null || v === undefined ? "기록 없음" : JSON.stringify(v));
+
+// 변경 이력 카드 (M13-E): 승인으로 규칙 버전이 오를 때마다 하나
+function ChangeCardView({ card: c, metrics }: { card: ChangeCard; metrics: MetricSpec[] }) {
+  const primary = metrics.filter((m) => m.primary || m.key === "on_time_rate").slice(0, 3);
+  return (
+    <article className="change-card">
+      <h3>v{c.version_before ?? "?"} → v{c.version_after} · {c.title ?? c.proposal_id}</h3>
+      <div className="small">
+        {c.changes.map((ch) => <div key={ch.path}><code>{ch.path}</code>: {shown(ch.before)} → {JSON.stringify(ch.after)}</div>)}
+        {c.override_rules.map((r, i) => (
+          <div key={i}>
+            {TERMS.overrides.label} <code>{JSON.stringify(r.when)}</code> 이면{" "}
+            {Object.entries(r.set).map(([p, v]) => <span key={p}><code>{p}</code>: {r.before ? shown(r.before[p]) : "기록 없음"} → {JSON.stringify(v)} </span>)}
+          </div>
+        ))}
+        {c.metrics_before && c.metrics_after && (
+          <div className="muted">
+            {primary.map((m) => `${m.label} ${fmtMetric(c.metrics_before![m.key], m.format)} → ${fmtMetric(c.metrics_after![m.key], m.format)}`).join(" · ")}
+            {c.violations_after != null && ` · 규칙 위반 ${c.violations_after}건`}
+          </div>
+        )}
+        <div className="muted">
+          근거 {c.findings.length ? c.findings.map((f) => `${f.id} ${f.title ?? ""}`).join(", ") : "–"} · 승인자 {c.approver ?? "기록 없음"}
+          {c.forced && " · 강제 승인"}{c.at ? ` · ${new Date(c.at * 1000).toLocaleString()}` : ""}
+        </div>
+        {c.note && <div>사유: {c.note}</div>}
+      </div>
+    </article>
+  );
+}
+
+function Params({ def, domainName, datasetId, metrics }: {
+  def: DomainDefinition; domainName: string; datasetId: string | null; metrics: MetricSpec[];
+}) {
   const overrides = (def.params.overrides ?? {}) as { allowed_sections?: string[]; rules?: { when: Record<string, unknown>; set: Record<string, unknown> }[] };
   const sections = Object.entries(def.params).filter(([k]) => k !== "version" && k !== "overrides") as [string, Record<string, unknown>][];
-  const approved = history.filter((h) => h.status === "approved" && h.kind === "params");
+  const [sens, setSens] = useState<Sensitivity | null>(null);
+  const [sensError, setSensError] = useState<string | null>(null);
+  const [cards, setCards] = useState<ChangeCard[]>([]);
+  useEffect(() => {
+    api.paramsHistory(domainName).then(setCards).catch(() => undefined);
+  }, [domainName]);
+  useEffect(() => {
+    if (!datasetId) return;
+    setSens(null);
+    api.sensitivity(datasetId).then(setSens).catch((e) => setSensError(String(e)));
+  }, [datasetId]);
+  const sensMetrics = (sens?.metrics ?? []).map((k) => metrics.find((m) => m.key === k)).filter(Boolean) as MetricSpec[];
   return (
     <div className="domain-stack">
       <p className="muted small">
-        <code>{def.files["params.yaml"]}</code> · 버전 v{String(def.params.version)}. 개선 제안은 {TERMS.bounds.label} 안에서만 값을 바꿀 수 있고,
-        {TERMS.bounds.label}와 설명은 바꿀 수 없습니다. 범위의 최솟값과 최댓값이 같으면 고정값입니다.
+        <code>{def.files["params.yaml"]}</code> · 버전 v{String(def.params.version)}. AI 개선 제안은 <strong>정책</strong> 파라미터만 {TERMS.bounds.label} 안에서
+        바꿀 수 있습니다. 추정값·고정·통제 파라미터와 {TERMS.bounds.label}·설명·분류는 바꿀 수 없습니다.
+      </p>
+      <p className="muted small">
+        {datasetId
+          ? sens
+            ? <>민감도: 지금 데이터({sens.rows[0]?.items.toLocaleString() ?? "–"}건)로 정책 파라미터를 허용 범위 안에서 {sens.steps}단계로 바꿔 규칙 방식으로 돌린 결과입니다 (AI 비용 0, {sens.seconds.toFixed(1)}초). "변화 없음"은 움직여도 결과가 같은 손잡이입니다.</>
+            : sensError ? <span className="critical-text">✕ 민감도 계산 실패: {sensError}</span> : "민감도 계산 중… (규칙 방식으로 수십 번 돌립니다, AI 비용 0)"
+          : "비교 탭에서 데이터를 만들면 파라미터마다 결과가 얼마나 움직이는지(민감도)도 함께 보입니다."}
       </p>
       {sections.map(([name, section]) => {
         const bounds = (section.bounds ?? {}) as Record<string, [number, number]>;
         const docs = (section.docs ?? {}) as Record<string, string>;
+        const kinds = (section.kinds ?? {}) as Record<string, ParamKind>;
         return (
           <div key={name} className="panel">
             <h2><code>{name}</code></h2>
-            <table className="param-table fixed">
-              <colgroup><col style={{ width: "20%" }} /><col style={{ width: "24%" }} /><col style={{ width: "11%" }} /><col /></colgroup>
-              <thead><tr><th>항목</th><th>현재 값</th><th title={tip("bounds")}>{TERMS.bounds.label}</th><th>설명</th></tr></thead>
+            <div className="table-scroll">
+            <table className="param-table">
+              <thead><tr><th>항목</th><th title="AI 개선안이 바꿀 수 있는지">분류</th><th>현재 값</th><th title={tip("bounds")}>{TERMS.bounds.label}</th>
+                {sensMetrics.map((m) => <th key={m.key} title={`${m.label} × 전체 건수의 최소~최대`}>{m.label} 범위</th>)}<th>설명</th></tr></thead>
               <tbody>
                 {Object.entries(section).filter(([k]) => !META.has(k)).map(([key, value]) => {
                   const b = bounds[key];
+                  const kind = kinds[key] ?? "policy";
                   return (
                     <tr key={key}>
                       <td><code>{key}</code></td>
+                      <td><span className={`kind-badge kind-${kind}`} title={KIND_INFO[kind].tip}>{KIND_INFO[kind].label}</span></td>
                       <td className="num-cell wrap">{show(value)}</td>
                       <td className="muted">{b ? (b[0] === b[1] ? `고정 ${b[0]}` : `${b[0]} ~ ${b[1]}`) : "–"}</td>
+                      {sensMetrics.map((m) => <SpreadCell key={m.key} rows={sens!.rows} path={`${name}.${key}`} metric={m.key} spec={m} />)}
                       <td>{docs[key] ?? <span className="muted">–</span>}</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         );
       })}
@@ -195,22 +285,9 @@ function Params({ def, history }: { def: DomainDefinition; history: HistoryRow[]
         ) : <p className="muted">없음</p>}
       </div>
       <div className="panel">
-        <h2>승인 이력</h2>
-        {approved.length ? (
-          <table className="param-table">
-            <thead><tr><th>회차</th><th>{TERMS.proposal.label}</th><th>버전</th><th>메모</th></tr></thead>
-            <tbody>
-              {approved.map((h) => (
-                <tr key={h.proposal_id}>
-                  <td>{h.round ?? "–"}</td>
-                  <td>{h.title}</td>
-                  <td>v{h.decision?.params_version_before} → v{h.decision?.params_version_after}</td>
-                  <td className="muted">{h.decision?.note || "–"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : <p className="muted">승인된 {TERMS.params.label} 변경이 아직 없습니다.</p>}
+        <h2>변경 이력</h2>
+        {cards.length ? cards.map((c) => <ChangeCardView key={c.proposal_id} card={c} metrics={metrics} />)
+          : <p className="muted">승인된 {TERMS.params.label} 변경이 아직 없습니다.</p>}
       </div>
     </div>
   );

@@ -81,6 +81,10 @@ def test_sensitivity_shows_flat_knobs(setup):
     stage2 = rows["matching.area_extension_km[1]"]
     within = [pt["metrics"] for pt in stage2["points"] if pt["values"]["matching.area_extension_km[1]"] <= 3]
     assert len(within) >= 2 and all(m == within[0] for m in within)
+    assert stage2["flat_around_current"][0] == 0 and stage2["flat_around_current"][1] >= 3   # 화면: "0~3 변화 없음"
+    # 이 데이터에서는 관할 확장이 어느 단계든 0~3km에서 효과가 없고 4km부터 달라진다 (경계 지역 고객이 3km 밖에 있음)
+    stage3 = rows["matching.area_extension_km[2]"]
+    assert stage3["flat_around_current"] == [0, 3] and stage3["ranges"]["assignment_rate"]["spread"] > 0
     assert rows["matching.area_extension_km[2]"]["ranges"]["assignment_rate"]["spread"] > 0
     r = rows["matching.area_extension_km[2]"]
     assert r["values"][0] == 0 and r["values"][-1] == 5 and r["current"] == 3 and len(r["points"]) == len(r["values"])

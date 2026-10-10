@@ -7,6 +7,7 @@ import { fmtMetric, fmtSeconds, fmtUsd } from "./MetricsPanel";
 import { usePoll } from "./usePoll";
 import { TERMS, tip } from "../terms";
 import Details from "./Details";
+import TradeoffMap from "./TradeoffMap";
 
 const STATUS_LABEL: Record<Proposal["status"], string> = {
   proposed: "제안됨",
@@ -19,6 +20,24 @@ const STATUS_LABEL: Record<Proposal["status"], string> = {
 };
 
 const HUMAN_HOURS_KEY = "oah.humanHoursPerCycle";
+
+const APPROVER_KEY = "oah.approver";
+
+function readApprover(): string {
+  try {
+    return localStorage.getItem(APPROVER_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function saveApprover(v: string) {
+  try {
+    localStorage.setItem(APPROVER_KEY, v);
+  } catch {
+    /* 저장 못 해도 승인은 된다 */
+  }
+}
 
 function readHumanHours(): number | null {
   try {
@@ -44,7 +63,9 @@ export default function ImprovementPanel({
   reportId,
   batchId,
   setBatchId,
+  datasetId,
 }: {
+  datasetId: string | null;              // 득실 지도(M13)를 그릴 데이터
   domainName: string;
   adapter: DomainAdapter;
   harness: HarnessInfo | null;
@@ -212,6 +233,10 @@ export default function ImprovementPanel({
       </div>
       </Details>
 
+      <TradeoffMap datasetId={datasetId} params={current?.params ?? null} proposals={batch?.proposals ?? []}
+        constraints={batch?.meta?.constraints ?? []} specs={adapter.metrics}
+        defaultAxes={adapter.tradeoff?.axes} defaultMetrics={adapter.tradeoff?.metrics} />
+
       <div className="proposal-list">
         {batch?.proposals.map((p) => (
           <ProposalCard key={p.id} proposal={p} current={current} specs={adapter.metrics} harness={harness} scopes={scopes}
@@ -337,6 +362,7 @@ function ProposalCard({
   onApproved: (message: string) => void;
 }) {
   const [note, setNote] = useState("");
+  const [approver, setApprover] = useState(readApprover);   // 변경 이력 카드에 남는다 (M13)
   const [estimate, setEstimate] = useState<SpecEstimate | null>(null);
   const [level, setLevel] = useState("L3");
   const pilotScopes = scopes.filter((s) => s.items);
@@ -357,7 +383,7 @@ function ProposalCard({
     });
 
   return (
-    <article className={`proposal proposal-${p.status}`}>
+    <article className={`proposal proposal-${p.status}`} id={`proposal-${p.id}`}>
       <header>
         <strong>{p.body.title}</strong>
         <span className="chip" title={tip(p.kind === "params" ? "params" : "spec")}>
@@ -413,10 +439,12 @@ function ProposalCard({
             {p.status === "simulated" ? `다시 ${TERMS.simulate.label}` : TERMS.simulate.label}
           </button>
           <input className="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="승인·반려 메모" />
+          <input className="approver" value={approver} onChange={(e) => { setApprover(e.target.value); saveApprover(e.target.value); }}
+            placeholder="승인자 (선택)" aria-label="승인자 이름" title="변경 이력 카드에 남습니다. 로그인이 없어 직접 적습니다 (이 브라우저에 기억)" />
           <button className="primary" disabled={busy || p.status !== "simulated"}
             title={p.status !== "simulated" ? "미리 돌려본 뒤 승인할 수 있습니다" : undefined}
             onClick={() => guard("승인 반영 중", async () => {
-              const r = await api.approve(p.id, note);
+              const r = await api.approve(p.id, note, false, approver);
               onApproved(r.kind === "params"
                 ? `${TERMS.params.label}을 v${r.decision?.params_version_after}로 반영했습니다(params.yaml). git 커밋은 직접 해주세요.`
                 : `${TERMS.spec.label}에 반영했습니다(domain-spec.md). git 커밋은 직접 해주세요.`);

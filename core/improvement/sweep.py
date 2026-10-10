@@ -99,6 +99,19 @@ def _steps(lo, hi, n: int, current) -> list:
     return sorted(vals)
 
 
+def _flat_span(values: list, points: list[dict], current) -> list | None:
+    """현재 값을 포함해 지표가 전혀 바뀌지 않는 연속 구간 [lo, hi]. 현재 값 하나뿐이면 None.
+    폭 전체로는 움직여도, 현재 값 근처에서 의미 없는 손잡이인지를 보여 준다."""
+    i = values.index(current)
+    same = lambda j: points[j]["metrics"] == points[i]["metrics"] and points[j]["violations"] == points[i]["violations"]  # noqa: E731
+    lo = hi = i
+    while lo > 0 and same(lo - 1):
+        lo -= 1
+    while hi < len(values) - 1 and same(hi + 1):
+        hi += 1
+    return [values[lo], values[hi]] if hi > lo else None
+
+
 def sensitivity(pack_factory, instance, base_params: dict, steps: int | None = None,
                 metrics: list[str] | None = None) -> dict:
     """policy 파라미터마다(목록이면 원소마다) 허용 범위를 steps단계로 돌려 지표가 움직인 폭을 표로.
@@ -131,5 +144,6 @@ def sensitivity(pack_factory, instance, base_params: dict, steps: int | None = N
                     ranges[m] = {"min": min(xs), "max": max(xs), "spread": max(xs) - min(xs)}
             rows.append({"path": target, "kind": DEFAULT_KIND, "bounds": list(bound), "current": current,
                          "values": values, "points": out["points"], "ranges": ranges,
+                         "flat_around_current": _flat_span(values, out["points"], current),
                          "items": out["points"][0]["items"] if out["points"] else 0})
     return {"rows": rows, "metrics": metrics, "steps": steps, "seconds": round(time.time() - started, 2)}

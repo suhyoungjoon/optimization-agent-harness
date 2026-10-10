@@ -27,6 +27,7 @@ export const dispatchAdapter: DomainAdapter = {
     },
     View: DispatchDataMap,
   },
+  tradeoff: { axes: ["matching.area_extension_km[2]", "matching.time_window_min[2]"], metrics: ["assignment_rate", "on_time_rate"] },
   metrics: [
     { key: "assignment_rate", label: "배정 성공률", format: "pct", headline: true, primary: true, better: "up",
       tech: "할당성공률: 배정된 지시서 ÷ 전체 지시서" },
