@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { DomainAdapter } from "../domains/types";
-import type { Dataset, DecisionRecord, DomainInfo, Finding, FindingLabel, Report, Run, ToolCall } from "../types";
+import type { Dataset, DecisionRecord, Dimensions, DomainInfo, Finding, FindingLabel, Report, Run, ToolCall } from "../types";
 import { fmtSeconds, fmtUsd } from "./MetricsPanel";
 import { usePoll } from "./usePoll";
 import { TERMS, tip } from "../terms";
@@ -53,7 +53,18 @@ export default function AnalysisPanel({
 
   const findings = current?.body?.findings ?? [];
   const focused = findings.find((f) => f.id === focus) ?? null;
-  const highlight = useMemo(() => (focused?.slice ? itemsInSlice(decisions, focused.slice) : null), [focused, decisions]);
+  const resourceSpecs = domain.dimensions.resources ?? {};
+  const highlight = useMemo(() => {
+    if (!focused) return null;
+    const idField = focused.resources ? resourceSpecs[focused.resources.kind]?.id_field : undefined;
+    if (!focused.slice && !idField) return null;
+    // 자원 발견이면 그 자원이 맡은 항목, 구간도 있으면 둘 다 만족하는 항목
+    const inSlice = focused.slice ? itemsInSlice(decisions, focused.slice) : decisions.map((d) => d.item_id);
+    if (!idField) return inSlice;
+    const ids = new Set(focused.resources!.ids.map(String));
+    const mine = new Set(decisions.filter((d) => ids.has(String(d.decision?.[idField]))).map((d) => d.item_id));
+    return inSlice.filter((id) => mine.has(id));
+  }, [focused, decisions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const guard = async (label: string, fn: () => Promise<void>) => {
     setBusy(label);
@@ -171,6 +182,7 @@ export default function AnalysisPanel({
                   metricLabels={Object.fromEntries(adapter.metrics.map((m) => [m.key, m.label]))}
                   dimensionLabels={Object.fromEntries(Object.entries(domain.dimensions.dimensions).map(([k, v]) => [k, v.label]))}
                   valueNames={adapter.valueNames ?? {}}
+                  resourceSpecs={resourceSpecs}
                   matched={Object.entries(current.score!.faults).filter(([, s]) => s.matched_findings.includes(f.id)).map(([fid]) => fid)}
                   causeCheck={Object.entries(current.score!.faults).filter(([, s]) => s.confirm_cause && s.matched_findings.includes(f.id)).map(([fid]) => fid)}
                   label={current.score!.labels[f.id]}
@@ -258,6 +270,7 @@ function FindingCard({
   metricLabels,
   dimensionLabels,
   valueNames,
+  resourceSpecs,
   matched,
   causeCheck,
   label,
@@ -272,6 +285,7 @@ function FindingCard({
   metricLabels: Record<string, string>;
   dimensionLabels: Record<string, string>;
   valueNames: Record<string, string>;
+  resourceSpecs: NonNullable<Dimensions["resources"]>;
   matched: string[];
   causeCheck: string[];      // 이 발견이 맞춘 정답 중 사람이 원인을 확인해야 하는 것
   label?: FindingLabel;
@@ -319,6 +333,16 @@ function FindingCard({
         {(finding.perspective_names ?? []).map((name) => (
           <span key={name} className="chip chip-perspective" title="이 발견을 찾은 관점">관점: {name}</span>
         ))}
+        {finding.resources && (() => {
+          const spec = resourceSpecs[finding.resources.kind];
+          const traits = Object.entries(finding.resources.traits ?? {})
+            .map(([k, v]) => `${spec?.traits?.[k]?.label ?? k} ${v.join(", ")}`);
+          return (
+            <span className="chip chip-perspective" title="이 발견이 가리키는 자원 (인용한 도구 결과에서 확인됨). 누르면 지도에서 이 자원이 맡은 항목을 강조합니다">
+              {spec?.label ?? finding.resources.kind}: {finding.resources.ids.join(", ")}{traits.length ? ` · ${traits.join(" · ")}` : ""}
+            </span>
+          );
+        })()}
         {(finding.related ?? []).length > 0 && (
           <span className="chip chip-perspective" title="구간이 겹치는 다른 발견 (한쪽이 다른 쪽을 더 좁힌 구간). 같은 문제를 다른 크기로 본 것일 수 있습니다">
             관련: {finding.related!.join(", ")}
@@ -340,6 +364,14 @@ function FindingCard({
       </div>
       <Details summary={`상세보기 (설명${finding.hypothesis ? " · 추정 원인" : ""}${finding.alternatives?.length ? ` · 다른 관점의 해석 ${finding.alternatives.length}건` : ""} · ${TERMS.evidence.label} ${finding.cited_calls.length}건)`}>
         <p>{finding.description}</p>
+        {finding.resources_removed && (
+          <p className="muted small" title="인용한 도구 결과에서 확인되지 않아 뺀 자원·속성입니다">
+            자원에서 뺀 항목: {[finding.resources_removed.kind && `종류 ${finding.resources_removed.kind}`,
+              (finding.resources_removed.ids ?? []).length ? `id ${finding.resources_removed.ids!.join(", ")}` : "",
+              ...Object.entries(finding.resources_removed.traits ?? {}).map(([k, v]) => `${k}=${v.join(", ")}`)]
+              .filter(Boolean).join(" · ")}
+          </p>
+        )}
         {finding.slice_removed && (
           <p className="muted small" title="AI가 선언되지 않은 차원·값으로 구간을 적어 그 항목만 뺐습니다 (지도 강조·정답 대조에 쓰지 않음)">
             구간에서 뺀 항목: {Object.entries(finding.slice_removed).map(([d, v]) => `${d}=${v.join(", ")}`).join(" · ")}

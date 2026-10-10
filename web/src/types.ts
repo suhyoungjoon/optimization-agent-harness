@@ -28,6 +28,8 @@ export interface TraceRecord {
 
 export interface Dimensions {
   dimensions: Record<string, { label: string; values?: string[]; format?: string }>;
+  // 자원 단위 발견 (M12-d): 발견의 resources에 적을 수 있는 자원 종류
+  resources?: Record<string, { label: string; id_field: string; traits?: Record<string, { label: string }> }>;
   reason_codes: Record<string, string>;
   violation_rules: Record<string, string>;
 }
@@ -169,6 +171,14 @@ export interface Finding {
   alternatives?: FindingAlternative[];
   related?: string[];   // 구간이 겹치는(한쪽이 더 좁은) 다른 발견 ID
   slice_removed?: Record<string, string[]>;   // 선언되지 않은 차원·값이라 구간에서 뺀 것
+  resources?: FindingResources;               // 자원 단위 발견 (M12-d)
+  resources_removed?: { kind?: string; ids?: string[]; traits?: Record<string, string[]> };   // 인용 결과에 없어 뺀 것
+}
+
+export interface FindingResources {
+  kind: string;
+  ids: string[];
+  traits?: Record<string, string[]>;
 }
 
 export interface FindingAlternative {
