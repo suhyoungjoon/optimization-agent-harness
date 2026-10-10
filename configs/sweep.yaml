@@ -1,0 +1,4 @@
+# 파라미터 탐색 (M13): 규칙 엔진으로 조합마다 solve → metrics → validate를 돌린다 (AI 비용 0).
+max_points: 50          # 한 번에 돌릴 조합 수 상한 (1,500건 기준 25개 조합에 약 5초)
+sensitivity_steps: 5    # 1차원 민감도: 허용 범위를 몇 단계로 나눌지 (현재 값은 항상 포함)
+sensitivity_metrics: [assignment_rate, on_time_rate]   # 민감도 표에서 폭을 볼 지표

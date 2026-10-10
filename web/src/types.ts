@@ -356,6 +356,70 @@ export interface HistoryRow {
   cycle: { analysis_seconds?: number; proposal_seconds?: number; simulation_seconds?: number; llm_cost_usd: number | null };
 }
 
+// --- M13: 파라미터 가시화 ---
+export type ParamKind = "policy" | "estimate" | "fixed" | "governance";
+
+export interface SweepAxis {
+  path: string;
+  values: unknown[];
+}
+
+export interface SweepPoint {
+  values: Record<string, unknown>;
+  metrics: Record<string, number>;
+  violations: number;
+  items: number;
+}
+
+export interface SweepResult {
+  axes: (SweepAxis & { kind: ParamKind })[];
+  points: SweepPoint[];
+  base: SweepPoint;
+  warnings: string[];
+  seconds: number;
+  cached: boolean;
+  params_version: number;
+}
+
+export interface SensitivityRow {
+  path: string;
+  kind: ParamKind;
+  bounds: [number, number];
+  current: number;
+  values: number[];
+  points: SweepPoint[];
+  ranges: Record<string, { min: number; max: number; spread: number }>;
+  flat_around_current: [number, number] | null;   // 현재 값을 포함해 결과가 같은 구간
+  items: number;
+}
+
+export interface Sensitivity {
+  rows: SensitivityRow[];
+  metrics: string[];
+  steps: number;
+  seconds: number;
+  cached: boolean;
+}
+
+// 변경 이력 카드: 승인으로 params 버전이 오를 때마다 하나 (before가 null이면 M13 이전 기록이라 "기록 없음")
+export interface ChangeCard {
+  proposal_id: string;
+  report_id: string | null;
+  title: string | null;
+  version_before: number | null;
+  version_after: number;
+  changes: { path: string; before: unknown; after: unknown }[];
+  override_rules: { when: Record<string, unknown>; set: Record<string, unknown>; before: Record<string, unknown> | null }[];
+  findings: { id: string; title: string | null }[];
+  metrics_before: Record<string, number> | null;
+  metrics_after: Record<string, number> | null;
+  violations_after: number | null;
+  approver: string | null;
+  note: string | null;
+  forced: boolean;
+  at: number | null;
+}
+
 // --- Agent workflow (LangGraph, M9) ---
 export interface WorkflowNode {
   id: string;

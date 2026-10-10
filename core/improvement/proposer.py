@@ -7,6 +7,7 @@
 import json
 
 from core.llm.client import LLMClient
+from core.params import params_view
 from core.llm.tool_loop import run_tool_loop, usage_dict
 
 from .changes import apply_params, params_errors, spec_errors, spec_sections
@@ -20,6 +21,8 @@ SYSTEM = """너는 최적화 규칙의 개선안을 설계한다. 분석 리포�
 개선안 종류:
 - params: 규칙 파라미터 변경. params_changes(전역 값 변경)와 override_rules(특정 구간에만 적용할 규칙)를 쓴다.
   - 경로 형식: "섹션.키" 또는 "섹션.키[인덱스]". 값은 각 섹션 bounds 안이어야 한다.
+  - 바꿀 수 있는 것은 분류(kinds)가 policy인 파라미터뿐이다 (get_params의 changeable).
+    estimate(현실 추정값)·fixed·governance(승인 조건 같은 통제)는 참고 정보이며, 바꾸는 안은 적용 불가다.
   - override_rules의 when은 선언된 차원만, set은 overrides.allowed_sections의 섹션만 바꿀 수 있다.
   - 문제가 특정 구간에만 있으면 전역 변경보다 override_rules를 우선한다 (다른 구간 지표를 흔들지 않도록).
 - spec: AI agent가 읽는 도메인 명세(고정 섹션)의 본문 수정. spec_edits에 섹션 제목과 새 본문 전체를 쓴다.
@@ -83,7 +86,7 @@ def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: di
     trials: list[dict] = []
 
     def get_params(args):
-        return {"params": params}
+        return {"params": params, **params_view(params)}
 
     def get_spec(args):
         return {"sections": spec_sections(spec_text)}

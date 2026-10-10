@@ -90,12 +90,19 @@ version: 1                     # 승인될 때마다 코어가 올린다
   <키>: 값                     # 숫자, 숫자 리스트, 숫자 딕셔너리
   docs: {<키>: 설명}           # 파라미터 의미. 도메인 탭과 개선 agent에 그대로 보인다. 모든 키에 필수(계약 테스트)
   bounds: {<키>: [min, max]}   # 개선 루프는 이 범위 안에서만 바꾼다. 숫자 키에 bounds가 없으면 check_params가 거부
+  kinds: {<키>: 분류}          # (선택, M13) policy | estimate | fixed | governance. 없으면 policy
 overrides:                     # 구간 조건: when의 차원 값에 해당하는 항목에만 set 적용
   allowed_sections: [...]      # validate가 쓰는 섹션은 넣지 않는다 (검증 기준이 구간마다 달라지면 안 된다)
   rules: []                    # {when: {<차원>: 값|[값]}, set: {"<섹션>.<키>[i]": 값}}
 ```
 
-`bounds`와 `docs`는 파라미터가 아니라 메타 키다. 개선안이 `섹션.bounds`나 `섹션.docs` 경로를 바꾸려 하면 검증에서 거부한다(허용 범위를 넓혀 검사를 우회하는 것을 막는다). 값을 고정하려면 bounds의 최솟값과 최댓값을 같게 둔다.
+`kinds`는 파라미터의 성격이다. 개선안은 `policy`(정책 손잡이)만 바꿀 수 있다.
+- `estimate`(현실 추정값. 예: 작업소요, 이동 속도)는 실적 근거로 사람이 바꾼다. 개선안이 바꾸면 가정만 바뀌는 "가짜 개선"이 되므로 적용 불가다.
+- `fixed`(고정값)도 바꿀 수 없다.
+- `governance`(승인 조건 같은 통제 설정)도 바꿀 수 없다. AI가 자기 가드레일을 풀지 못하게 하기 위해서다.
+- 구간 조건(`overrides.rules`의 `set`)에도 같은 규칙이 적용된다.
+
+`bounds`·`docs`·`kinds`는 파라미터가 아니라 메타 키다. 개선안이 `섹션.bounds`·`섹션.docs`·`섹션.kinds` 경로를 바꾸려 하면 검증에서 거부한다(허용 범위를 넓혀 검사를 우회하는 것을 막는다). 값을 고정하려면 bounds의 최솟값과 최댓값을 같게 둔다.
 
 경로 표기와 검사는 `core/params.py`(`get_path`, `apply_overrides`, `check_params`)가 도메인 공통으로 처리한다. `solve`는 항목마다 `apply_overrides(params, dims)`를 적용한 값을 써야 구간 조건이 효과를 낸다.
 

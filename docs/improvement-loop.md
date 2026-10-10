@@ -187,6 +187,33 @@ spec 개선안(③)은 AI agent를 개선 전 명세·개선 후 명세로 각�
 | 기억 | 발견 판정 기억 항목에 자원 요약이 들어간다 (예: "자원 worker WB01, WB04") |
 | 화면 | 카드에 "작업자: WB01, WB04 · 가능시간 13:00-18:00" 칩. 카드를 누르면 지도에서 그 자원이 맡은 항목을 강조한다 (`id_field`) |
 
+## 10. 파라미터 분류와 탐색 (M13)
+
+파라미터는 성격이 다르다. `params.yaml`의 `kinds`로 나눈다. 분류가 없는 키는 `policy`로 본다.
+
+| 분류 | 뜻 | 개선안 | dispatch |
+|---|---|---|---|
+| `policy` | 정책 손잡이 | 허용 범위 안에서 바꿀 수 있다 | `matching`, `cei` |
+| `estimate` | 현실 추정값 | **적용 불가.** 실적 근거로 사람이 바꾼다 | `duration`, `weights`, `travel.avg_speed_kmh` |
+| `fixed` | 고정값 | 적용 불가 | `travel.detour_factor` |
+| `governance` | 승인 조건 같은 통제 설정 | 적용 불가. AI가 자기 가드레일을 풀 수 없게 | `approval_required` |
+
+- `params_errors`가 전역 값과 구간 조건 모두를 검사하고, 분류별 사유를 돌려준다. 예: "추정값은 실적 근거로만 사람이 바꾼다".
+- 개선 에이전트의 `get_params` 결과에는 바꿀 수 있는 경로(`changeable`)와 참고만 할 경로(`reference_only`, 분류별 사유)가 함께 간다.
+- 왜 막는가: 개통 작업소요를 60분에서 45분으로 줄이면 배정·정시가 모두 좋아지고 규칙 위반도 0이다. 그러나 이것은 "작업이 빨리 끝난다"고 가정한 것일 뿐이고, `validate()`도 같은 추정값으로 판정하므로 막지 못한다(실험 보고서 6.12절).
+
+**탐색** (`core.improvement.sweep`, 규칙 엔진, AI 비용 0)
+- `sweep_params(pack_factory, instance, base_params, axes, metrics)`: 축 1~2개의 조합마다 solve → metrics → validate.
+  - 조합 수 상한은 `configs/sweep.yaml`(50개)에서 읽는다.
+  - 정책이 아닌 축도 탐색은 하되, 분류와 경고를 결과에 붙인다.
+- `sensitivity(...)`: 정책 파라미터마다 허용 범위를 몇 단계로 돌려 지표가 움직인 폭과 현재 값 주변의 "변화 없음" 구간을 보여 준다. 의미 없는 손잡이가 드러난다.
+- API: `POST /params/sweep`, `GET /params/sensitivity`. 같은 데이터셋·규칙 버전·축이면 서버 메모리에 캐시한다.
+
+**변경 이력 카드** (`core.improvement.history`)
+- 승인으로 규칙 버전이 오를 때마다 카드 하나: 바뀐 값(전→후), 근거 발견, 전후 지표, 승인자와 사유.
+- 이미 저장된 기록으로 만든다. 승인할 때 결정(`decision`)에 승인자(`approver`)와 바뀌기 전 값을 더 남긴다. DB 스키마는 그대로이고, 그 전 기록은 "기록 없음"으로 보인다.
+- API: `GET /params/history?domain=`.
+
 ## 역할 정리
 
 | 누가 | 하는 일 |

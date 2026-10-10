@@ -1,6 +1,6 @@
 import type {
   CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DomainDefinition, DecisionRecord, DomainInfo, FindingLabel, HarnessInfo, Memory, HistoryRow, Proposal, ProposalBatch, Report, Run,
-  SpecEstimate, TraceRecord, WorkflowGraph, WorkflowRun, AgentsGraph, AgentsRun,
+  SpecEstimate, TraceRecord, WorkflowGraph, WorkflowRun, AgentsGraph, AgentsRun, SweepAxis, SweepResult, Sensitivity, ChangeCard,
 } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -85,11 +85,16 @@ export const api = {
   simulate: (id: string, body: { confirm?: boolean; level?: string; scope?: string[] } = {}) =>
     request<Proposal | { needs_confirmation: true; estimate: SpecEstimate } | { id: string; status: string }>(
       `/proposals/${id}/simulate`, { method: "POST", body: JSON.stringify(body) }),
-  approve: (id: string, note: string, force = false) =>
-    request<Proposal>(`/proposals/${id}/approve`, { method: "POST", body: JSON.stringify({ note, force }) }),
+  approve: (id: string, note: string, force = false, approver = "") =>
+    request<Proposal>(`/proposals/${id}/approve`, { method: "POST", body: JSON.stringify({ note, force, approver }) }),
   reject: (id: string, note: string) =>
     request<Proposal>(`/proposals/${id}/reject`, { method: "POST", body: JSON.stringify({ note }) }),
   history: () => request<HistoryRow[]>("/history"),
+  // --- M13: 파라미터 가시화 (규칙 엔진만, AI 비용 0) ---
+  sweep: (datasetId: string, axes: SweepAxis[], metrics?: string[]) =>
+    request<SweepResult>("/params/sweep", { method: "POST", body: JSON.stringify({ dataset_id: datasetId, axes, metrics }) }),
+  sensitivity: (datasetId: string) => request<Sensitivity>(`/params/sensitivity?dataset_id=${encodeURIComponent(datasetId)}`),
+  paramsHistory: (domain: string) => request<ChangeCard[]>(`/params/history?domain=${encodeURIComponent(domain)}`),
   memory: (domain: string) => request<Memory>(`/memory?domain=${encodeURIComponent(domain)}`),
 
   // 진행 상황 SSE. 닫는 함수를 돌려준다.

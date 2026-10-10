@@ -315,6 +315,7 @@ export default function App() {
             reportId={reportId}
             batchId={batchId}
             setBatchId={setBatchId}
+            datasetId={dataset?.id ?? null}
           />
         )}
       </main>

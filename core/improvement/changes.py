@@ -7,7 +7,7 @@ spec 개선안:   {"spec_edits": [{"section": "고정 섹션 제목", "text": "�
 import copy
 import re
 
-from core.params import check_params, path_errors, set_path
+from core.params import check_params, kind_errors, path_errors, set_path
 
 
 def apply_params(params: dict, proposal: dict) -> dict:
@@ -27,6 +27,12 @@ def params_errors(params: dict, proposal: dict, dimensions: dict) -> list[str]:
     blocked = [e for c in proposal.get("params_changes") or [] for e in path_errors(str(c.get("path", "")))]
     if blocked:
         return blocked
+    # 분류 (M13): policy가 아닌 값은 전역 값으로도, 구간 조건으로도 바꿀 수 없다
+    kinds = [e for c in proposal.get("params_changes") or [] for e in kind_errors(params, str(c.get("path", "")))]
+    kinds += [e for i, r in enumerate(proposal.get("override_rules") or []) for path in (r.get("set") or {})
+              for e in kind_errors(params, str(path), f"override_rules[{i}].set.{path}")]
+    if kinds:
+        return kinds
     try:
         candidate = apply_params(params, proposal)
     except (ValueError, KeyError, IndexError, TypeError) as exc:

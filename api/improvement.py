@@ -3,6 +3,8 @@
 분석 agent에게는 정답표를 주지 않는다. 채점 결과는 사람이 보는 화면에만 나간다.
 """
 
+import json
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,16 +20,20 @@ from core.evaluation.fault_scorer import apply_labels, score
 from core.evaluation.runner import create_ai_run, run_ai_agent
 from core.harness.levels import load_levels
 from core.improvement.approval import write_params, write_spec
-from core.improvement.changes import apply_params, apply_spec
+from core.improvement.changes import apply_params, apply_spec, params_errors
+from core.improvement.history import change_card, change_record
 from core.improvement.constraints import constraint_errors, constraint_violations
 from core.improvement.memory import analysis_memory_text, collect_memory, proposal_memory_text
 from core.improvement.proposer import finding_slices, propose
 from core.improvement.simulate import simulate_params
+from core.improvement.sweep import sensitivity, sweep_params
 from core.interfaces import DecisionRecord
 from core.registry import load_pack, load_params, load_perspectives
 from core.storage.store import Store
 
 from .replay import equivalent_run_ids
+
+SWEEP_CACHE_MAX = 64   # 탐색 결과 캐시 항목 수 상한
 
 
 class AnalysisRequest(BaseModel):
@@ -40,6 +46,12 @@ class AnalysisRequest(BaseModel):
 class LabelRequest(BaseModel):
     finding_id: str
     label: Literal["valid", "false_positive", "cause_ok", "cause_wrong"] | None   # cause_*: 원인 확인 대상 발견
+
+
+class SweepRequest(BaseModel):
+    dataset_id: str
+    axes: list[dict]                       # [{path, values}] 1~2개
+    metrics: list[str] | None = None       # 없으면 도메인 지표 전부
 
 
 class ProposalRequest(BaseModel):
@@ -59,6 +71,7 @@ class SimulateRequest(BaseModel):
 class DecisionRequest(BaseModel):
     note: str = ""
     force: bool = False               # 시뮬레이션 없이 승인 (사유를 note에 남긴다)
+    approver: str = ""                # 승인자 이름 (선택, 로그인이 없어 자기 기재. 변경 이력 카드에 보인다)
 
 
 @dataclass
@@ -114,6 +127,46 @@ def estimate_spec_cost(store: Store, level: str, items: int) -> dict:
 
 def register(app: FastAPI, ctx: Context) -> None:
     store = ctx.store
+    sweep_cache: dict[str, dict] = {}     # (데이터셋, params 버전, 축) → 결과. 규칙 엔진이라 다시 계산해도 비용 0
+    approve_lock = threading.Lock()
+
+    # --- 파라미터 탐색 (M13) ---
+    def _sweep_context(dataset_id: str):
+        dataset = store.get_dataset(dataset_id)
+        if dataset is None:
+            raise HTTPException(404, f"unknown dataset: {dataset_id}")
+        params = load_params(load_pack(dataset["domain"]))
+        pack = load_pack(dataset["domain"], params)
+        instance, _truth = pack.generate(dataset["seed"], dataset["faults"])
+        return dataset, params, instance, (lambda p: load_pack(dataset["domain"], p))
+
+    def _cached(key: str, compute):
+        if key in sweep_cache:
+            return {**sweep_cache[key], "cached": True}
+        try:
+            result = compute()
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        sweep_cache[key] = result
+        while len(sweep_cache) > SWEEP_CACHE_MAX:   # 오래된 것부터 버린다 (dict는 넣은 순서)
+            sweep_cache.pop(next(iter(sweep_cache)))
+        return {**result, "cached": False}
+
+    @app.post("/params/sweep")
+    def params_sweep(req: SweepRequest):
+        """파라미터를 1~2개 축으로 바꿔 가며 규칙 엔진으로 돌린 점 목록 (AI 비용 0)."""
+        dataset, params, instance, factory = _sweep_context(req.dataset_id)
+        key = json.dumps(["sweep", req.dataset_id, params.get("version"), req.axes, req.metrics], sort_keys=True)
+        out = _cached(key, lambda: sweep_params(factory, instance, params, req.axes, req.metrics))
+        return {**out, "dataset_id": req.dataset_id, "params_version": params.get("version")}
+
+    @app.get("/params/sensitivity")
+    def params_sensitivity(dataset_id: str):
+        """policy 파라미터별 1차원 민감도: 허용 범위를 몇 단계로 돌려 지표가 움직인 폭."""
+        dataset, params, instance, factory = _sweep_context(dataset_id)
+        key = json.dumps(["sensitivity", dataset_id, params.get("version")])
+        out = _cached(key, lambda: sensitivity(factory, instance, params))
+        return {**out, "dataset_id": dataset_id, "params_version": params.get("version")}
 
     # --- 분석 ---
     @app.post("/analysis")
@@ -261,6 +314,9 @@ def register(app: FastAPI, ctx: Context) -> None:
         run, dataset, pack, instance, _truth, _decisions = _run_context(store, report["run_id"])
         if p["kind"] == "params":
             params = load_params(pack)
+            # 저장된 개선안도 지금 규칙으로 다시 검사한다 (분류 도입 전에 만든 안, 다른 안이 먼저 반영된 경우)
+            if errors := params_errors(params, p["body"], pack.dimensions()):
+                raise HTTPException(400, "지금 규칙 기준으로 적용할 수 없음: " + "; ".join(errors))
             candidate = apply_params(params, p["body"])
             result = simulate_params(lambda q: load_pack(pack.name, q), instance, params,
                                      candidate, finding_slices(report["body"]))
@@ -324,16 +380,26 @@ def register(app: FastAPI, ctx: Context) -> None:
             raise HTTPException(400, "시뮬레이션을 마친 개선안만 승인할 수 있음 (강제 승인은 force와 사유 필요)")
         if req.force and not req.note.strip():
             raise HTTPException(400, "강제 승인에는 사유(note)가 필요함")
-        report = store.get_report(p["report_id"])
-        pack = load_pack(store.get_run(report["run_id"])["domain"])
-        decision = {"action": "approved", "note": req.note, "forced": req.force, "at": time.time()}
-        if p["kind"] == "params":
-            before, after = write_params(pack.params_path(), p["body"])
-            decision.update(params_version_before=before, params_version_after=after)
-        else:
-            write_spec(pack.spec_path(), p["body"])
-        store.mark_stale(p["kind"], proposal_id)
-        return store.update_proposal(proposal_id, status="approved", decision=decision)
+        with approve_lock:   # 승인은 한 번에 하나 (같은 기준 파일에 두 안이 겹쳐 쓰이지 않게)
+            p = proposal_or_404(proposal_id)
+            if p["status"] in ("approved", "rejected", "stale"):
+                raise HTTPException(400, f"이미 결정됨: {p['status']}")
+            report = store.get_report(p["report_id"])
+            pack = load_pack(store.get_run(report["run_id"])["domain"])
+            decision = {"action": "approved", "note": req.note, "forced": req.force, "at": time.time(),
+                        "approver": req.approver.strip() or None}
+            if p["kind"] == "params":
+                params = load_params(pack)
+                # 강제 승인도 지금 규칙으로 다시 검사한다 (분류상 바꿀 수 없는 값, 허용 범위)
+                if errors := params_errors(params, p["body"], pack.dimensions()):
+                    raise HTTPException(400, "지금 규칙 기준으로 적용할 수 없음: " + "; ".join(errors))
+                decision.update(change_record(params, p["body"]))   # 바뀌기 전 값 (변경 이력 카드)
+                before, after = write_params(pack.params_path(), p["body"])
+                decision.update(params_version_before=before, params_version_after=after)
+            else:
+                write_spec(pack.spec_path(), p["body"])
+            store.mark_stale(p["kind"], proposal_id)
+            return store.update_proposal(proposal_id, status="approved", decision=decision)
 
     @app.post("/proposals/{proposal_id}/reject")
     def reject(proposal_id: str, req: DecisionRequest):
@@ -342,6 +408,19 @@ def register(app: FastAPI, ctx: Context) -> None:
             raise HTTPException(400, f"이미 결정됨: {p['status']}")
         return store.update_proposal(proposal_id, status="rejected",
                                      decision={"action": "rejected", "note": req.note, "at": time.time()})
+
+    @app.get("/params/history")
+    def params_history(domain: str):
+        """변경 이력 카드: 승인으로 params 버전이 오를 때마다 하나 (최근 것부터)."""
+        cards = []
+        for p in store.decided_proposals():
+            report = store.get_report(p["report_id"])
+            run = store.get_run(report["run_id"]) if report else None
+            if not run or run["domain"] != domain:
+                continue
+            if card := change_card(p, report):
+                cards.append(card)
+        return sorted(cards, key=lambda c: c["version_after"] or 0, reverse=True)
 
     # --- 이력 ---
     @app.get("/history")

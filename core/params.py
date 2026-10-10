@@ -2,12 +2,18 @@
 
 params.yaml 구조 (도메인 공통 규약):
   version: int
-  <섹션>: {<키>: 값, ..., bounds: {<키>: [min, max]}, docs: {<키>: 설명}}
+  <섹션>: {<키>: 값, ..., bounds: {<키>: [min, max]}, docs: {<키>: 설명}, kinds: {<키>: 분류}}
   overrides:
     allowed_sections: [<섹션>, ...]     # 구간 조건으로 바꿀 수 있는 섹션
     rules:                               # 위에서부터 순서대로 적용
       - when: {<차원>: 값 | [값, ...]}   # dimensions.yaml에 선언된 차원만
         set: {"<섹션>.<키>": 값, "<섹션>.<키>[i]": 값}
+
+파라미터 분류 (kinds, M13): 개선안이 바꿀 수 있는 것은 policy뿐이다. 분류가 없는 키는 policy로 본다.
+  policy      정책 손잡이. 개선안이 바꿀 수 있다
+  estimate    현실 추정값. 실적 근거가 있을 때 사람이 바꾼다 (개선안이 바꾸면 "가정만 바꾼 가짜 개선"이 된다)
+  fixed       고정값
+  governance  승인 조건 같은 통제 설정. AI가 자기 가드레일을 풀 수 없게 한다
 """
 
 import copy
@@ -16,7 +22,14 @@ from numbers import Number
 from typing import Any
 
 RESERVED = ("version", "overrides")
-SECTION_META = ("bounds", "docs")      # 섹션 안의 메타 키: 파라미터가 아니며 개선안으로 바꿀 수 없다
+SECTION_META = ("bounds", "docs", "kinds")   # 섹션 안의 메타 키: 파라미터가 아니며 개선안으로 바꿀 수 없다
+KINDS = ("policy", "estimate", "fixed", "governance")
+DEFAULT_KIND = "policy"                 # 분류가 없는 키 (하위 호환)
+KIND_REASONS = {
+    "estimate": "추정값은 실적 근거로만 사람이 바꾼다 (개선안이 바꾸면 가정만 바뀐다)",
+    "fixed": "고정값이라 바꿀 수 없다",
+    "governance": "승인 조건 같은 통제 설정은 개선안이 바꿀 수 없다 (AI가 자기 가드레일을 풀 수 없게)",
+}
 _PATH = re.compile(r"^([A-Za-z_]\w*)\.([A-Za-z_]\w*)(?:\[(\d+)\])?$")
 
 
@@ -74,6 +87,42 @@ def path_errors(path: str) -> list[str]:
     return []
 
 
+def param_kind(params: dict, path: str) -> str:
+    """경로의 파라미터 분류. 선언이 없으면 policy."""
+    section, key, _ = parse_path(path)
+    return ((params.get(section) or {}).get("kinds") or {}).get(key, DEFAULT_KIND)
+
+
+def kind_errors(params: dict, path: str, where: str | None = None) -> list[str]:
+    """개선안이 이 경로를 바꿀 수 없으면 분류별 사유. policy면 빈 목록."""
+    try:
+        kind = param_kind(params, path)
+    except ValueError as exc:
+        return [str(exc)]
+    if kind == DEFAULT_KIND or kind not in KIND_REASONS:
+        return []
+    return [f"{where or path}: {kind} 파라미터 — {KIND_REASONS[kind]}"]
+
+
+def param_paths(params: dict) -> list[str]:
+    """섹션.키 경로 목록 (메타 키·예약 섹션 제외)."""
+    return [f"{name}.{key}" for name, section in params.items() if name not in RESERVED and isinstance(section, dict)
+            for key in section if key not in SECTION_META]
+
+
+def params_view(params: dict) -> dict:
+    """개선 에이전트에 보일 분류 요약: 바꿀 수 있는 경로와, 참고만 할 경로(분류별 사유)."""
+    reference: dict[str, dict] = {}
+    changeable = []
+    for path in param_paths(params):
+        kind = param_kind(params, path)
+        if kind == DEFAULT_KIND:
+            changeable.append(path)
+        else:
+            reference.setdefault(kind, {"reason": KIND_REASONS.get(kind, ""), "paths": []})["paths"].append(path)
+    return {"changeable": changeable, "reference_only": reference}
+
+
 def numeric_leaves(value) -> list[Number]:
     if isinstance(value, bool):
         return []
@@ -109,6 +158,11 @@ def check_params(params: dict, dimensions: dict | None = None) -> list[str]:
                 errors.append(f"{name}.bounds.{key}: 존재하지 않는 파라미터")
             elif bound[0] > bound[1]:
                 errors.append(f"{name}.bounds.{key}: min > max")
+        for key, kind in (section.get("kinds") or {}).items():
+            if key not in section or key in SECTION_META:
+                errors.append(f"{name}.kinds.{key}: 존재하지 않는 파라미터")
+            elif kind not in KINDS:
+                errors.append(f"{name}.kinds.{key}: 알 수 없는 분류 {kind} (허용: {', '.join(KINDS)})")
         for key, text in (section.get("docs") or {}).items():
             if key not in section or key in SECTION_META:
                 errors.append(f"{name}.docs.{key}: 존재하지 않는 파라미터")
