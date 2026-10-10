@@ -74,6 +74,9 @@ def test_strip_bad_resources_keeps_finding_and_records_removed():
     assert "resources" not in gone and gone["resources_removed"]["kind"] == "truck"
     ok = finding(res(["WB01"]))
     assert strip_bad_resources(ok, CALLS, DIMS) is ok
+    messy = strip_bad_resources(finding(res(["WB01", "WB01"], {"branch": ["B", "B"], "available": []})), CALLS, DIMS)
+    assert messy["resources"] == {"kind": "worker", "ids": ["WB01"], "traits": {"branch": ["B"]}}   # 중복·빈 값 정리
+    assert "resources_removed" not in messy
 
 
 def test_submission_and_finalize_use_resource_check():

@@ -72,14 +72,14 @@ def _split(finding: dict, calls: dict, dimensions: dict) -> tuple[dict | None, d
         return None, {"kind": kind, "ids": list(r.get("ids") or [])}
     seen = _cited_values(finding, calls)
     allowed = declared[kind].get("traits") or {}
-    ids = [str(i) for i in r.get("ids") or []]
+    ids = list(dict.fromkeys(str(i) for i in r.get("ids") or []))   # 순서를 지키며 중복 제거
     keep = {"kind": kind, "ids": [i for i in ids if i in seen]}
     removed: dict = {}
     if len(keep["ids"]) < len(ids):
         removed["ids"] = [i for i in ids if i not in seen]
     traits_keep, traits_removed = {}, {}
     for name, values in (r.get("traits") or {}).items():
-        values = [str(v) for v in (values if isinstance(values, list) else [values])]
+        values = list(dict.fromkeys(str(v) for v in (values if isinstance(values, list) else [values])))
         good = [v for v in values if name in allowed and v in seen]
         bad = [v for v in values if v not in good]
         if good:
@@ -120,16 +120,16 @@ def resource_problems(finding: dict, calls: dict, dimensions: dict) -> list[str]
 
 def strip_bad_resources(finding: dict, calls: dict, dimensions: dict) -> dict:
     """검사를 통과하지 못한 자원 id·속성을 빼고 resources_removed에 남긴다 (발견 자체는 둔다).
-    남는 id가 없으면 resources를 지운다. 고칠 것이 없으면 같은 객체를 돌려준다."""
+    남는 id가 없으면 resources를 지운다. 중복 값과 빈 속성은 정리한다. 고칠 것이 없으면 같은 객체를 돌려준다."""
     if not finding.get("resources"):
         return finding
     keep, removed = _split(finding, calls, dimensions)
-    if not removed and keep is not None:
+    if not removed and keep == finding["resources"]:
         return finding
     out = {k: v for k, v in finding.items() if k != "resources"}
     if keep is not None:
-        out["resources"] = keep
-    return {**out, "resources_removed": removed or {"ids": []}}
+        out["resources"] = keep          # 중복 값·빈 속성은 정리된다
+    return {**out, "resources_removed": removed} if removed or keep is None else out
 
 
 def resources_text(resources: dict | None) -> str:

@@ -108,9 +108,14 @@ reason_codes:      # 실패 사유 코드 → 설명. 코어 사유 코드(LLM_*
   <CODE>: 설명
 violation_rules:   # validate()가 반환하는 규칙 ID → 설명
   <rule_id>: 설명
+resources:         # (선택, M12-d) 분석 발견의 resources 칸에 적을 수 있는 자원 종류
+  <종류>:
+    label: 한글 이름
+    id_field: <DecisionRecord.decision에서 이 자원을 가리키는 키>   # 화면이 그 자원이 맡은 항목을 강조
+    traits: {<속성>: {label: 한글 이름}}                             # 발견에 함께 적을 수 있는 속성
 ```
 
-차원은 "사람이 원인을 말할 때 쓰는 단위"로 고른다. 심은 패턴의 정답(`answer.dims`)이 이 차원들로 표현될 수 있어야 분석 agent가 찾을 수 있다.
+차원은 "사람이 원인을 말할 때 쓰는 단위"로 고른다. 자원(사람·장비 등) 단위의 패턴은 차원이 아니라 `resources`로 선언한다. 차원은 항목을 나누는 단위라, 자원 id를 차원으로 두면 자원이 없는 미배정 항목과 섞인다. 자원 id와 속성 값은 분석 agent가 인용한 도구 결과에 그대로 있어야 하므로, 자원별 조회 도구(`analysis_tools`)가 id와 속성을 결과에 담아야 한다. 심은 패턴의 정답(`answer.dims`)이 이 차원들로 표현될 수 있어야 분석 agent가 찾을 수 있다.
 
 ### faults.yaml (정답표)
 
@@ -125,6 +130,10 @@ P1:
     metric: <지표 키>               # 지표형: 발견의 metric 이름·방향이 같으면 일치
     direction: low|high
     param_hint: <섹션.키>           # (선택) 개선안이 건드려야 할 파라미터. 사람용 참고
+    requires_tools: [<도구>]        # (선택) 이 도구 결과를 인용한 발견만 근거 일치
+    confirm_cause: true             # (선택) 원인이 맞는지 사람이 판정해야 탐지로 셈
+    resources: {kind: <자원 종류>, truth_key: <truth["faults"][id]의 키>, min_precision: 0.5}
+                                    # (선택) 발견이 자원을 적었으면 적은 id 중 정답 비율이 기준 이상이어야 함
 ```
 
 분석 agent는 정답표를 보지 못한다. 채점에만 쓴다.
