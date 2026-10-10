@@ -12,6 +12,8 @@
 import hashlib
 import json
 
+from core.analysis.resources import resources_text
+
 MAX_ITEMS = 10
 JUDGMENT_TEXT = {"false_positive": "잘못 짚음", "cause_ok": "원인 맞음", "cause_wrong": "원인 틀림"}
 
@@ -42,6 +44,7 @@ def collect_memory(store, domain: str, params_version: int | None = None, limit:
             judgments.append({"id": f"label:{r['id']}:{fid}", "label": label, "title": f.get("title", ""),
                               "slice": f.get("slice"), "reason_codes": f.get("reason_codes"),
                               "metric": f.get("metric"), "hypothesis": f.get("hypothesis"),
+                              "resources": f.get("resources"),
                               "at": r.get("finished_at") or r.get("created_at"),
                               "params_version": r.get("params_version")})
     return build_memory(rejections, judgments, params_version, limit)
@@ -82,7 +85,8 @@ def analysis_memory_text(memory: dict | None) -> str:
         where = ", ".join(x for x in (
             f"구간 {json.dumps(j['slice'], ensure_ascii=False)}" if j.get("slice") else "",
             f"사유 {', '.join(j['reason_codes'])}" if j.get("reason_codes") else "",
-            f"지표 {j['metric'].get('name')} {j['metric'].get('direction')}" if j.get("metric") else "") if x)
+            f"지표 {j['metric'].get('name')} {j['metric'].get('direction')}" if j.get("metric") else "",
+            f"자원 {resources_text(j['resources'])}" if j.get("resources") else "") if x)
         hyp = f" — 당시 AI 원인 가설: {j['hypothesis']}" if j.get("hypothesis") and j["label"] != "false_positive" else ""
         lines.append(f"- [{JUDGMENT_TEXT[j['label']]}] {j['title']}" + (f" ({where})" if where else "") + hyp + _stale_note(j))
     return ("\n\n# 이전 회차에서 사람이 내린 판정 (기억)\n" + "\n".join(lines)

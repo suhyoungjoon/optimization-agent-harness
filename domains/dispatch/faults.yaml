@@ -40,6 +40,10 @@ P3:
     metric: worker_utilization
     direction: low
     requires_tools: [worker_stats]   # 작업자별 가능시간·활용률을 근거로 인용한 발견만 (자동 근거 일치)
+    resources:                       # 발견이 작업자를 적었으면, 적은 작업자 중 절반 이상이 정답(가능시간을 바꾼 작업자)이어야 한다
+      kind: worker
+      truth_key: affected_workers    # 생성기 정답표의 키
+      min_precision: 0.5
     confirm_cause: true              # 원인(가능시간 불일치)이 맞는지는 사람이 판정해야 탐지로 센다
 
 P4:

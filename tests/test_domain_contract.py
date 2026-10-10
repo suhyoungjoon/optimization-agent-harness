@@ -112,6 +112,17 @@ def test_faults_reference_declared_codes(domain):
             if allowed is not None:
                 values = value if isinstance(value, list) else [value]
                 assert set(values) <= set(allowed), f"{fid}: {dim}에 선언되지 않은 값 {values}"
+        if answer.get("resources"):   # 자원 단위 정답 (M12-d): 선언된 자원 종류와 정답표 키
+            assert answer["resources"].get("kind") in (dims.get("resources") or {}), f"{fid}: 선언되지 않은 자원 종류"
+            assert answer["resources"].get("truth_key"), f"{fid}: resources.truth_key가 없다"
+
+
+@pytest.mark.parametrize("domain", DOMAINS)
+def test_resources_schema(domain):
+    """자원 선언(선택): 종류마다 label, id_field, 속성마다 label."""
+    from core.analysis.resources import resource_spec_errors
+
+    assert resource_spec_errors(load_yaml(domain, "dimensions.yaml")) == []
 
 
 # --- 동작 계약 (pack.py 구현 후 활성화) ------------------------------------

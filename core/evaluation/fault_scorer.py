@@ -5,6 +5,8 @@
   하나라도 있으면 불일치다. 정답과 발견 모두 사유 코드가 있으면 하나 이상 겹쳐야 한다.
 - metric이 있으면: 발견의 metric 이름과 방향이 같으면 일치다.
 - requires_tools가 있으면: 발견이 그 도구 중 하나의 결과를 인용해야 한다 (리포트의 호출 기록으로 확인).
+- resources가 있으면 ({kind, truth_key, min_precision}): 발견이 자원을 적었을 때만, 같은 종류이고 적은 id 중
+  정답(정답표 fault[truth_key])의 비율이 min_precision 이상이어야 한다. 자원을 적지 않은 발견은 이 검사를 건너뛴다.
 
 2단계 채점:
 - 자동(근거 일치): 위 규칙으로 맞춘다.
@@ -52,9 +54,23 @@ def _matches_target(finding: dict, answer: dict) -> bool:
     return not (want_codes and got_codes) or bool(want_codes & got_codes)
 
 
-def matches(finding: dict, answer: dict, calls: dict | None = None) -> bool:
-    """calls: 리포트의 도구 호출 기록 (tool_use id → {name, ...}). requires_tools 검사에 쓴다."""
-    return _matches_target(finding, answer) and _cites_required_tool(finding, answer, calls)
+def _resources_ok(finding: dict, answer: dict, fault: dict | None) -> bool:
+    spec = answer.get("resources")
+    got = finding.get("resources") or {}
+    if not spec or not got.get("ids"):
+        return True
+    if got.get("kind") != spec.get("kind"):
+        return False
+    truth = _values((fault or {}).get(spec.get("truth_key"), []))
+    ids = _values(got["ids"])
+    return len(ids & truth) / len(ids) >= float(spec.get("min_precision", 0.5))
+
+
+def matches(finding: dict, answer: dict, calls: dict | None = None, fault: dict | None = None) -> bool:
+    """calls: 리포트의 도구 호출 기록 (tool_use id → {name, ...}). requires_tools 검사에 쓴다.
+    fault: 정답표의 결함 항목 (answer.resources의 truth_key로 정답 자원을 찾는다)."""
+    return (_matches_target(finding, answer) and _cites_required_tool(finding, answer, calls)
+            and _resources_ok(finding, answer, fault))
 
 
 def _status(fault: dict) -> str:
@@ -77,7 +93,7 @@ def score(findings: list[dict], faults: dict[str, dict], calls: dict | None = No
     per_fault, matched_ids = {}, set()
     for fid, fault in faults.items():
         answer = fault["answer"]
-        hits = [f["id"] for f in findings if matches(f, answer, calls)]
+        hits = [f["id"] for f in findings if matches(f, answer, calls, fault)]
         matched_ids.update(hits)
         confirm = bool(answer.get("confirm_cause"))
         status = "missed" if not hits else "pending" if confirm else "detected"

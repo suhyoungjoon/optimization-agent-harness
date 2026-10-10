@@ -64,6 +64,10 @@ def _codes_overlap(a: dict, b: dict) -> bool:
 
 def _same_finding(a: dict, b: dict, dimensions: dict | None = None) -> bool:
     """같은 발견인가: (정리한) 구간 차원이 서로 같고 값이 겹치며 사유가 겹친다. 구간이 없으면 지표 이름·방향이 같다."""
+    ra, rb = a.get("resources") or {}, b.get("resources") or {}
+    if ra.get("ids") and rb.get("ids"):   # 같은 종류의 자원이 겹치고 지표가 같으면 같은 발견 (M12-d)
+        ma, mb = (a.get("metric") or {}).get("name"), (b.get("metric") or {}).get("name")
+        return ra.get("kind") == rb.get("kind") and bool(set(ra["ids"]) & set(rb["ids"])) and ma == mb
     sa, sb = normalized_slice(a, dimensions), normalized_slice(b, dimensions)
     if sa or sb:
         if set(sa) != set(sb) or any(not sa[d] & sb[d] for d in sa):
@@ -103,7 +107,7 @@ def merge_findings(by_perspective: dict[str, list[dict]], names: dict[str, str],
             group["perspectives"].append(pid)
             group["perspective_names"].append(names.get(pid, pid))
             group["alternatives"].append({"perspective": pid, "perspective_name": names.get(pid, pid),
-                                          **{k: body.get(k) for k in ("title", "description", "hypothesis")},
+                                          **{k: body.get(k) for k in ("title", "description", "hypothesis", "resources")},
                                           "cited_calls": list(body.get("cited_calls") or [])})
             group["cited_calls"] += [c for c in body.get("cited_calls") or [] if c not in group["cited_calls"]]
     ids = [f"F{i + 1}" for i in range(len(groups))]

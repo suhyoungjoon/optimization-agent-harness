@@ -10,6 +10,7 @@ from core.llm.tool_loop import call_list_text, resolve_call, run_tool_loop, usag
 
 from .aggregate_tools import Aggregator
 from .grounding import numbers_in, unsupported_numbers
+from .resources import resource_problems, resources_schema, strip_bad_resources
 
 SUBMIT = "submit_report"
 
@@ -41,8 +42,9 @@ def _slice_schema(dimensions: dict) -> dict:
 
 
 def report_submit_tool(dimensions: dict, metric_names: list[str]) -> dict:
-    """분석 리포트 제출 도구 정의. 다른 분석 agent(예: 관점별 agent)도 같은 리포트 형식을 쓰도록 공개한다."""
-    return {
+    """분석 리포트 제출 도구 정의. 다른 분석 agent(예: 관점별 agent)도 같은 리포트 형식을 쓰도록 공개한다.
+    도메인이 자원을 선언했으면 발견에 resources 칸이 생긴다 (M12-d)."""
+    tool = {
         "name": SUBMIT,
         "description": "분석 리포트를 제출한다.",
         "input_schema": {
@@ -70,6 +72,20 @@ def report_submit_tool(dimensions: dict, metric_names: list[str]) -> dict:
             "required": ["summary", "findings"],
         },
     }
+    schema = resources_schema(dimensions)
+    if schema:
+        tool["input_schema"]["properties"]["findings"]["items"]["properties"]["resources"] = schema
+    return tool
+
+
+RESOURCES_RULE = ("\n- 특정 자원(선언된 자원 종류)에 대한 패턴이면 resources에 종류와 id를 적는다. "
+                  "id와 속성 값은 인용한 도구 결과에 있는 그대로 적는다. 자원 id를 slice에 적지 않는다.")
+
+
+def analysis_system(dimensions: dict) -> str:
+    """분석 시스템 프롬프트. 도메인이 자원을 선언했을 때만 자원 칸 안내를 붙인다 (없으면 이전과 같다)."""
+    return SYSTEM.replace("\n- 끝나면 submit_report", RESOURCES_RULE + "\n- 끝나면 submit_report") \
+        if (dimensions or {}).get("resources") else SYSTEM
 
 
 def cited_call_ids(finding: dict, calls: dict) -> list[str]:
@@ -143,7 +159,8 @@ def submission_problems(submission: dict, calls: dict, dimensions: dict) -> list
     issues = []
     for i, f in enumerate(submission.get("findings") or []):
         issues += [f"findings[{i}] '{f.get('title', '')}': {p}"
-                   for p in grounding_problems(f, calls) + slice_problems(f, dimensions)]
+                   for p in grounding_problems(f, calls) + slice_problems(f, dimensions)
+                   + resource_problems(f, calls, dimensions)]
     return issues
 
 
@@ -156,7 +173,8 @@ def finalize_findings(findings: list[dict], calls: dict, dimensions: dict) -> tu
         if problems:
             dropped.append({"finding": f, "problems": problems})
         else:
-            kept.append({**strip_bad_slice(f, dimensions), "cited_calls": cited_call_ids(f, calls),
+            kept.append({**strip_bad_resources(strip_bad_slice(f, dimensions), calls, dimensions),
+                         "cited_calls": cited_call_ids(f, calls),
                          "id": f"F{len(kept) + 1}"})
     return kept, dropped
 
@@ -173,7 +191,7 @@ def analyze(pack: DomainPack, instance, decisions: list[DecisionRecord], llm: LL
     질문을 시스템 프롬프트 뒤에 붙인다. 없으면 입력이 이전과 같다."""
     dimensions = pack.dimensions()
     tools = Aggregator(decisions, dimensions).tools() + pack.analysis_tools(instance, decisions)
-    system, tools = perspective_view(SYSTEM, tools, perspective)
+    system, tools = perspective_view(analysis_system(dimensions), tools, perspective)
     metric_names = sorted(pack.metrics(instance, decisions))
 
     def check(submission: dict, calls: dict) -> list[str]:

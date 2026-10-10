@@ -40,6 +40,10 @@ _EDITS = {"type": "array", "items": {"type": "object", "properties": {
     "section": {"type": "string"}, "text": {"type": "string"}}, "required": ["section", "text"]}}
 
 
+BASE_KEYS = ("id", "title", "description", "slice", "reason_codes", "metric", "hypothesis")
+# 개선 에이전트에 넘기는 발견 요약. resources는 적힌 발견에만 넣는다 (없으면 입력이 이전과 같다)
+FINDING_SUMMARY_KEYS = BASE_KEYS + ("resources",)
+
 def _submit_tool() -> dict:
     return {
         "name": SUBMIT,
@@ -104,7 +108,7 @@ def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: di
          "description": "파라미터 변경을 임시 적용해 규칙 엔진으로 재실행하고 전후 지표와 발견 구간별 실패율을 돌려준다.",
          "input_schema": {"type": "object", "properties": {"params_changes": _CHANGES, "override_rules": _RULES}}},
     ]
-    findings = [{k: f.get(k) for k in ("id", "title", "description", "slice", "reason_codes", "metric", "hypothesis")}
+    findings = [{k: f.get(k) for k in FINDING_SUMMARY_KEYS if f.get(k) is not None or k in BASE_KEYS}
                 for f in report.get("findings", [])]
     user = ("# 분석 리포트\n" + json.dumps({"summary": report.get("summary"), "findings": findings},
                                         ensure_ascii=False, indent=1)

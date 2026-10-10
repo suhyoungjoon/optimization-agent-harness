@@ -89,7 +89,7 @@ def analysis_agent_graph(ctx: AgentContext, llm=None, perspective: dict | None =
     pack, full = d.get("pack"), d.get("full_rule") or []
     dims = pack.dimensions() if pack else {"dimensions": {}}
     tools = (Aggregator(full, dims).tools() + pack.analysis_tools(d["instance"], full)) if pack else []
-    system, tools = analysis_core.perspective_view(analysis_core.SYSTEM, tools, perspective)
+    system, tools = analysis_core.perspective_view(analysis_core.analysis_system(dims), tools, perspective)
     metric_names = sorted(pack.metrics(d["instance"], full)) if pack else []
 
     def check(submission: dict, calls: dict) -> list[str]:
@@ -287,7 +287,8 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
 
     def proposal_agent(state: AgentsState):
         report = d["report"]
-        findings = [{k: f.get(k) for k in ("id", "title", "description", "slice", "reason_codes", "metric", "hypothesis")}
+        findings = [{k: f.get(k) for k in proposer_core.FINDING_SUMMARY_KEYS
+                     if f.get(k) is not None or k in proposer_core.BASE_KEYS}
                     for f in report["findings"]]
         dims = d["pack"].dimensions()
         user = ("# 분석 리포트\n" + json.dumps({"summary": report.get("summary"), "findings": findings},
