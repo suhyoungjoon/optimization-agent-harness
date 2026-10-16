@@ -4,7 +4,7 @@ import type { CompareSummary, Dataset, DecisionRecord, DomainInfo, HarnessInfo, 
 import CompareTable from "./CompareTable";
 import HarnessPipeline from "./HarnessPipeline";
 import HarnessToggle from "./HarnessToggle";
-import MetricsPanel, { fmtMetric, fmtUsd } from "./MetricsPanel";
+import MetricsPanel, { fmtCost, fmtMetric } from "./MetricsPanel";
 import { TERMS, tip } from "../terms";
 import Details from "./Details";
 
@@ -199,7 +199,7 @@ function Verdict({ rule, ai, specs }: { rule: Run; ai: Run; specs: DomainAdapter
       <>
         <span className={v ? "critical-text" : "good-text"} title={tip("violations")}>{TERMS.violations.label} {v}건</span>
         {primary.map((s) => <span key={s.key} title={s.tech}> · {s.label} {fmtMetric(run.metrics?.[s.key], s.format)}</span>)}
-        <span> · 건당 {run.agent === "rule" ? "$0" : fmtUsd(cost != null && items ? cost / items : cost)}</span>
+        <span> · 건당 {run.agent === "rule" ? "$0" : fmtCost(run.meta?.usage, cost != null && items ? cost / items : cost)}</span>
       </>
     );
   };

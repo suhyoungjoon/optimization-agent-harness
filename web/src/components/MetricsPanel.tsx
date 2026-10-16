@@ -10,6 +10,16 @@ export const fmtMetric = (v: number | null | undefined, f: MetricSpec["format"])
 export const fmtUsd = (v: number | null | undefined) =>
   v === undefined || v === null ? "–" : v === 0 ? "$0" : v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`;
 
+type CostUsage = { cost_usd?: number | null; input_tokens?: number; output_tokens?: number } | null | undefined;
+
+/** 토큰은 썼는데 단가를 몰라 비용을 못 낸 사용량 (예: 단가를 비워 둔 Azure 모델) */
+export const costUnknown = (u: CostUsage) =>
+  !!u && u.cost_usd == null && (u.input_tokens ?? 0) + (u.output_tokens ?? 0) > 0;
+
+/** 비용 표시. 단가 미확인이면 "미확인" (value: 건당 비용처럼 사용량에서 계산한 값) */
+export const fmtCost = (u: CostUsage, value: number | null | undefined = u?.cost_usd) =>
+  costUnknown(u) ? "미확인" : fmtUsd(value);
+
 export const fmtSeconds = (v: number | null | undefined) =>
   v === undefined || v === null ? "–" : v < 1 ? `${(v * 1000).toFixed(v < 0.01 ? 2 : 0)}ms` : `${v.toFixed(1)}초`;
 
@@ -63,10 +73,10 @@ export default function MetricsPanel({
         {primary.map(metricTile)}
         <div className="tile tile-cost">
           <div className="tile-label">건당 비용</div>
-          <div className="tile-value">{run.agent === "rule" ? "$0" : fmtUsd(cost != null && items ? cost / items : cost)}</div>
+          <div className="tile-value">{run.agent === "rule" ? "$0" : fmtCost(run.meta?.usage, cost != null && items ? cost / items : cost)}</div>
           {run.agent === "ai" && run.meta?.usage && (
             <div className="tile-note">
-              총 {fmtUsd(cost)} · {TERMS.llm.label} {run.meta.usage.calls ?? 0}회
+              총 {fmtCost(run.meta.usage)} · {TERMS.llm.label} {run.meta.usage.calls ?? 0}회
               {run.meta.usage.cached_calls ? ` (저장된 응답 재사용 ${run.meta.usage.cached_calls})` : ""}
             </div>
           )}

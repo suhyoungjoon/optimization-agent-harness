@@ -78,6 +78,8 @@ export interface Usage {
   cache_read_input_tokens?: number;
   cache_creation_input_tokens?: number;
   cost_usd: number | null;
+  provider?: string;
+  deployment?: string;
 }
 
 export interface RunProgress {
@@ -146,6 +148,7 @@ export interface CompareSummary {
   violations: number | null;
   seconds_per_item: number | null;
   cost_per_item_usd: number | null;
+  cost_unknown?: boolean;
   consistency: number | null;
 }
 
