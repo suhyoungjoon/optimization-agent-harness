@@ -44,12 +44,14 @@ azure:
   roles:                                           # 6.9절과 같은 구도: 분석은 가벼운 모델, 개선안은 상위 모델
     analysis: {model: gpt-5-mini, effort: medium}
     proposals: {model: gpt-5, effort: medium}
-  # 모델 이름 → deployment 이름. 비어 있으면 모델 이름을 그대로 deployment로 쓴다 (게이트웨이 화면이나 첫 호출로 확인)
+  # 모델 이름 → deployment 이름. 비어 있으면 모델 이름을 그대로 deployment로 쓴다.
+  # 2026-10-16 실제 호출: gpt-4.1-mini, gpt-5-mini, gpt-5는 모델 이름 = deployment 이름 (나머지는 쓸 때 확인)
   deployments: {}
   # 모델별 옵션. 없는 모델은 기본값(reasoning_effort 안 보냄, max_completion_tokens 사용).
   #   reasoning_effort: 받는 값 목록. 설정의 effort가 목록에 있으면 보내고, xhigh·max면 목록의 마지막 값, 그 밖에는 보내지 않는다
   #   max_tokens_param: 출력 길이 파라미터 이름 (기본 max_completion_tokens. gpt-5 계열은 max_tokens를 거부할 수 있다)
   # temperature 등 샘플링 값은 어느 모델에도 보내지 않는다 (gpt-5 계열은 기본값 외 temperature를 거부한다).
+  # gpt-5, gpt-5-mini: 이 api-version에서 reasoning_effort와 max_completion_tokens를 받는다 (2026-10-16 실제 호출).
   # gpt-5.4, gpt-5.6-luna, gpt-6-luna, gpt-6.1-sol은 지원 값을 실제 호출로 확인한 뒤 적는다 (미확인이면 보내지 않음).
   models:
     gpt-5: {reasoning_effort: [minimal, low, medium, high]}

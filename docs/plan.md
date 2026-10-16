@@ -766,13 +766,15 @@ M9가 기존 에이전트를 노드로 감싸 연결만 했다면, M10은 **에�
 | C. 실제 호출 (요청 시) | `gpt-4.1-mini`로 1일차 앞 10건 L2 배정 1회, 분석 1회. 도구 호출 왕복이 정상인지만 본다. gpt-5 계열에서 이 api-version이 `reasoning_effort`·`max_completion_tokens`를 받는지 1회 확인 |
 | D. 모델 비교 실험 (요청 시) | 실험 보고서 6.9절과 같은 조건(같은 규칙 실행, 같은 리포트, 기억·제약 켬)으로 분석(gpt-4.1-mini, gpt-5-mini)과 개선안(gpt-5, gpt-5.4 이상). "제공사를 바꿔도 하네스(근거 검사·분류·제약)가 품질을 지키는가"를 새 절로 |
 | 범위 밖 | 에이전트 코드 변경, OpenAI Responses API, 프롬프트 캐시 제어(OpenAI는 자동), 화면에서 제공사 고르기 |
+| 구현 결과 (2026-10-16) | `core/llm/azure_openai.py`(`AzureOpenAIClient`, 변환 함수), `client.py`(`provider`, `make_client`, `deployment_for`, 사용량의 `provider`·`deployment`), `configs/llm.yaml` `azure` 섹션, 비교표 `cost_unknown`과 화면 "미확인", 선택 설치 `.[azure]`. 클라이언트 생성은 `api/main.py`와 `workflow/agents/api.py`에서 `make_client`로 바꿨다(LangGraph agents 탭의 실제 AI도 같은 제공사를 쓰게. 메시지를 만드는 에이전트 코드는 그대로). 테스트 23개 추가, 전체가 `LLM_PROVIDER` 두 값에서 통과 |
+| 실제 호출 확인 (2026-10-16) | 연결: gpt-4.1-mini·gpt-5-mini·gpt-5 모두 도구 호출 → 결과 → 답 왕복 정상, deployment 이름 = 모델 이름, gpt-5 계열이 `reasoning_effort`·`max_completion_tokens`를 받음. 배정(gpt-4.1-mini, seed 42 P1~P4, 1일차 앞 10건, L2, `LLM_CACHE=0`): 끝까지 완료, 배정 8/10, 규칙 위반 0, 미배정 2건은 `NO_CERT`, 호출 46회, 입력 10,413 + 캐시 읽기 97,152 / 출력 1,900 토큰, 59초. 분석(gpt-4.1-mini, 규칙 전체 1,500건): 제출까지 완료, 호출 8회, 발견 4건, 채점 P2 탐지·P3 원인 확인 대기·P1·P4 놓침(탐지율 25%), 31초. 비용은 단가 미확인. 품질 비교는 D(모델 비교 실험)에서 한다 |
 
 착수 전 결정할 것 (M14):
 
 | # | 결정 | 선택지 | 추천 |
 |---|---|---|---|
-| 16 | 실제 호출 확인 시점 | 착수 전 / 구현 후 키를 넣고 | **구현 후** (결정됨, 2026-10-16). 키가 아직 `.env`에 없다. 확인 전까지 `reasoning_effort`는 설정에서 지원을 적은 모델에만 보내고, 안 받으면 그 모델 옵션에서 지운다 |
-| 17 | deployment 이름 | 모델 이름과 같다고 가정 / 대응표 | **대응표 자리만 두고 비면 모델 이름 그대로** (결정됨, 2026-10-16). 게이트웨이 화면이나 첫 호출로 확인해 채운다 |
+| 16 | 실제 호출 확인 시점 | 착수 전 / 구현 후 키를 넣고 | **구현 후** (결정됨, 2026-10-16). 키가 아직 `.env`에 없다. 확인 전까지 `reasoning_effort`는 설정에서 지원을 적은 모델에만 보내고, 안 받으면 그 모델 옵션에서 지운다. **확인 완료 (2026-10-16)**: gpt-5·gpt-5-mini가 받는다 |
+| 17 | deployment 이름 | 모델 이름과 같다고 가정 / 대응표 | **대응표 자리만 두고 비면 모델 이름 그대로** (결정됨, 2026-10-16). 게이트웨이 화면이나 첫 호출로 확인해 채운다. **확인 완료 (2026-10-16)**: 쓴 세 모델은 같은 이름 |
 | 18 | 풀리지 않는 arguments | 원문 문자열을 `input`에 그대로 / `{"_raw_arguments": 원문}` | **`{"_raw_arguments": 원문}`**. 러너·도구 처리기는 `input`을 dict로 받는다(문자열이면 처리기에서 예외로 실행이 멈춘다). 다시 보낼 때는 원문 문자열 그대로 돌려준다. 필드 단위 JSON 문자열은 지금처럼 `decode_json_args`가 푼다 |
 | 19 | 입력 토큰 집계 | `prompt_tokens` 전체를 입력으로 / 캐시분을 빼고 | **캐시분을 뺀다**: 입력 = `prompt_tokens − cached_tokens`, 캐시 읽기 = `cached_tokens`. OpenAI의 `prompt_tokens`는 캐시분을 포함하고, Anthropic의 `input_tokens`는 포함하지 않는다. 같은 뜻으로 맞춰야 비용 계산이 두 번 세지 않는다 |
 | 20 | 깊이 값 대응 | Anthropic 값을 그대로 / 모델 옵션의 지원 값으로 | **지원 값으로**: 설정의 `effort`가 모델의 `reasoning_effort` 목록에 있으면 그대로, `xhigh`·`max`면 목록의 마지막(가장 깊은 값), 그 밖에는 보내지 않는다 |
