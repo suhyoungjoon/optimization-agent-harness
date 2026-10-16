@@ -23,7 +23,8 @@ from core.improvement.simulate import simulate_params
 from core.improvement.sweep import load_sweep_config, sensitivity, sweep_params
 from core.improvement.history import change_card, change_record
 from core.interfaces import DecisionRecord, DomainPack, ToolContext, TraceRecord, Violation
-from core.llm.client import AnthropicClient, LLMClient, LLMResponse, ResponseCache, Usage, load_config
+from core.llm.azure_openai import AzureOpenAIClient
+from core.llm.client import AnthropicClient, LLMClient, LLMResponse, ResponseCache, Usage, load_config, make_client
 from core.llm.tool_loop import LoopResult, run_tool_loop, usage_dict
 from core.params import (KINDS, apply_overrides, check_params, get_path, kind_errors, param_kind, params_view,
                          parse_path, path_errors, set_path)
@@ -41,7 +42,8 @@ __all__ = [
     # 하네스 (core.harness)
     "CORE_REASON_CODES", "AbortRun", "HarnessRunner", "Level", "RunOutput", "Tracer", "get_level", "load_levels",
     # LLM (core.llm)
-    "AnthropicClient", "LLMClient", "LLMResponse", "LoopResult", "ResponseCache", "Usage", "load_config",
+    "AnthropicClient", "AzureOpenAIClient", "LLMClient", "LLMResponse", "LoopResult", "ResponseCache", "Usage",
+    "load_config", "make_client",
     "run_tool_loop", "usage_dict",
     # 실행·비교·채점 (core.evaluation)
     "apply_labels", "compare", "consistency", "create_ai_run", "matches", "run_ai_agent", "run_rule_agent", "score",
