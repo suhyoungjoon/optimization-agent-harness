@@ -2,6 +2,12 @@
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def anthropic_provider(monkeypatch):
+    """이 파일은 Anthropic 클라이언트와 기본 설정을 본다 (LLM_PROVIDER로 제공사를 바꾼 채 실행해도 같게)."""
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+
 from core.llm.client import AnthropicClient, LLMResponse, ResponseCache, Usage, load_config
 
 

@@ -17,7 +17,7 @@ export default function CompareTable({ rows, specs }: { rows: CompareSummary[]; 
       {r.violations == null ? "–" : `${r.violations % 1 ? r.violations.toFixed(1) : r.violations}건`}
     </td>
   );
-  const cost = (r: CompareSummary) => <td className="num">{r.agent === "rule" ? "$0" : fmtUsd(r.cost_per_item_usd)}</td>;
+  const cost = (r: CompareSummary) => <td className="num">{r.agent === "rule" ? "$0" : r.cost_unknown && r.cost_per_item_usd == null ? "미확인" : fmtUsd(r.cost_per_item_usd)}</td>;
   const extra = headline.filter((s) => !s.primary).length + 3; // 핵심 외 지표 + 실행 횟수·반복 시 같은 결과·건당 시간
 
   return (

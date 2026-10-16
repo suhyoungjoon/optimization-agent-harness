@@ -3,7 +3,7 @@ import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YA
 import { api } from "../api";
 import type { DomainAdapter, MetricSpec, Scope } from "../domains/types";
 import type { HarnessInfo, HistoryRow, Memory, Proposal, ProposalBatch, SpecEstimate } from "../types";
-import { fmtMetric, fmtSeconds, fmtUsd } from "./MetricsPanel";
+import { fmtCost, fmtMetric, fmtSeconds, fmtUsd } from "./MetricsPanel";
 import { usePoll } from "./usePoll";
 import { TERMS, tip } from "../terms";
 import Details from "./Details";
@@ -155,7 +155,7 @@ export default function ImprovementPanel({
         {batch?.status === "error" && <span className="critical-text">✕ 개선 제안 만들기 실패: {batch.error}</span>}
         {batch?.status === "done" && batch.meta && (
           <span className="muted">
-            제안 {batch.proposals.length}건 · AI가 미리 돌려본 횟수 {batch.meta.trials}회 · 비용 {fmtUsd(batch.meta.usage.cost_usd)} ·{" "}
+            제안 {batch.proposals.length}건 · AI가 미리 돌려본 횟수 {batch.meta.trials}회 · 비용 {fmtCost(batch.meta.usage)} ·{" "}
             {fmtSeconds(batch.meta.usage.seconds)}
           </span>
         )}

@@ -1,6 +1,8 @@
-# LLM 설정. 모델 교체는 이 파일만 바꾼다 (코드는 core/llm/client.py 한 곳에서만 호출).
+# LLM 설정. 모델 교체는 이 파일만 바꾼다 (코드는 core/llm/ 안에서만 호출).
 # 실험할 때만 바꾸려면 환경변수 LLM_MODEL, LLM_THINKING, LLM_EFFORT로 덮어쓴다 (파일은 그대로).
-model: claude-haiku-4-5       # 비용 절약용 (실제 API 실험, 2026-10). 이전: claude-sonnet-5
+# 제공사: anthropic(기본, 아래 값) | azure_openai(맨 아래 azure 섹션의 값이 위 값을 덮는다). 환경변수 LLM_PROVIDER가 우선
+provider: anthropic
+model: claude-haiku-4-5      # 비용 절약용 (실제 API 실험, 2026-10). 이전: claude-sonnet-5
 # 생각(thinking)과 깊이(effort)는 모델마다 지원이 다르다. 모델을 바꿀 때 두 줄도 같이 맞춘다.
 #   Sonnet 5 / Opus 5 계열: thinking: adaptive, effort: low | medium | high | xhigh | max
 #   Haiku 4.5: thinking: off, effort: null (adaptive thinking과 effort를 지원하지 않아 보내면 400)
@@ -26,3 +28,38 @@ pricing_per_mtok:
   claude-haiku-5-5: {input: 0.10, output: 0.50}  # 2026-10 확인. 프롬프트 10만 토큰 이하 단가 (초과 시 0.50 / 2.50)
 # 프롬프트 캐시 단가 배율 (입력 단가 대비): 쓰기 5분 TTL, 읽기
 cache_multipliers: {write: 1.25, read: 0.1}
+
+# Azure OpenAI 호환 게이트웨이 (provider: azure_openai일 때). 키 값은 .env에만 둔다 (여기에 쓰지 않는다).
+# 요청 경로: {endpoint}/openai/deployments/{deployment}/chat/completions?api-version={api_version}
+azure:
+  endpoint: https://skax.ai-talentlab.com
+  endpoint_env: MY_PROJECT_AZURE_ENDPOINT          # 있으면 endpoint를 덮는다
+  api_version: "2024-12-01-preview"
+  api_version_env: MY_PROJECT_AZURE_API_VERSION    # 있으면 api_version을 덮는다
+  api_key_envs: [MY_PROJECT_AZURE_API_KEY, AZURE_OPENAI_API_KEY]   # 앞의 것이 우선
+  # 아래 값은 위 기본값(model, effort, max_tokens, roles, 단가)을 덮는다. thinking은 쓰지 않는다
+  model: gpt-4.1-mini                              # 배정 (2026-10-16: gpt-4.1로 올렸다가 비용 때문에 되돌림. 건수만큼 호출이 늘어난다)
+  effort: null
+  max_tokens: 16000                                # 요청에는 max_completion_tokens로 보낸다 (추론 모델은 추론 토큰 포함)
+  roles:                                           # 분석·개선안을 한 단계 올림 (2026-10-16). 이전: 분석 gpt-5-mini, 개선안 gpt-5
+    analysis: {model: gpt-5, effort: medium}
+    proposals: {model: gpt-5.4, effort: medium}    # gpt-6.1-sol은 Chat Completions에서 도구를 못 써 보류 (아래)
+  # 모델 이름 → deployment 이름. 비어 있으면 모델 이름을 그대로 deployment로 쓴다.
+  # 2026-10-16 실제 호출: gpt-4.1, gpt-4.1-mini, gpt-5, gpt-5-mini, gpt-5.4, gpt-5.6-luna, gpt-6-luna, gpt-6.1-sol 모두 모델 이름 = deployment 이름
+  deployments: {}
+  # 모델별 옵션. 없는 모델은 기본값(reasoning_effort 안 보냄, max_completion_tokens 사용).
+  #   reasoning_effort: 받는 값 목록. 설정의 effort가 목록에 있으면 보내고, xhigh·max면 목록의 마지막 값, 그 밖에는 보내지 않는다
+  #   max_tokens_param: 출력 길이 파라미터 이름 (기본 max_completion_tokens. gpt-5 계열은 max_tokens를 거부할 수 있다)
+  # temperature 등 샘플링 값은 어느 모델에도 보내지 않는다 (gpt-5 계열은 기본값 외 temperature를 거부한다).
+  # 도구(function) + 추론 지원 (Chat Completions, api-version 2024-12-01-preview, 2026-10-16 실제 호출):
+  #   gpt-4.1·gpt-4.1-mini: 도구 ✓ (추론 없음) / gpt-5·gpt-5-mini·gpt-5.4: 도구 + reasoning_effort ✓
+  #   gpt-5.6-luna: 도구는 reasoning_effort를 보내지 않을 때만 ✓ (옵션 없음으로 둔다)
+  #   gpt-6-luna·gpt-6.1-sol: 이 경로에서 도구 ✕ ("도구는 reasoning_effort none일 때만"인데 none을 받지 않음).
+  #     Responses API(api-version 2025-04-01-preview 이상)에서는 gpt-6.1-sol이 도구 + 추론 ✓ — 지금 클라이언트는 미지원 (plan.md M14)
+  models:
+    gpt-5: {reasoning_effort: [minimal, low, medium, high]}
+    gpt-5-mini: {reasoning_effort: [minimal, low, medium, high]}
+    gpt-5.4: {reasoning_effort: [low, medium, high, xhigh]}
+  # 단가 (USD / 100만 토큰). 모르면 비워 둔다: 비용은 "미확인"으로 표시하고 토큰 수만 기록한다
+  pricing_per_mtok: {}
+  cache_multipliers: {write: 1.0, read: 0.5}       # 입력 단가 대비. 단가를 채울 때 모델별 캐시 할인율도 확인한다

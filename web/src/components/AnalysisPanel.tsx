@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { DomainAdapter } from "../domains/types";
 import type { Dataset, DecisionRecord, Dimensions, DomainInfo, Finding, FindingLabel, Report, Run, ToolCall } from "../types";
-import { fmtSeconds, fmtUsd } from "./MetricsPanel";
+import { fmtCost, fmtSeconds } from "./MetricsPanel";
 import { usePoll } from "./usePoll";
 import { TERMS, tip } from "../terms";
 import Details from "./Details";
@@ -142,7 +142,7 @@ export default function AnalysisPanel({
               </div>
               <div className="tile tile-cost">
                 <div className="tile-label">분석 비용·시간</div>
-                <div className="tile-value">{fmtUsd(current.body.usage.cost_usd)}</div>
+                <div className="tile-value">{fmtCost(current.body.usage)}</div>
                 <div className="tile-note">
                   {fmtSeconds(current.body.usage.seconds)} · {TERMS.llm.label} {current.body.usage.llm_calls ?? 0}회 · 집계 {Object.keys(current.body.calls).length}회
                 </div>
@@ -160,7 +160,7 @@ export default function AnalysisPanel({
                     <div className="tile-label">관점: {p.name}</div>
                     <div className="tile-value">{p.error ? "실패" : `발견 ${p.findings}건`}</div>
                     <div className="tile-note">
-                      {p.error ? p.error : `${fmtUsd(p.usage?.cost_usd)} · ${fmtSeconds(p.usage?.seconds)} · ${TERMS.llm.label} ${p.usage?.llm_calls ?? 0}회`
+                      {p.error ? p.error : `${fmtCost(p.usage)} · ${fmtSeconds(p.usage?.seconds)} · ${TERMS.llm.label} ${p.usage?.llm_calls ?? 0}회`
                         + (p.dropped ? ` · 근거 부족으로 뺌 ${p.dropped}건` : "")}
                     </div>
                   </div>

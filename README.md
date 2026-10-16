@@ -95,6 +95,18 @@ python -m api.main --demo demo/rehearsal      # http://127.0.0.1:8000
 `.env.example`을 `.env`로 복사하고 `ANTHROPIC_API_KEY`를 채운다(`.env`는 커밋하지 않는다).
 모델·생각(thinking)·effort·동시 실행 수·응답 캐시는 `configs/llm.yaml`에 있다. 기본 모델은 비용을 아끼려고 `claude-haiku-4-5`이고, Haiku 4.5는 adaptive thinking과 effort를 지원하지 않아 `thinking: "off"`, `effort: null`로 둔다(Sonnet·Opus 5 계열로 바꾸면 `thinking: adaptive`와 effort를 같이 켠다). 같은 입력은 캐시에서 재사용하므로 반복 개발 비용이 줄어든다. 최종 측정 때는 `LLM_CACHE=0`으로 끈다.
 
+#### Azure OpenAI로 실행 (M14)
+
+허용 모델이 OpenAI 계열뿐인 Azure OpenAI 호환 게이트웨이를 쓸 때다. 에이전트는 그대로이고, `core/llm/azure_openai.py`가 Anthropic 형식 ↔ OpenAI 형식을 바꾼다.
+
+```bash
+pip install -e ".[dev,workflow,azure]"           # azure: openai 패키지
+# .env에 MY_PROJECT_AZURE_API_KEY를 채운다 (endpoint·api-version은 configs/llm.yaml, 환경변수로 덮을 수 있음)
+LLM_PROVIDER=azure_openai python -m api.main
+```
+
+모델·역할별 모델·deployment 이름 대응표·모델별 옵션(`reasoning_effort` 지원 값)은 `configs/llm.yaml`의 `azure` 섹션에 있다. 단가를 비워 둔 모델은 비용이 "미확인"으로 나오고 토큰 수는 그대로 기록된다. 실행 기록의 사용량(`usage`)에 `provider`와 `deployment`가 남는다.
+
 비용 때문에 AI는 실행 범위를 **1일차 앞 10건(시범)**부터 돌려 건당 비용을 확인한 뒤 넓힌다. 규칙 agent는 비용이 없으니 전체로 돌린다.
 
 실행 결과는 `runs/harness.db`(SQLite)에 쌓인다. `runs/`는 커밋하지 않는다.

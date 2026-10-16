@@ -1,6 +1,8 @@
 """LLM 호출 래퍼. 모델·effort·재시도·캐시·토큰 집계를 한 곳에서 관리한다.
 
-코어의 다른 모듈은 LLMClient 프로토콜만 쓰고, 실제 API 호출은 AnthropicClient만 한다.
+코어의 다른 모듈은 LLMClient 프로토콜만 쓰고, 실제 API 호출은 AnthropicClient와
+AzureOpenAIClient(core/llm/azure_openai.py, Anthropic 형식 ↔ OpenAI 형식 변환)만 한다.
+어느 쪽을 쓸지는 설정의 provider로 고르고, make_client가 만든다.
 """
 
 import hashlib
@@ -39,12 +41,25 @@ def api_key_from_env() -> str | None:
 
 
 ROLE_KEYS = ("model", "thinking", "effort", "max_tokens")
+# 제공사 → 설정 섹션. anthropic은 최상위 값을 그대로 쓴다
+PROVIDER_SECTIONS = {"anthropic": None, "azure_openai": "azure"}
+# 제공사 섹션이 최상위 값을 덮는 키 (역할별 모델과 단가는 제공사마다 다르다)
+PROVIDER_KEYS = (*ROLE_KEYS, "roles", "pricing_per_mtok", "cache_multipliers")
 
 
 def load_config(path: Path = CONFIG_PATH, role: str | None = None) -> dict:
     """role: 역할별 설정(roles.<role>)을 기본값 위에 덮는다 (예: analysis, proposals). 없으면 기본값.
+    제공사(provider, 환경변수 LLM_PROVIDER가 우선)가 anthropic이 아니면 그 섹션 값이 먼저 최상위 값을 덮는다.
     실험용 환경변수(LLM_MODEL 등)는 역할보다 우선한다."""
     config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    provider = os.environ.get("LLM_PROVIDER") or config.get("provider") or "anthropic"
+    if provider not in PROVIDER_SECTIONS:
+        raise ValueError(f"알 수 없는 LLM 제공사: {provider} (가능: {', '.join(PROVIDER_SECTIONS)})")
+    config["provider"] = provider
+    if section_name := PROVIDER_SECTIONS[provider]:
+        section = config.get(section_name) or {}
+        config.update({k: section[k] for k in PROVIDER_KEYS if k in section})
+        config["roles"] = section.get("roles") or {}
     override = ((config.get("roles") or {}).get(role) or {}) if role else {}
     config.update({k: v for k, v in override.items() if k in ROLE_KEYS})
     env_cache = os.environ.get("LLM_CACHE")
@@ -110,8 +125,28 @@ class Usage:
         return cost / 1_000_000
 
     def to_dict(self, model: str, config: dict) -> dict:
-        return {"model": model, "calls": self.calls, "cached_calls": self.cached_calls, **self.tokens,
-                "cost_usd": self.cost_usd(model, config)}
+        """cost_usd가 None이면 단가 미확인이다 (토큰 수는 항상 남는다). 제공사와 deployment는 재현 조건으로 남긴다."""
+        provider = config.get("provider", "anthropic")
+        out = {"model": model, "provider": provider, "calls": self.calls, "cached_calls": self.cached_calls,
+               **self.tokens, "cost_usd": self.cost_usd(model, config)}
+        if provider == "azure_openai":
+            out["deployment"] = deployment_for(model, config)
+        return out
+
+
+def deployment_for(model: str, config: dict) -> str:
+    """Azure deployment 이름. 설정의 대응표(azure.deployments)에 없으면 모델 이름 그대로."""
+    return ((config.get("azure") or {}).get("deployments") or {}).get(model) or model
+
+
+def make_client(config: dict | None = None, **kwargs: Any) -> "LLMClient":
+    """설정의 provider에 맞는 클라이언트. kwargs는 클라이언트 생성자로 넘긴다 (cache, api, env_path)."""
+    config = config or load_config()
+    if config.get("provider", "anthropic") == "azure_openai":
+        from core.llm.azure_openai import AzureOpenAIClient
+
+        return AzureOpenAIClient(config, **kwargs)
+    return AnthropicClient(config, **kwargs)
 
 
 class ResponseCache:

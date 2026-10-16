@@ -75,7 +75,7 @@ class AgentRuns:
 
     def start(self, req: AgentsStart) -> dict:
         from core.harness.levels import load_levels
-        from core.llm.client import AnthropicClient, load_config
+        from core.llm.client import load_config, make_client
 
         from .context import AgentContext
         from .flow import build_flow
@@ -95,7 +95,7 @@ class AgentRuns:
                 raise HTTPException(501, f"가짜 AI를 쓸 수 없음 (레포에서 실행해야 함): {exc}")
         else:
             try:
-                clients = {role: AnthropicClient(load_config(role=role)) for role in (None, "analysis", "proposals")}
+                clients = {role: make_client(load_config(role=role)) for role in (None, "analysis", "proposals")}
             except Exception as exc:  # 자격 증명이 없는 경우 등
                 raise HTTPException(503, f"LLM 클라이언트를 만들 수 없음: {exc}")
             ctx.make_llm = lambda role=None: clients[role]

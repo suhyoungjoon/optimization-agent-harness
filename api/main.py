@@ -24,7 +24,7 @@ from core.evaluation.runner import create_ai_run, run_ai_agent, run_rule_agent
 from core.harness.levels import load_levels
 from core.harness.runner import CORE_REASON_CODES
 from core.improvement.changes import spec_sections
-from core.llm.client import AnthropicClient, LLMClient, load_config
+from core.llm.client import LLMClient, load_config, make_client
 from core.registry import list_domains, list_faults, load_faults, load_pack, load_params, set_domain_files_root
 from core.storage.store import Store, to_jsonable
 
@@ -105,7 +105,7 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
     if not demo:
         # role: None(배정), "analysis", "proposals" — configs/llm.yaml의 roles로 역할별 모델
         if llm_factory is None:
-            make_llm = lambda role=None: AnthropicClient(load_config(role=role))  # noqa: E731
+            make_llm = lambda role=None: make_client(load_config(role=role))  # noqa: E731
         elif accepts_role(llm_factory):
             make_llm = llm_factory
         else:
@@ -143,7 +143,7 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
     @app.get("/harness/levels")
     def levels():
         return {"levels": {name: to_jsonable(level) for name, level in load_levels().items()},
-                "llm": {**{k: llm_config.get(k) for k in ("model", "thinking", "effort", "cache", "concurrency",
+                "llm": {**{k: llm_config.get(k) for k in ("provider", "model", "thinking", "effort", "cache", "concurrency",
                                                             "max_llm_calls_per_item")},
                         "roles": {role: {k: cfg.get(k) for k in ("model", "thinking", "effort")}
                                   for role in (llm_config.get("roles") or {}) for cfg in [load_config(role=role)]}},

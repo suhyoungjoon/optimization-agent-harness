@@ -205,21 +205,29 @@ class Tracer:
 
 AI agent 러너 전용이다. 규칙 엔진·개선 루프 단계는 트레이스를 남기지 않는다.
 
-### 2.11 LLM 클라이언트 — `core/llm/client.py`, `core/llm/tool_loop.py`
+### 2.11 LLM 클라이언트 — `core/llm/client.py`, `core/llm/azure_openai.py`, `core/llm/tool_loop.py`
 
 ```python
 def load_config(path: Path = <configs/llm.yaml>, role: str | None = None) -> dict
 # role: roles.<role>(model·thinking·effort·max_tokens)을 기본값 위에 덮음 (analysis, proposals). 없으면 기본값(배정)
 # 환경변수 LLM_CACHE가 cache를, LLM_MODEL·LLM_THINKING·LLM_EFFORT가 역할 설정보다 우선해 덮어씀
+# provider(anthropic | azure_openai, 환경변수 LLM_PROVIDER 우선): azure_openai면 azure 섹션의
+# model·effort·max_tokens·roles·단가가 먼저 기본값을 덮는다. 결과 dict에 provider가 들어 있다 (M14)
+def make_client(config: dict | None = None, **kwargs) -> LLMClient   # provider에 맞는 클라이언트 (kwargs: cache, api, env_path)
 class LLMClient(Protocol):
     model: str
     def create(self, *, system: list[dict], messages: list[dict], tools: list[dict], salt: str = "") -> LLMResponse
 class AnthropicClient:            # 실제 호출은 여기서만. thinking·effort는 llm.yaml 값대로 (모델마다 지원이 다름)
     def __init__(self, config: dict | None = None, cache: ResponseCache | None = None, api: Any = None,
                  env_path: str | Path | None = None)   # env_path: API 키를 읽을 .env (없으면 패키지 위치의 .env)
+class AzureOpenAIClient:          # Azure OpenAI 호환 게이트웨이 (Chat Completions). 생성자는 AnthropicClient와 같다
+    # 요청: Anthropic 형식(system 블록, tool_use, tool_result) → OpenAI 형식, 응답: 다시 Anthropic 형식 LLMResponse.
+    # 에이전트 코드는 제공사를 모른다. 키는 azure.api_key_envs(기본 MY_PROJECT_AZURE_API_KEY)에서, pip install -e ".[azure]"
+    # 풀리지 않는 arguments는 input={"_raw_arguments": 원문}, 입력 토큰은 캐시분을 뺀 값(Anthropic과 같은 뜻)
 class ResponseCache:              # 요청+salt 해시 → 응답 (SQLite)
     def __init__(self, path=<패키지 위치>/runs/llm_cache.sqlite)
 class Usage: calls, cached_calls, tokens; add(resp); merge(other); cost_usd(model, config); to_dict(model, config)
+# to_dict: model, provider, (azure_openai면) deployment, 토큰, cost_usd. 단가를 모르면 cost_usd=None (화면은 "미확인")
 @dataclass class LLMResponse: content: list[dict]; stop_reason: str; usage: dict[str, int]; model: str; from_cache: bool = False
 
 def run_tool_loop(llm, *, system: str, user: str, tools: list[dict], submit_tool: dict, max_calls: int = 30,
