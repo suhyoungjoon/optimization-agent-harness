@@ -168,7 +168,8 @@ def test_reasoning_effort_only_for_models_that_list_it(azure_config):
 
 
 def test_deployment_table_and_usage_record(azure_config):
-    config = {**azure_config, "azure": {**azure_config["azure"], "deployments": {"gpt-4.1-mini": "dep-mini-01"}}}
+    config = {**azure_config, "model": "gpt-4.1-mini",
+              "azure": {**azure_config["azure"], "deployments": {"gpt-4.1-mini": "dep-mini-01"}}}
     api = ScriptedOpenAI([completion("ok", prompt=1000, completion_tokens=50, cached=600)])
     client = AzureOpenAIClient(config, api=api)
     resp = client.create(system=[], messages=[{"role": "user", "content": "hi"}], tools=[])
