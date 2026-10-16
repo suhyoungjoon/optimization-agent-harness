@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../api";
 import type { DomainAdapter, MetricSpec, Scope } from "../domains/types";
-import type { HarnessInfo, HistoryRow, Memory, Proposal, ProposalBatch, SpecEstimate } from "../types";
+import type { HarnessInfo, HistoryRow, Memory, Proposal, ProposalBatch, Ranking, RankTier, SpecEstimate } from "../types";
 import { fmtCost, fmtMetric, fmtSeconds, fmtUsd } from "./MetricsPanel";
 import { usePoll } from "./usePoll";
 import { TERMS, tip } from "../terms";
@@ -18,6 +18,25 @@ const STATUS_LABEL: Record<Proposal["status"], string> = {
   rejected: "반려됨",
   stale: "기준이 바뀜 (다시 제안 필요)",
 };
+
+const TIER_LABEL: Record<RankTier, string> = {
+  main: "본안",
+  cut: "개수 상한으로 잘림",
+  reference: "참고",
+  hidden: "지배당한 안 (모든 지표에서 다른 안보다 나쁨)",
+  pending: "아직 미리 돌려보지 않음",
+};
+const FOLDED: RankTier[] = ["cut", "reference", "hidden"];
+
+// 제시 기준 (M15-A) 순서대로: 본안 → 아직 → (접음) 잘림 · 참고 · 숨김
+function orderedProposals(batch: ProposalBatch | null, ranking: Ranking | null | undefined) {
+  const all = batch?.proposals ?? [];
+  if (!ranking) return { shown: all, folded: [] as Proposal[] };
+  const byId = new Map(all.map((p) => [p.id, p]));
+  const ordered = ranking.order.map((id) => byId.get(id)).filter((p): p is Proposal => !!p);
+  const tier = (p: Proposal) => ranking.entries[p.id]?.tier ?? "pending";
+  return { shown: ordered.filter((p) => !FOLDED.includes(tier(p))), folded: ordered.filter((p) => FOLDED.includes(tier(p))) };
+}
 
 const HUMAN_HOURS_KEY = "oah.humanHoursPerCycle";
 
@@ -122,6 +141,14 @@ export default function ImprovementPanel({
     }
   };
 
+  const ranking = batch?.ranking;
+  const { shown, folded } = orderedProposals(batch, ranking);
+  const unsimulated = (batch?.proposals ?? []).filter((p) => p.kind === "params" && p.status === "proposed");
+  const simulateAll = () =>
+    guard("설정값 제안을 모두 미리 돌려보는 중", async () => {
+      for (const p of unsimulated) await api.simulate(p.id, {});
+      setNotice(`설정값 제안 ${unsimulated.length}건을 미리 돌려보고 순위를 매겼습니다 (규칙 엔진, AI 비용 0)`);
+    });
   const approved = history.filter((h) => h.status === "approved");
   const lastCycle = history[history.length - 1]?.cycle;
   const cycleSeconds = lastCycle
@@ -233,15 +260,37 @@ export default function ImprovementPanel({
       </div>
       </Details>
 
-      <TradeoffMap datasetId={datasetId} params={current?.params ?? null} proposals={batch?.proposals ?? []}
+      <TradeoffMap datasetId={datasetId} params={current?.params ?? null} proposals={batch?.proposals ?? []} ranking={ranking}
         constraints={batch?.meta?.constraints ?? []} specs={adapter.metrics}
         defaultAxes={adapter.tradeoff?.axes} defaultMetrics={adapter.tradeoff?.metrics} />
 
+      {batch?.status === "done" && ranking && (
+        <div className="controls small">
+          <span className="muted" title="개선안 제시 기준: 사람 제약을 지키는 안 → 핵심 지표 개선폭 → 손실이 작은 순. 적용 불가·규칙 위반 증가·최소 효과 미만은 참고로 접습니다">
+            제시 기준: 본안 최대 {ranking.config.max_proposals}건 · 발견 하나당 {ranking.config.per_finding}건 · 핵심 지표 최소 효과{" "}
+            {(ranking.config.min_effect * 100).toFixed(1)}%p
+            {ranking.cut.length > 0 && ` · 개수 상한으로 잘린 안 ${ranking.cut.length}건`}
+          </span>
+          {unsimulated.length > 0 && (
+            <button disabled={!!busy} onClick={simulateAll} title="순위는 미리 돌려본 결과로 매깁니다. 설정값 제안은 규칙 엔진으로 다시 계산하므로 AI 비용이 들지 않습니다">
+              설정값 제안 {unsimulated.length}건 모두 미리 돌려보기
+            </button>
+          )}
+        </div>
+      )}
       <div className="proposal-list">
-        {batch?.proposals.map((p) => (
-          <ProposalCard key={p.id} proposal={p} current={current} specs={adapter.metrics} harness={harness} scopes={scopes}
-            busy={!!busy} guard={guard} onApproved={(msg) => setNotice(msg)} />
+        {shown.map((p) => (
+          <ProposalCard key={p.id} proposal={p} rank={ranking?.entries[p.id]} current={current} specs={adapter.metrics} harness={harness}
+            scopes={scopes} busy={!!busy} guard={guard} onApproved={(msg) => setNotice(msg)} />
         ))}
+        {folded.length > 0 && (
+          <Details summary={`참고 (접음) ${folded.length}건: 잘림 · 참고 · 지배당한 안`}>
+            {folded.map((p) => (
+              <ProposalCard key={p.id} proposal={p} rank={ranking?.entries[p.id]} current={current} specs={adapter.metrics} harness={harness}
+                scopes={scopes} busy={!!busy} guard={guard} onApproved={(msg) => setNotice(msg)} />
+            ))}
+          </Details>
+        )}
         {!batch && reportId && <p className="muted empty">{TERMS.proposal.label} 만들기를 누르면 AI가 분석 결과를 읽고 규칙을 어떻게 바꿀지 제안합니다.</p>}
       </div>
 
@@ -338,12 +387,19 @@ function Gist({ proposal: p, specs }: { proposal: Proposal; specs: MetricSpec[] 
           : "나빠진 지표 없음"}
       </span>
       <span className={v ? "worse" : "better"} title={tip("violations")}>{TERMS.violations.label} {v}건</span>
+      {sim.minimal_change && (
+        <span className="better" title="현재 값과 제안 값 사이를 규칙 엔진으로 훑어, 같은 핵심 지표를 내는 가장 작은 변경을 찾았습니다 (AI 비용 0)">
+          최소 변경 추천: <code>{sim.minimal_change.path}</code> {sim.minimal_change.current} → <strong>{sim.minimal_change.recommended}</strong>
+          {" "}(제안 {sim.minimal_change.proposed}과 핵심 지표 같음)
+        </span>
+      )}
     </p>
   );
 }
 
 function ProposalCard({
   proposal: p,
+  rank,
   current,
   specs,
   harness,
@@ -353,6 +409,7 @@ function ProposalCard({
   onApproved,
 }: {
   proposal: Proposal;
+  rank?: Ranking["entries"][string];
   current: { params: Record<string, unknown>; spec_sections: Record<string, string> } | null;
   specs: MetricSpec[];
   harness: HarnessInfo | null;
@@ -385,6 +442,7 @@ function ProposalCard({
   return (
     <article className={`proposal proposal-${p.status}`} id={`proposal-${p.id}`}>
       <header>
+        {rank?.rank != null && <span className="chip rank" title="개선안 제시 기준의 순위">{rank.rank}순위</span>}
         <strong>{p.body.title}</strong>
         <span className="chip" title={tip(p.kind === "params" ? "params" : "spec")}>
           {p.kind === "params" ? TERMS.params.label : TERMS.spec.label}
@@ -397,6 +455,11 @@ function ProposalCard({
         )}
       </header>
       <Gist proposal={p} specs={specs} />
+      {rank && rank.tier !== "pending" && (
+        <p className={`small ${rank.tier === "main" ? "muted" : "warning-text"}`}>
+          {rank.tier === "main" ? "순위 이유" : TIER_LABEL[rank.tier]}: {rank.reasons.join(" · ")}
+        </p>
+      )}
 
       {p.errors.length > 0 && (
         <ul className="critical-text small">

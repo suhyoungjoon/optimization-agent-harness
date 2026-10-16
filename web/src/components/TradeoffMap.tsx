@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../api";
 import type { MetricSpec } from "../domains/types";
-import type { Constraint, ParamKind, Proposal, SweepResult } from "../types";
+import type { Constraint, ParamKind, Proposal, Ranking, SweepResult } from "../types";
 import Details from "./Details";
 import { fmtMetric } from "./MetricsPanel";
 
@@ -81,12 +81,21 @@ function Mark({ cx, cy, payload, onPick }: { cx?: number; cy?: number; payload?:
   return <circle cx={cx} cy={cy} r={4.5} fill={fill} {...ring} />;
 }
 
-export default function TradeoffMap({ datasetId, params, proposals, constraints, specs, defaultAxes, defaultMetrics }: {
+// 순위가 있으면 "1순위", 참고·숨김이면 그 표시, 없으면 "안N"
+function rankLabel(ranking: Ranking | null | undefined, id: string, i: number): string {
+  const e = ranking?.entries[id];
+  if (!e) return `안${i + 1}`;
+  if (e.rank) return `${e.rank}순위`;
+  return { cut: `안${i + 1} (잘림)`, reference: `안${i + 1} (참고)`, hidden: `안${i + 1} (지배당함)`, pending: `안${i + 1}`, main: `안${i + 1}` }[e.tier];
+}
+
+export default function TradeoffMap({ datasetId, params, proposals, ranking, constraints, specs, defaultAxes, defaultMetrics }: {
   datasetId: string | null;
   defaultAxes?: [string, string?];        // 도메인 어댑터가 정한 기본 탐색 축
   defaultMetrics?: [string, string];      // 기본 가로·세로 지표
   params: Record<string, unknown> | null;
   proposals: Proposal[];
+  ranking?: Ranking | null;      // 제시 기준 순위 (M15-A): 점 옆에 "1순위" 등으로 표시
   constraints: Constraint[];
   specs: MetricSpec[];
 }) {
@@ -157,11 +166,11 @@ export default function TradeoffMap({ datasetId, params, proposals, constraints,
       if (p.kind !== "params" || p.status !== "simulated" || !sim?.after || sim.error) return;
       if (!sameBase(sim.before, result.base.metrics)) return;
       const n = (sim as { items?: number }).items ?? items;
-      out.push({ x: scale(xs, sim.after[xKey], n), y: scale(ys, sim.after[yKey], n), kind: "proposal", label: `안${i + 1}`,
+      out.push({ x: scale(xs, sim.after[xKey], n), y: scale(ys, sim.after[yKey], n), kind: "proposal", label: rankLabel(ranking, p.id, i),
         proposalId: p.id, violations: sim.violations_after ?? 0, detail: [p.body.title] });
     });
     return out.filter((d) => Number.isFinite(d.x) && Number.isFinite(d.y));
-  }, [result, xKey, yKey, counts, proposals]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [result, xKey, yKey, counts, proposals, ranking]); // eslint-disable-line react-hooks/exhaustive-deps
   const hidden = result ? proposals.filter((p) => p.kind === "params" && p.status === "simulated" && p.simulation?.after
     && !p.simulation.error && !sameBase(p.simulation.before, result.base.metrics)).length : 0;
 

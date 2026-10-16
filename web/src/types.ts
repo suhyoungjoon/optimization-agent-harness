@@ -300,6 +300,18 @@ export interface Simulation {
   run_ids?: Record<string, string>;
   error?: string;
   constraint_violations?: { index: number; type: "param" | "metric"; message: string }[];
+  // 최소 변경 추천 (M15-A): 같은 핵심 지표를 내는 가장 작은 변경. 숫자 하나 바꾸는 안만
+  minimal_change?: { path: string; current: number; proposed: number; recommended: number; same_primary: boolean;
+    metrics: Record<string, number>; violations_after: number } | null;
+}
+
+// 개선안 제시 기준 (M15-A): main 본안(순위) · cut 개수 초과 · reference 참고 · hidden 지배당함 · pending 아직
+export type RankTier = "main" | "cut" | "reference" | "hidden" | "pending";
+export interface Ranking {
+  order: string[];
+  entries: Record<string, { tier: RankTier; rank: number | null; gain: number | null; loss: number | null; worse: string[]; reasons: string[] }>;
+  cut: string[];
+  config: { max_proposals: number; per_finding: number; min_effect: number };
 }
 
 // 사람이 정한 한도 (M12-a). 입력 화면은 이 레포에 없고 API로 받는다
@@ -334,6 +346,7 @@ export interface ProposalBatch {
   error?: string | null;
   meta: { usage: Usage & { seconds?: number }; trials: number; params_version?: number; constraints?: Constraint[]; memory?: Memory | null } | null;
   proposals: Proposal[];
+  ranking?: Ranking | null;
 }
 
 export interface SpecEstimate {
