@@ -38,10 +38,10 @@ azure:
   api_version_env: MY_PROJECT_AZURE_API_VERSION    # 있으면 api_version을 덮는다
   api_key_envs: [MY_PROJECT_AZURE_API_KEY, AZURE_OPENAI_API_KEY]   # 앞의 것이 우선
   # 아래 값은 위 기본값(model, effort, max_tokens, roles, 단가)을 덮는다. thinking은 쓰지 않는다
-  model: gpt-4.1                                   # 배정 (2026-10-16: gpt-4.1-mini에서 한 단계 올림)
+  model: gpt-4.1-mini                              # 배정 (2026-10-16: gpt-4.1로 올렸다가 비용 때문에 되돌림. 건수만큼 호출이 늘어난다)
   effort: null
   max_tokens: 16000                                # 요청에는 max_completion_tokens로 보낸다 (추론 모델은 추론 토큰 포함)
-  roles:                                           # 역할마다 한 단계 올림 (2026-10-16). 이전: 분석 gpt-5-mini, 개선안 gpt-5
+  roles:                                           # 분석·개선안을 한 단계 올림 (2026-10-16). 이전: 분석 gpt-5-mini, 개선안 gpt-5
     analysis: {model: gpt-5, effort: medium}
     proposals: {model: gpt-5.4, effort: medium}    # gpt-6.1-sol은 Chat Completions에서 도구를 못 써 보류 (아래)
   # 모델 이름 → deployment 이름. 비어 있으면 모델 이름을 그대로 deployment로 쓴다.
