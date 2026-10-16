@@ -751,6 +751,37 @@ M9가 기존 에이전트를 노드로 감싸 연결만 했다면, M10은 **에�
 - 실험 보고서에 탐색 결과 표가 있다.
 - 기존 테스트가 모두 통과하고, 분류·탐색 테스트가 추가된다.
 
+**M14 상세 계획: Azure OpenAI 연결 (이 레포)**
+
+배경: 회사에서 Azure OpenAI 호환 게이트웨이 키를 받았다. 허용 모델은 OpenAI 계열뿐이다(gpt-4.1, gpt-4.1-mini, gpt-4o, gpt-4o-mini, gpt-5, gpt-5-mini, gpt-5.4, gpt-5.6-luna, gpt-6-luna, gpt-6.1-sol). 기존 Claude(Anthropic) 경로는 그대로 두고, 설정으로 제공사를 고른다.
+
+원칙: **에이전트 코드는 고치지 않는다.** 하네스 러너, 도구 루프, LangGraph 에이전트는 지금처럼 Anthropic 형식 메시지(`tool_use`, `tool_result`, system 블록)를 만든다. 형식 변환은 `core/llm/` 안의 클라이언트 하나가 맡는다(9장: LLM 호출은 `core/llm/`에서만).
+
+| 단계 | 내용 |
+|---|---|
+| A. 변환 클라이언트 | `core/llm/azure_openai.py`의 `AzureOpenAIClient`. `AnthropicClient`와 같은 `create(system, messages, tools, salt)`와 같은 `LLMResponse`. 요청: system 블록 → `role: system` 하나(`cache_control` 버림), 도구 → `{type: function, function: {name, description, parameters}}`(strict 안 씀), `tool_use` → `tool_calls`(arguments는 JSON 문자열), `tool_result` → 블록마다 `role: tool`(`is_error`면 앞에 오류 표시), thinking 버림, `max_tokens` → `max_completion_tokens`, 깊이 → 지원 모델에만 `reasoning_effort`. 응답: 텍스트 → `text`, `tool_calls` → `tool_use`(`id` 유지, arguments는 `json.loads`), `finish_reason` `tool_calls`/`stop`/`length` → `tool_use`/`end_turn`/`max_tokens`, 사용량 변환. 공식 `openai` 패키지의 `AzureOpenAI`(선택 설치 `.[azure]`) |
+| B. 설정 | `configs/llm.yaml`에 `provider: anthropic \| azure_openai`(환경변수 `LLM_PROVIDER`가 우선, 기본 `anthropic`)와 `azure` 섹션: endpoint·api_version과 덮어쓰는 환경변수 이름, 키 환경변수 이름, 기본 모델, 역할별 모델(`roles`), 모델별 옵션(`reasoning_effort` 지원 값 등), 모델 이름 → deployment 이름 대응표. 코드에 모델 이름을 쓰지 않는다. 단가를 모르면 비우고 비용은 "미확인"으로 표시, 토큰 수는 항상 기록. `.env.example`에 키·endpoint·api-version 환경변수를 값 없이 |
+| B. 재현 조건 | 사용량 기록(`usage`)에 `provider`와 `deployment`를 남긴다. `usage.model`은 지금처럼 모델 이름 |
+| C. 테스트 | 변환 단위 테스트(도구 호출 → 결과 → 재호출 왕복, 한 번에 여러 도구 호출, 깨진 arguments, 오류 결과, thinking 제거, 사용량·종료 사유), 설정(제공사 고르기, 역할별 모델, deployment 대응), 가짜 OpenAI 응답으로 도구 루프 끝까지, 가짜 LLM 흐름 테스트를 `LLM_PROVIDER=azure_openai`에서도 실행 |
+| C. 실제 호출 (요청 시) | `gpt-4.1-mini`로 1일차 앞 10건 L2 배정 1회, 분석 1회. 도구 호출 왕복이 정상인지만 본다. gpt-5 계열에서 이 api-version이 `reasoning_effort`·`max_completion_tokens`를 받는지 1회 확인 |
+| D. 모델 비교 실험 (요청 시) | 실험 보고서 6.9절과 같은 조건(같은 규칙 실행, 같은 리포트, 기억·제약 켬)으로 분석(gpt-4.1-mini, gpt-5-mini)과 개선안(gpt-5, gpt-5.4 이상). "제공사를 바꿔도 하네스(근거 검사·분류·제약)가 품질을 지키는가"를 새 절로 |
+| 범위 밖 | 에이전트 코드 변경, OpenAI Responses API, 프롬프트 캐시 제어(OpenAI는 자동), 화면에서 제공사 고르기 |
+
+착수 전 결정할 것 (M14):
+
+| # | 결정 | 선택지 | 추천 |
+|---|---|---|---|
+| 16 | 실제 호출 확인 시점 | 착수 전 / 구현 후 키를 넣고 | **구현 후** (결정됨, 2026-10-16). 키가 아직 `.env`에 없다. 확인 전까지 `reasoning_effort`는 설정에서 지원을 적은 모델에만 보내고, 안 받으면 그 모델 옵션에서 지운다 |
+| 17 | deployment 이름 | 모델 이름과 같다고 가정 / 대응표 | **대응표 자리만 두고 비면 모델 이름 그대로** (결정됨, 2026-10-16). 게이트웨이 화면이나 첫 호출로 확인해 채운다 |
+| 18 | 풀리지 않는 arguments | 원문 문자열을 `input`에 그대로 / `{"_raw_arguments": 원문}` | **`{"_raw_arguments": 원문}`**. 러너·도구 처리기는 `input`을 dict로 받는다(문자열이면 처리기에서 예외로 실행이 멈춘다). 다시 보낼 때는 원문 문자열 그대로 돌려준다. 필드 단위 JSON 문자열은 지금처럼 `decode_json_args`가 푼다 |
+| 19 | 입력 토큰 집계 | `prompt_tokens` 전체를 입력으로 / 캐시분을 빼고 | **캐시분을 뺀다**: 입력 = `prompt_tokens − cached_tokens`, 캐시 읽기 = `cached_tokens`. OpenAI의 `prompt_tokens`는 캐시분을 포함하고, Anthropic의 `input_tokens`는 포함하지 않는다. 같은 뜻으로 맞춰야 비용 계산이 두 번 세지 않는다 |
+| 20 | 깊이 값 대응 | Anthropic 값을 그대로 / 모델 옵션의 지원 값으로 | **지원 값으로**: 설정의 `effort`가 모델의 `reasoning_effort` 목록에 있으면 그대로, `xhigh`·`max`면 목록의 마지막(가장 깊은 값), 그 밖에는 보내지 않는다 |
+
+완료 기준:
+- `provider: azure_openai`로 배정(L2)·분석·개선안이 끝까지 돈다(실제 호출 확인).
+- `provider: anthropic`(기본값)에서 기존 테스트가 모두 통과한다.
+- 키가 코드·로그·실행 기록·커밋 어디에도 남지 않는다.
+
 # 부록. 구현 명세
 
 ## 개요
@@ -1044,6 +1075,7 @@ GitHub 마일스톤을 주차별로 만들고, 아래 항목을 이슈로 등록
 | M11 가로 그래프 (추가) | LangGraph agents 탭을 React Flow + dagre 가로 그래프로: 위 = 상위 그래프, 가운데 = 에이전트 내부, 방금 지나간 연결 움직이는 선, 실행 중인 노드로 화면이 따라감 (완료) | B |
 | M12 분석·개선 고도화 (완료) | 이 레포: M12-a 채점기 2단계(자동 근거 일치 + 사람 원인 확인) + 제약 형식·코드 제약 검사·개선 에이전트 제약 입력 / M12-b 관점별 분석 에이전트 3관점 + 단일 에이전트 비교 실험 / M12-c 회차 간 장기 기억 / M12-d 자원 단위 발견. 현장 의견 대화는 별도 레포(이 레포 코어를 패키지로 사용). 상세는 15장 M12 | A·B |
 | M13 파라미터 가시화 (완료) | 파라미터 분류(`policy`/`estimate`/`fixed`/`governance`)와 정책이 아닌 값을 바꾸는 개선안의 적용 불가 처리, 파라미터 탐색(`sweep_params`, 1차원 민감도, AI 비용 0), 개선 탭 득실 지도, 도메인 탭 파라미터 지도, 변경 이력 카드. 상세는 15장 M13 | A·B |
+| M14 Azure OpenAI 연결 (추가) | 제공사 설정(`provider: anthropic \| azure_openai`), Anthropic ↔ OpenAI Chat Completions 변환 클라이언트(`AzureOpenAIClient`), 역할별 모델·모델별 옵션·deployment 대응표, 사용량에 제공사·deployment 기록, 단가 미확인 표시. 에이전트 코드는 그대로. 상세는 15장 M14 | A |
 | 선택 (도전) | 두 번째 도메인 팩 (예: 교대 근무표) 최소 구현, 계약 테스트 통과 | A·B |
 
 **완료 기준(각 마일스톤)**: M2는 규칙 agent 결과가 지도에 표시되고 위반 0건, M3은 UI에서 L0~L5 전환 시 지표가 갱신됨, M4는 탐지율과 개선 전후 수치가 화면에 나옴, M5는 네트워크 없이 캐시 모드로 전체 시연 가능, M6-a는 규칙 agent가 쓰는 규칙·데이터를 코드를 열지 않고 화면에서 확인 가능.
