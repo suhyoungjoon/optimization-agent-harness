@@ -328,3 +328,19 @@ def test_stored_non_policy_proposal_is_rechecked_on_simulate_and_forced_approve(
     forced = client.post(f"/proposals/{ok['id']}/approve", json={"force": True, "note": "강제"})
     assert forced.status_code == 400 and "추정값" in forced.json()["detail"]
     assert params_path.read_text(encoding="utf-8") == before                    # 규칙 파일은 그대로
+
+
+def test_batch_ranking_and_minimal_change(client):
+    """제시 기준 (M15-A): 묶음 조회에 순위가 붙고, 숫자 하나 바꾸는 안은 시뮬레이션 결과에 최소 변경 추천이 붙는다."""
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    report = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    batch = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id']}).json()['id']}")
+    ok, too_far, spec = batch["proposals"]
+    r = batch["ranking"]
+    assert r["entries"][too_far["id"]]["tier"] == "reference" and r["entries"][ok["id"]]["tier"] == "pending"
+    sim = client.post(f"/proposals/{ok['id']}/simulate", json={}).json()["simulation"]
+    assert sim["violations_before"] == 0 and sim["minimal_change"] is None     # 3km → 4km: 더 작은 값 없음
+    r = client.get(f"/proposals/batches/{batch['id']}").json()["ranking"]
+    assert r["entries"][ok["id"]]["tier"] == "main" and r["entries"][ok["id"]]["rank"] == 1
+    assert r["order"][0] == ok["id"] and r["config"]["max_proposals"] == 3

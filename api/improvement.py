@@ -25,6 +25,7 @@ from core.improvement.history import change_card, change_record
 from core.improvement.constraints import constraint_errors, constraint_violations
 from core.improvement.memory import analysis_memory_text, collect_memory, proposal_memory_text
 from core.improvement.proposer import finding_slices, propose
+from core.improvement.ranking import load_ranking_config, metric_specs, minimal_change, rank_proposals
 from core.improvement.simulate import simulate_params
 from core.improvement.sweep import sensitivity, sweep_params
 from core.interfaces import DecisionRecord
@@ -283,7 +284,16 @@ def register(app: FastAPI, ctx: Context) -> None:
         batch = store.get_batch(batch_id)
         if batch is None:
             raise HTTPException(404, f"unknown batch: {batch_id}")
-        return batch
+        return {**batch, "ranking": batch_ranking(batch)}
+
+    def batch_ranking(batch: dict) -> dict | None:
+        """제시 기준 (M15-A): 순위·참고·숨김·잘림. 도메인 지표 정의가 없으면 None."""
+        report = store.get_report(batch["report_id"]) if batch.get("report_id") else None
+        run = store.get_run(report["run_id"]) if report else None
+        if run is None:
+            return None
+        specs = metric_specs(load_pack(run["domain"]).dimensions())
+        return rank_proposals(batch.get("proposals") or [], specs, load_ranking_config()) if specs else None
 
     def batch_constraints(p: dict) -> list[dict]:
         return ((store.get_batch(p["batch_id"]) or {}).get("meta") or {}).get("constraints") or []
@@ -322,6 +332,9 @@ def register(app: FastAPI, ctx: Context) -> None:
                                      candidate, finding_slices(report["body"]))
             result["params_version"] = params.get("version")
             with_constraint_check(result, batch_constraints(p), candidate)
+            primary = [m["key"] for m in metric_specs(pack.dimensions()) if m.get("primary")]
+            result["minimal_change"] = minimal_change(lambda q: load_pack(pack.name, q), instance, params,
+                                                      p["body"], result, primary)
             return store.update_proposal(proposal_id, status="simulated", simulation=result)
 
         # spec: AI agent를 개선 전·후 명세로 한 번씩 실행 (비용 발생 → 확인 필요)
