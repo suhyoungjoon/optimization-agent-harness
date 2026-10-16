@@ -414,6 +414,8 @@ details.more > .more-body { margin-top: 8px; }
 @media (max-width: 1000px) { .wf-split { grid-template-columns: 1fr; } }
 .wf-bar { position: sticky; top: 0; z-index: 2; margin-top: 0; }
 .wf-bar .note { flex: 1; min-width: 160px; }
+.wf-review { flex-wrap: wrap; row-gap: 6px; }
+.loop-panel table td { vertical-align: top; }
 .wf-nodes { list-style: none; margin: 0; padding: 0; }
 .wf-arrow { text-align: center; color: var(--text-muted); line-height: 1.4; }
 .wf-node { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--axis); border-radius: 8px; padding: 8px 12px; }

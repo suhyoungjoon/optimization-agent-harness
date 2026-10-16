@@ -390,7 +390,7 @@ function Gist({ proposal: p, specs }: { proposal: Proposal; specs: MetricSpec[] 
       {sim.minimal_change && (
         <span className="better" title="현재 값과 제안 값 사이를 규칙 엔진으로 훑어, 같은 핵심 지표를 내는 가장 작은 변경을 찾았습니다 (AI 비용 0)">
           최소 변경 추천: <code>{sim.minimal_change.path}</code> {sim.minimal_change.current} → <strong>{sim.minimal_change.recommended}</strong>
-          {" "}(제안 {sim.minimal_change.proposed}과 핵심 지표 같음)
+          {" "}(제안값 {sim.minimal_change.proposed}일 때와 핵심 지표 같음)
         </span>
       )}
     </p>

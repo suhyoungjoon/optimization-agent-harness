@@ -500,10 +500,40 @@ export interface AgentEvent {
 
 export interface AgentsRun extends Omit<WorkflowRun, "ids" | "inputs" | "approval"> {
   llm: "fake" | "claude";
-  approval: { proposal: number; title: string; question: string } | null;
+  approval: {
+    proposal: number; title: string; question: string; round?: number; rank?: number | null; reasons?: string[];
+    opinion_error?: string; minimal_change?: { path: string; current: number; recommended: number; proposed: number } | null;
+  } | null;
   events: AgentEvent[];
   counts: Record<string, Record<string, number>>;
   last_event: AgentEvent | null;
-  proposals: { title: string; kind: string; status: string; errors: string[] }[];
+  proposals: { title: string; kind: string; status: string; errors: string[]; rank?: { tier: string; rank: number | null; reasons: string[] } | null }[];
   inputs: { domain?: string; seed?: number; faults?: string[]; items?: number; level?: string; perspectives?: boolean };
+  loop?: AgentsLoop;
+}
+
+// 개선 루프 (M15-B): 회차 기록과 결과 보고
+export interface LoopDecision { action: "approve" | "reject" | "opinion"; title: string; note: string; round?: number }
+export interface LoopRound {
+  round: number;
+  before: Record<string, number>;
+  after: Record<string, number>;
+  approved: string[];
+  decisions: LoopDecision[];
+  cost_usd: number | null;
+  seconds: number;
+  params_version_before?: number;
+  params_version_after?: number;
+}
+export interface AgentsLoop {
+  round: number | null;
+  rounds: LoopRound[];
+  constraints: Constraint[];
+  stop_reason: string | null;
+  decisions: LoopDecision[];
+  report: {
+    rounds: LoopRound[]; stop_reason: string; decisions: LoopDecision[]; constraints: Constraint[];
+    remaining: { id: string; title: string }[]; cost_usd: number | null; seconds: number; lines: string[];
+    total: Record<string, { before: number | null; after: number | null }>;
+  } | null;
 }

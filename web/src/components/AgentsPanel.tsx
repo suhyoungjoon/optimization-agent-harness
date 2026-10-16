@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { DomainAdapter } from "../domains/types";
-import type { AgentEvent, AgentsGraph, AgentsRun, DomainInfo, HarnessInfo } from "../types";
+import type { AgentEvent, AgentsGraph, AgentsLoop, AgentsRun, DomainInfo, HarnessInfo } from "../types";
+import type { MetricSpec } from "../domains/types";
+import { fmtMetric, fmtUsd } from "./MetricsPanel";
 import { TERMS, tip } from "../terms";
 import GraphCanvas, { type NodeView } from "./GraphCanvas";
 import { usePoll } from "./usePoll";
-import { StepBar } from "./WorkflowPanel";
+import { StepBar, type StepAction } from "./WorkflowPanel";
 
 // LangGraph agents (M10, 가로 그래프 M11): 배정·분석·개선 제안 에이전트의 내부까지 LangGraph 하위 그래프로 만든 별도 탭.
 // 위 = 상위 그래프(에이전트 단위로 멈춤), 아래 = 고른 에이전트의 내부 그래프. 둘 다 왼쪽→오른쪽 그래프로 그리고,
@@ -16,6 +18,7 @@ const AGENT_NAMES: Record<string, string> = {
   dispatch_agent: "배정 에이전트",
   analysis_agent: "분석 에이전트",
   proposal_agent: "개선 제안 에이전트",
+  opinion_agent: "의견 정리 에이전트",
   simulate: "미리 돌려보기 (배정 에이전트 재실행)",
 };
 
@@ -86,7 +89,7 @@ export default function AgentsPanel({
     setFlowId(r.id);
     setTick((t) => t + 1);
   });
-  const step = (action: "next" | "approve" | "reject") => guard(async () => {
+  const step = (action: StepAction) => guard(async () => {
     if (!flowId) return;
     setRun(await api.agentsStep(flowId, action, note));
     setNote("");
@@ -190,6 +193,7 @@ export default function AgentsPanel({
 
       <StepBar run={run} nextLabel={run?.next[0] ? topLabel(run.next[0]) : null}
         currentLabel={run?.current ? topLabel(run.current) : null} note={note} setNote={setNote} onStep={step}
+        approval={run?.approval ?? null}
         idleText="입력을 고르고 [에이전트 준비]를 누르면 첫 단계 앞에서 멈춥니다. 에이전트 하나가 끝날 때마다 멈춥니다."
         doneText="그래프의 노드를 누르면 그 단계의 결과와 에이전트 내부를 다시 볼 수 있습니다." />
 
@@ -198,10 +202,12 @@ export default function AgentsPanel({
           <h2>상위 그래프 <span className="muted small">(StateGraph · 노드를 누르면 아래에 내부·결과)</span></h2>
           <GraphCanvas ariaLabel="상위 그래프" nodes={graph.top.nodes} edges={graph.top.edges} views={topViews}
             activeEdges={topActive} onNodeClick={(id) => !id.startsWith("__") && setPicked(picked === id ? null : id)}
-            height={230} nodeWidth={160} nodeHeight={74} minFitZoom={0.82} follow={towards ?? lastStep ?? "__start__"} />
+            height={320} nodeWidth={160} nodeHeight={74} minFitZoom={0.82} follow={towards ?? lastStep ?? "__start__"} />
           <Legend />
         </div>
       )}
+
+      {run?.loop && <LoopPanel loop={run.loop} specs={adapter.metrics} />}
 
       <AgentInside graph={graph} agent={shown} run={run} events={events} live={liveAgent === shown} />
 
@@ -323,6 +329,76 @@ function EventLog({ agent, events, live, graph }: { agent: string; events: Agent
           </li>
         ))}
       </ol>
+    </div>
+  );
+}
+
+const ACTION_LABEL = { approve: "승인", reject: "반려", opinion: "의견" } as const;
+
+// 개선 루프 (M15-B): 지금 회차, 회차별 핵심 지표 전→후, 쓴 제약, 끝나면 결과 보고
+function LoopPanel({ loop, specs }: { loop: AgentsLoop; specs: MetricSpec[] }) {
+  const primary = specs.filter((s) => s.primary);
+  const rounds = loop.report?.rounds ?? loop.rounds;
+  const cons = loop.report?.constraints ?? loop.constraints;
+  if (!loop.round && !rounds.length) return null;
+  return (
+    <div className="panel loop-panel">
+      <h2>
+        개선 루프{" "}
+        <span className="muted small">
+          {loop.report ? `끝 · ${loop.report.stop_reason}` : `${loop.round ?? 1}회차 진행 중`}
+          {!loop.report && loop.decisions.length > 0 && ` · 이번 회차 결정 ${loop.decisions.map((d) => ACTION_LABEL[d.action]).join("·")}`}
+        </span>
+      </h2>
+      {rounds.length > 0 && (
+        <div className="table-scroll">
+          <table className="compare-table-inner">
+            <thead>
+              <tr>
+                <th>회차</th>
+                {primary.map((s) => <th key={s.key} className="num">{s.label} 전 → 후</th>)}
+                <th>승인·반려·의견</th><th className="num">AI 비용</th><th className="num">시간</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rounds.map((r) => (
+                <tr key={r.round}>
+                  <td>{r.round}회차{r.params_version_after !== r.params_version_before && <span className="muted small"> (규칙 v{r.params_version_before}→v{r.params_version_after})</span>}</td>
+                  {primary.map((s) => (
+                    <td key={s.key} className="num">{fmtMetric(r.before[s.key], s.format)} → <strong>{fmtMetric(r.after[s.key], s.format)}</strong></td>
+                  ))}
+                  <td className="small">
+                    {r.decisions.map((d, i) => (
+                      <div key={i}><span className={d.action === "approve" ? "good-text" : d.action === "opinion" ? "warning-text" : "muted"}>{ACTION_LABEL[d.action]}</span> {d.title}{d.note && <span className="muted"> — {d.note}</span>}</div>
+                    ))}
+                    {!r.decisions.length && <span className="muted">결정 없음</span>}
+                  </td>
+                  <td className="num">{fmtUsd(r.cost_usd)}</td>
+                  <td className="num">{r.seconds.toFixed(1)}초</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {cons.length > 0 && (
+        <p className="small">쓴 제약: {cons.map((c, i) => (
+          <span key={i} className="chip">{c.type === "param" ? c.path : c.metric}{" "}
+            {[c.min != null && `최소 ${c.min}`, c.max != null && `최대 ${c.max}`, c.max_drop != null && `감소 ${c.max_drop} 이내`,
+              c.max_rise != null && `증가 ${c.max_rise} 이내`].filter(Boolean).join(", ")} <span className="muted">({c.source})</span></span>
+        ))}</p>
+      )}
+      {loop.report && (
+        <div className="small">
+          <strong>결과 보고</strong>
+          <ul>
+            {loop.report.lines.map((l) => <li key={l}>{l}</li>)}
+            <li>종료 이유: {loop.report.stop_reason}</li>
+            <li>남은 문제: {loop.report.remaining.length ? loop.report.remaining.map((f) => `${f.id} ${f.title}`).join(", ") : "없음"}</li>
+            <li>AI 비용 합 {fmtUsd(loop.report.cost_usd)} · 시간 합 {loop.report.seconds.toFixed(1)}초</li>
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

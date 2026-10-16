@@ -486,7 +486,7 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
             lines.append("⚠ 제약 위반: " + "; ".join(v["message"] for v in sim["constraint_violations"]))
         if mc := sim.get("minimal_change"):
             lines.append(f"최소 변경 추천: {mc['path']} {mc['current']} → {mc['recommended']} "
-                         f"(제안 {mc['proposed']}과 핵심 지표 같음)")
+                         f"(제안값 {mc['proposed']}일 때와 핵심 지표 같음)")
         return {"proposal": idx, "queue": rest, "improved": improved, **_step("simulate", lines, improved=improved)}
 
     def human_review(state: AgentsState):
