@@ -1,7 +1,10 @@
 """LangGraph agents (M10): 배정·분석·개선 제안 에이전트를 모두 LangGraph 하위 그래프로 만들고 상위 그래프로 묶는다.
 
     데이터 준비 → [배정 에이전트] → 평가 → 규칙 방식 전체 실행 → [분석 에이전트] → [개선 제안 에이전트]
-    → 미리 돌려보기 ◇ → 사람 승인(interrupt) ◇ → 반영
+    → 미리 돌려보기·순위 ◇ → 사람 검토(interrupt) ◇ → 반영 → 재배정·재평가 → 종료 판정 ◇ → 결과 보고
+                                  ├ 반려 → 다음 제안 / 모두 반려 → 다시 제안 (반려 사유를 기억으로)
+                                  └ 의견 → [의견 정리 에이전트] → 제약 → 다시 제안 (형식이 틀리면 사람에게 다시 묻기)
+    종료 판정이 "다음 회차"면 배정 에이전트부터 다시 (M15-B). 순위·종료 기준은 configs/proposals.yaml·workflow.yaml.
 
 M9(workflow/graph.py)는 기존 API를 노드로 감쌌다면, 여기서는 에이전트 내부(AI 응답·도구·검사·재시도)까지
 LangGraph 노드와 연결이다. 도구·검사·검증·시뮬레이션·승인 반영은 코어 함수를 그대로 부른다 (코어는 그대로).
@@ -26,6 +29,10 @@ from core.harness.levels import Level
 from core.improvement import proposer as proposer_core
 from core.improvement.approval import write_params, write_spec
 from core.improvement.changes import apply_params, apply_spec, params_errors, spec_errors, spec_sections
+from core.improvement.constraints import constraint_errors, constraint_violations
+from core.improvement.loop import load_loop_config, loop_report, termination
+from core.improvement.memory import _proposal_change, proposal_memory_text
+from core.improvement.ranking import load_ranking_config, metric_specs, minimal_change, rank_proposals
 from core.improvement.simulate import simulate_params
 from core.params import params_view
 from core.registry import load_pack, load_params, load_perspectives
@@ -45,10 +52,14 @@ class AgentsState(TypedDict, total=False):
     level: str
     metrics: list[dict]
     perspectives: bool          # 분석 에이전트를 관점별로 나눠 병렬 실행 (M12-b)
-    queue: list[int]            # 아직 미리 돌려보지 않은 제안 번호
+    queue: list[int]            # 아직 검토하지 않은 제안 번호 (제시 기준 순위대로)
     proposal: int               # 지금 다루는 제안 번호
     improved: bool
-    decision: str
+    decision: str               # 사람 검토: approve / reject / opinion
+    round: int                  # 회차 (1부터, M15-B)
+    opinion_error: str          # 의견을 제약으로 정리하지 못한 이유 (사람에게 다시 묻는다)
+    stop: bool                  # 종료 판정 결과
+    stop_reason: str
     log: Annotated[list[dict], operator.add]
 
 
@@ -63,11 +74,33 @@ NODES: dict[str, dict] = {
                                       "관점별 분석이면 관점마다 따로(병렬) 돌리고 합친다"},
     "proposal_agent": {"label": "개선 제안 에이전트", "kind": "ai", "agent": True,
                        "description": "LangGraph 하위 그래프: AI 응답 ⇄ 규칙 조회·시험 계산 도구 → 바꿀 수 있는 범위 검사"},
-    "simulate": {"label": "미리 돌려보기", "kind": "rule",
-                 "description": "제안 하나를 적용한 결과를 계산한다 (업무 규칙 문서 제안은 배정 에이전트를 전·후로 다시 실행)"},
-    "human_review": {"label": "사람 승인", "kind": "human", "description": "사람이 미리 돌려본 결과를 보고 승인하거나 반려한다"},
+    "simulate": {"label": "미리 돌려보기·순위", "kind": "rule",
+                 "description": "설정값 제안을 모두 규칙 엔진으로 돌려보고 제시 기준으로 순위를 매긴 뒤, 순위대로 하나씩 보여 준다 "
+                                "(업무 규칙 문서 제안은 차례가 오면 배정 에이전트를 전·후로 다시 실행)"},
+    "human_review": {"label": "사람 검토", "kind": "human",
+                     "description": "사람이 미리 돌려본 결과를 보고 승인 · 반려 · 의견(한 줄)을 남긴다"},
+    "opinion_agent": {"label": "의견 정리 에이전트", "kind": "ai", "agent": True,
+                      "description": "LangGraph 하위 그래프: 사람의 한 줄 의견 → 제약 형식 → 형식 검사 (틀리면 사람에게 다시 묻기)"},
     "apply": {"label": "반영", "kind": "rule", "description": "승인한 제안을 규칙 파일에 반영한다 (git 커밋은 사람이)"},
+    "reevaluate": {"label": "재배정·재평가", "kind": "rule",
+                   "description": "반영한 규칙으로 전체를 다시 배정하고 회차 전·후 지표를 잰다"},
+    "check_end": {"label": "종료 판정", "kind": "rule",
+                  "description": "목표 달성 · 개선 없음 · 최대 회차면 결과 보고로, 아니면 다음 회차로"},
+    "report": {"label": "결과 보고", "kind": "rule",
+               "description": "회차별 핵심 지표 전→후, 승인·반려·의견 이력, 쓴 제약, 남은 문제, 회차별 AI 비용·시간"},
 }
+
+# 조건부 연결의 갈래 이름 (M15-B, 그래프 그림에 그대로 나온다)
+OPINION, ALL_REJECTED, CAP = "의견 → 제약으로 정리", "모두 반려 → 다시 제안", "다시 제안 횟수 소진"
+CONSTRAINT_OK, FORMAT_BAD = "제약 확인 → 다시 제안", "형식이 맞지 않음 → 다시 묻기"
+CONTINUE, DONE = "다음 회차", "끝 → 결과 보고"
+CONSTRAINTS_HEADER = "# 지켜야 할 제약 (현장·운영이 정한 한도, source는 누가 정했는지)"
+
+
+def _charge(d: dict, cost) -> None:
+    """회차 AI 비용 합 (단가를 모르면 None으로 남긴다)."""
+    if cost is not None:
+        d["round_cost"] = (d.get("round_cost") or 0.0) + cost
 
 
 def _step(node: str, lines: list[str], **data) -> dict:
@@ -217,10 +250,53 @@ def proposal_agent_graph(ctx: AgentContext, llm=None):
                             feedback=False, max_calls=20, salt="lg-proposals", tool_text=tool_text)
 
 
+OPINION_SYSTEM = """현장·운영 담당자가 개선 제안을 보고 남긴 한 줄 의견을 개선 제약 형식으로 바꾼다.
+제약 형식 (목록, 항목마다):
+  {"type": "param",  "path": "섹션.키[i]", "min": 수, "max": 수, "source": "현장 의견", "note": "의견 원문"}
+  {"type": "metric", "metric": "지표 이름", "min": 수, "max": 수, "max_drop": 수, "max_rise": 수, "source": "현장 의견", "note": "의견 원문"}
+- path는 get_params의 경로만, metric은 get_params의 metrics 이름만 쓴다. 지금 다루는 제안이 바꾸려는 경로를 먼저 본다.
+- 한도는 의견에 있는 숫자로만 정한다. 의견에 숫자가 없으면 지어내지 말고 빈 목록을 제출하고 summary에 무엇이 빠졌는지 적어라.
+- submit_constraints로 제출한다. 형식 검사를 통과하지 못하면 사람에게 다시 묻는다."""
+
+
+def opinion_agent_graph(ctx: AgentContext, llm=None):
+    d = ctx.data
+    pack, params = d.get("pack"), d.get("params") or {}
+    metric_names = sorted(pack.metrics(d["instance"], d.get("full_rule") or [])) if pack and d.get("instance") else []
+
+    def get_params(args):
+        return {"params": params, **params_view(params), "metrics": metric_names}
+
+    tools = [{"name": "get_params", "handler": get_params, "input_schema": {"type": "object", "properties": {}},
+              "description": "현재 규칙 파라미터(경로·허용 범위·바꿀 수 있는 범위)와 지표 이름."}]
+    submit = {"name": "submit_constraints", "description": "의견을 정리한 제약 목록을 제출한다.",
+              "input_schema": {"type": "object", "required": ["constraints"], "properties": {
+                  "constraints": {"type": "array", "items": {"type": "object"}},
+                  "summary": {"type": "string", "description": "어떻게 정리했는지, 또는 무엇이 빠져 정리하지 못했는지"}}}}
+
+    def check(submission: dict, calls: dict) -> list[str]:
+        constraints = submission.get("constraints")
+        if constraints == []:
+            return ["제약으로 정리할 한도가 없음" + (f" ({submission['summary']})" if submission.get("summary") else "")]
+        return constraint_errors(constraints, params, metric_names)
+
+    return build_tool_agent(ctx, "opinion_agent", llm=llm, system=OPINION_SYSTEM, tools=tools, submit_tool=submit,
+                            check=check, check_label="제약 형식 검사", max_calls=6, salt="lg-opinion")
+
+
 # --- 상위 그래프 ----------------------------------------------------------------------------
 
 def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
     d = ctx.data
+    loop_cfg, rank_cfg = load_loop_config(), load_ranking_config()
+
+    def specs() -> list[dict]:
+        return metric_specs(d["pack"].dimensions())
+
+    def start_round(n: int) -> None:
+        d.update(round_no=n, round_started=time.time(), round_cost=None, round_decisions=[], round_approved=[],
+                 reproposals=0, proposed_in_round=False, round_before=None, round_after=None,
+                 round_version=d["params"].get("version"))
 
     def prepare(state: AgentsState):
         pack = load_pack(state["domain"])
@@ -230,10 +306,12 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
         scope = pack.items(instance)[: state["items"]]
         sub = pack.subset(instance, scope)
         rule = pack.solve(sub, params)
-        d.update(pack=pack, params=params, instance=instance, truth=truth, scope=scope, sub_instance=sub, rule_sub=rule)
+        d.update(pack=pack, params=params, instance=instance, truth=truth, scope=scope, sub_instance=sub, rule_sub=rule,
+                 constraints=[], rejections=[], rounds=[])
+        start_round(1)
         v = len(pack.validate(sub, rule))
-        return _step("prepare", [f"전체 {len(pack.items(instance))}건 중 처리 순서 앞 {len(scope)}건",
-                                 _line(state, "규칙 방식 기준선", v, pack.metrics(sub, rule))])
+        return {"round": 1, **_step("prepare", [f"전체 {len(pack.items(instance))}건 중 처리 순서 앞 {len(scope)}건",
+                                                _line(state, "규칙 방식 기준선", v, pack.metrics(sub, rule))])}
 
     def dispatch_agent(state: AgentsState):
         llm = ctx.make_llm()
@@ -242,8 +320,9 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
         d["ai_decisions"], d["ai_usage"] = out["decisions"], out["usage"]
         retried = sum(1 for r in out["decisions"] if r.metrics.get("retries"))
         cost = out["usage"].cost_usd(llm.model, ctx.llm_config)
+        _charge(d, cost)
         return _step("dispatch_agent", [
-            f"{len(out['decisions'])}건 결정 · 다시 시도한 건 {retried}건 · 하네스 레벨 {state['level']}",
+            f"{state.get('round', 1)}회차 · {len(out['decisions'])}건 결정 · 다시 시도한 건 {retried}건 · 하네스 레벨 {state['level']}",
             f"AI 호출 {sum(int(r.metrics.get('llm_calls', 0)) for r in out['decisions'])}회"
             + ("" if cost is None else f" · 비용 ${cost:.4f}") + f" · 모델 {llm.model}"])
 
@@ -257,8 +336,10 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
     def rule_full(state: AgentsState):
         pack = d["pack"]
         d["full_rule"] = pack.solve(d["instance"], d["params"])
+        metrics = pack.metrics(d["instance"], d["full_rule"])
+        d["round_before"] = metrics
         return _step("rule_full", [_line(state, f"전체 {len(d['full_rule'])}건", len(pack.validate(d['instance'], d['full_rule'])),
-                                         pack.metrics(d["instance"], d["full_rule"]))])
+                                         metrics)])
 
     def analysis_agent(state: AgentsState):
         perspectives = load_perspectives(d["pack"]) if state.get("perspectives") else []
@@ -282,11 +363,15 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
         lines += [f"{f['id']} {f['title']}" + (f" ({'·'.join(f['perspective_names'])})" if f.get("perspective_names") else "")
                   for f in kept[:5]]
         cost = report["usage"].get("cost_usd")
+        _charge(d, cost)
         if cost is not None:
             lines.append(f"비용 ${cost:.4f} · 모델 {report['usage'].get('model')}")
         return _step("analysis_agent", lines, detected=s["detected"], total=s["total"])
 
     def proposal_agent(state: AgentsState):
+        if d.get("proposed_in_round"):          # 이번 회차에서 다시 제안받는 것 (모두 반려 또는 의견 → 제약)
+            d["reproposals"] += 1
+        d["proposed_in_round"] = True
         report = d["report"]
         findings = [{k: f.get(k) for k in proposer_core.FINDING_SUMMARY_KEYS
                      if f.get(k) is not None or k in proposer_core.BASE_KEYS}
@@ -296,7 +381,14 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
                                             ensure_ascii=False, indent=1)
                 + "\n\n# 차원\n" + json.dumps({k: v.get("values") for k, v in dims.get("dimensions", {}).items()},
                                              ensure_ascii=False))
-        out = run_tool_agent(proposal_agent_graph(ctx, ctx.make_llm("proposals")), user)
+        if d["constraints"]:     # 사람이 정한 한도 (의견을 정리한 제약 포함). 개선 탭과 같은 문구
+            user += ("\n\n" + CONSTRAINTS_HEADER + "\n" + json.dumps(d["constraints"], ensure_ascii=False, indent=1)
+                     + "\nsimulate_params 결과의 constraint_violations가 비도록 안을 설계하라. "
+                       "어길 수밖에 없으면 rationale에 어떤 제약을 왜 어기는지 적어라.")
+        user += proposal_memory_text({"rejections": d["rejections"]})   # 이 실행에서 반려·의견을 받은 안 (기억)
+        llm = ctx.make_llm("proposals")
+        out = run_tool_agent(proposal_agent_graph(ctx, llm), user)
+        _charge(d, out["usage"].cost_usd(llm.model, ctx.llm_config))
         spec_text = Path(d["pack"].spec_path()).read_text(encoding="utf-8")
         proposals = []
         for p in (out.get("submission") or {}).get("proposals") or []:
@@ -306,36 +398,78 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
             errors = (params_errors(d["params"], p, dims) if p.get("kind") == "params"
                       else spec_errors(spec_text, p) if p.get("kind") == "spec" else ["알 수 없는 kind"])
             proposals.append({"body": p, "errors": errors, "status": "invalid" if errors else "proposed"})
-        d["proposals"] = proposals
+        d["proposals"], d["ranking"] = proposals, None
         usable = [i for i, p in enumerate(proposals) if not p["errors"]]
         usable.sort(key=lambda i: proposals[i]["body"].get("kind") != "params")
-        lines = [f"제안 {len(proposals)}건 · 미리 돌려볼 제안 {len(usable)}건"
+        head = f"{state.get('round', 1)}회차" + (f" · 다시 제안 {d['reproposals']}번째" if d["reproposals"] else "")
+        lines = [f"{head} · 제안 {len(proposals)}건 · 미리 돌려볼 제안 {len(usable)}건"
                  + (f" · 적용 불가 {len(proposals) - len(usable)}건" if len(proposals) > len(usable) else "")]
+        if d["constraints"] or d["rejections"]:
+            lines.append(f"입력에 넣은 것: 제약 {len(d['constraints'])}개 · 반려·의견 기억 {len(d['rejections'])}건")
         lines += [proposals[i]["body"].get("title", "") for i in usable]
         lines += [f"✕ {p['body'].get('title', '')}: {p['errors'][0]}" for p in proposals if p["errors"]]
         return {"queue": usable, **_step("proposal_agent", lines)}
 
+    def rank_all() -> tuple[list[int], list[str]]:
+        """설정값 제안을 모두 규칙 엔진으로 돌려보고 제시 기준(M15-A)으로 순위를 매긴다. (검토 순서, 화면 줄)"""
+        pack, params, proposals = d["pack"], d["params"], d["proposals"]
+        primary = [m["key"] for m in specs() if m.get("primary")]
+        factory = lambda q: load_pack(pack.name, q)   # noqa: E731
+        for p in proposals:
+            body = p["body"]
+            if p["errors"] or body.get("kind") != "params":
+                continue
+            candidate = apply_params(params, body)
+            sim = simulate_params(factory, d["instance"], params, candidate, proposer_core.finding_slices(d["report"]))
+            if d["constraints"]:
+                sim["constraint_violations"] = constraint_violations(d["constraints"], candidate, sim)
+            sim["minimal_change"] = minimal_change(factory, d["instance"], params, body, sim, primary)
+            p.update(simulation=sim, status="simulated")
+        ranking = rank_proposals([{"id": str(i), "status": p["status"], "errors": p["errors"], "body": p["body"],
+                                   "simulation": p.get("simulation")} for i, p in enumerate(proposals)], specs(), rank_cfg)
+        d["ranking"] = ranking
+        for i, p in enumerate(proposals):
+            p["rank"] = ranking["entries"][str(i)]
+        queue = [int(pid) for pid in ranking["order"] if ranking["entries"][pid]["tier"] in ("main", "pending")]
+        main = [int(pid) for pid in ranking["order"] if ranking["entries"][pid]["tier"] == "main"]
+        others = {t: sum(1 for e in ranking["entries"].values() if e["tier"] == t) for t in ("reference", "hidden", "cut")}
+        lines = ["순위: " + (" · ".join(f"{proposals[i]['rank']['rank']}순위 {proposals[i]['body'].get('title', '')}"
+                                        for i in main) or "본안 없음")]
+        folded = " · ".join(f"{label} {others[t]}건" for t, label in (("reference", "참고"), ("hidden", "지배당함"),
+                                                                     ("cut", "개수 상한으로 잘림")) if others[t])
+        if folded:
+            lines.append("접은 안: " + folded)
+        return queue, lines
+
     def simulate(state: AgentsState):
-        idx, rest = state["queue"][0], state["queue"][1:]
+        rank_lines = []
+        queue = state["queue"]
+        if d.get("ranking") is None:
+            queue, rank_lines = rank_all()
+            if not queue:
+                return {"queue": [], "improved": False, **_step("simulate", rank_lines, improved=False)}
+        idx, rest = queue[0], queue[1:]
         p = d["proposals"][idx]
         pack, body = d["pack"], p["body"]
-        if body.get("kind") == "params":
-            sim = simulate_params(lambda q: load_pack(pack.name, q), d["instance"], d["params"],
-                                  apply_params(d["params"], body), proposer_core.finding_slices(d["report"]))
-            sim["violations_before"] = len(pack.validate(d["instance"], d["full_rule"]))
-        else:   # 업무 규칙 문서 제안: 배정 에이전트(하위 그래프)를 고치기 전·후 문서로 한 번씩
+        if body.get("kind") != "params":   # 업무 규칙 문서 제안: 배정 에이전트(하위 그래프)를 고치기 전·후 문서로 한 번씩
             spec_now = Path(pack.spec_path()).read_text(encoding="utf-8")
             level = levels[state["level"]]
             runs = {}
             for label, text in (("before", None), ("after", apply_spec(spec_now, body))):
-                graph = build_dispatch_agent(ctx, level, llm=ctx.make_llm(), spec_text=text,
+                llm = ctx.make_llm()
+                graph = build_dispatch_agent(ctx, level, llm=llm, spec_text=text,
                                              salt=f"lg-spec-{label}", agent="simulate")
-                runs[label] = run_dispatch_agent(graph, d["scope"])["decisions"]
+                out = run_dispatch_agent(graph, d["scope"])
+                runs[label] = out["decisions"]
+                _charge(d, out["usage"].cost_usd(llm.model, ctx.llm_config))
             sub = d["sub_instance"]
             sim = {"kind": "spec", "before": pack.metrics(sub, runs["before"]), "after": pack.metrics(sub, runs["after"]),
                    "violations_before": len(pack.validate(sub, runs["before"])),
                    "violations_after": len(pack.validate(sub, runs["after"]))}
-        p.update(simulation=sim, status="simulated")
+            if d["constraints"]:
+                sim["constraint_violations"] = constraint_violations(d["constraints"], {}, sim)
+            p.update(simulation=sim, status="simulated")
+        sim = p["simulation"]
         before, after = sim["before"], sim["after"]
         primary = [m for m in _primary(state) if m["key"] in before and m["key"] in after]
         delta = lambda m: after[m["key"]] - before[m["key"]]   # noqa: E731
@@ -343,22 +477,68 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
             (sim.get("violations_after") or 0) <= (sim.get("violations_before") or 0))
         worse = [m["label"] for m in state.get("metrics") or []
                  if m.get("better") and m["key"] in before and m["key"] in after and _worse(m, delta(m))]
-        lines = [body.get("title", "")]
+        rank = p.get("rank") or {}
+        lines = rank_lines + [(f"[{rank['rank']}순위] " if rank.get("rank") else "") + body.get("title", "")]
         lines += [f"{m['label']} {_fmt(m, before[m['key']])} → {_fmt(m, after[m['key']])}" for m in primary]
         lines.append(f"나빠진 지표: {', '.join(worse)}" if worse else "나빠진 지표 없음")
         lines.append(f"규칙 위반 {sim.get('violations_before') or 0}건 → {sim.get('violations_after') or 0}건")
+        if sim.get("constraint_violations"):
+            lines.append("⚠ 제약 위반: " + "; ".join(v["message"] for v in sim["constraint_violations"]))
+        if mc := sim.get("minimal_change"):
+            lines.append(f"최소 변경 추천: {mc['path']} {mc['current']} → {mc['recommended']} "
+                         f"(제안 {mc['proposed']}과 핵심 지표 같음)")
         return {"proposal": idx, "queue": rest, "improved": improved, **_step("simulate", lines, improved=improved)}
 
     def human_review(state: AgentsState):
         p = d["proposals"][state["proposal"]]
-        answer = interrupt({"proposal": state["proposal"], "title": p["body"].get("title"),
-                            "question": "이 제안을 반영할까요?"})
+        sim, rank = p.get("simulation") or {}, p.get("rank") or {}
+        ask = {"proposal": state["proposal"], "title": p["body"].get("title"), "round": state.get("round", 1),
+               "rank": rank.get("rank"), "reasons": rank.get("reasons") or [],
+               "minimal_change": sim.get("minimal_change"),
+               "question": "이 제안을 반영할까요? (승인 · 반려 · 의견 한 줄)"}
+        if state.get("opinion_error"):
+            ask.update(opinion_error=state["opinion_error"],
+                       question="의견을 제약으로 정리하지 못했습니다. 한도(숫자)를 넣어 다시 적어 주세요")
+        answer = interrupt(ask)
         action = answer.get("action") if isinstance(answer, dict) else answer
-        note = (answer.get("note") if isinstance(answer, dict) else "") or ""
+        note = ((answer.get("note") if isinstance(answer, dict) else "") or "").strip()
+        action = action if action in ("approve", "reject", "opinion") else "reject"
+        if action == "opinion" and not note:
+            action = "reject"
+        title = p["body"].get("title", "")
+        d["round_decisions"].append({"action": action, "title": title, "note": note,
+                                     "target_findings": p["body"].get("target_findings") or []})
+        if action != "approve":   # 반려·의견은 다음 제안의 기억이 된다 (같은 안을 다시 내지 않게)
+            d["rejections"].append({"title": title, "change": _proposal_change(p["body"]),
+                                    "reason": ("의견: " if action == "opinion" else "") + (note or "사유 없음")})
         p["status"] = "approved" if action == "approve" else "rejected"
-        word = "승인" if action == "approve" else "반려"
-        return {"decision": "approve" if action == "approve" else "reject",
-                **_step("human_review", [word + (f": {note}" if note else "")])}
+        word = {"approve": "승인", "reject": "반려", "opinion": "의견"}[action]
+        return {"decision": action, "opinion_error": "",
+                **_step("human_review", [word + (f": {note}" if note else ""), title])}
+
+    def opinion_agent(state: AgentsState):
+        p = d["proposals"][state["proposal"]]
+        opinion = d["round_decisions"][-1]["note"]
+        user = (f"# 현장 의견 (한 줄)\n{opinion}\n\n# 지금 다루는 제안\n"
+                + json.dumps({"title": p["body"].get("title"), "change": _proposal_change(p["body"])}, ensure_ascii=False)
+                + (f"\n\n# 이미 있는 제약\n{json.dumps(d['constraints'], ensure_ascii=False)}" if d["constraints"] else ""))
+        llm = ctx.make_llm("proposals")
+        out = run_tool_agent(opinion_agent_graph(ctx, llm), user)
+        _charge(d, out["usage"].cost_usd(llm.model, ctx.llm_config))
+        problems = list(out.get("problems") or [])
+        if out.get("stop") != "submitted" and not problems:
+            problems = ["의견 정리 에이전트가 제출하지 않음"]
+        if problems:
+            return {"opinion_error": "; ".join(problems),
+                    **_step("opinion_agent", [f"✕ 제약으로 정리하지 못함: {problems[0]}", "사람에게 다시 묻는다"])}
+        added = [{**c, "source": c.get("source") or "현장 의견", "note": c.get("note") or opinion}
+                 for c in (out.get("submission") or {}).get("constraints") or []]
+        d["constraints"] = d["constraints"] + added
+        lines = [f"의견 \"{opinion}\" → 제약 {len(added)}개"]
+        lines += [f"{c.get('path') or c.get('metric')} "
+                  + ", ".join(f"{k} {c[k]}" for k in ("min", "max", "max_drop", "max_rise") if k in c)
+                  + f" ({c['source']})" for c in added]
+        return {"opinion_error": "", **_step("opinion_agent", lines, constraints=added)}
 
     def apply(state: AgentsState):
         pack, body = d["pack"], d["proposals"][state["proposal"]]["body"]
@@ -368,34 +548,109 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
         else:
             write_spec(pack.spec_path(), body)
             line = "업무 규칙 문서에 반영 (domain-spec.md)"
+        d["round_approved"].append(body.get("title", ""))
         return _step("apply", [line, "git 커밋은 사람이 직접 한다"])
+
+    def reevaluate(state: AgentsState):
+        """반영한 규칙으로 다시 배정(규칙 방식 전체)하고 회차 전·후를 잰다. 배정 에이전트는 다음 회차에 새 규칙으로."""
+        params = load_params(d["pack"])
+        pack = load_pack(state["domain"], params)
+        d.update(pack=pack, params=params, full_rule=pack.solve(d["instance"], params),
+                 rule_sub=pack.solve(d["sub_instance"], params))
+        d.pop("fake_policy", None)    # 리허설용 가짜 AI는 새 규칙의 결정을 다시 읽는다
+        after = pack.metrics(d["instance"], d["full_rule"])
+        d["round_after"] = after
+        before = d.get("round_before") or {}
+        lines = [_line(state, f"재배정 (규칙 v{params.get('version')}, 전체 {len(d['full_rule'])}건)",
+                       len(pack.validate(d["instance"], d["full_rule"])), after)]
+        lines += [f"{m['label']} {_fmt(m, before.get(m['key']))} → {_fmt(m, after.get(m['key']))} (이번 회차 전→후)"
+                  for m in _primary(state)]
+        return _step("reevaluate", lines)
+
+    def check_end(state: AgentsState):
+        n = state.get("round", 1)
+        before = d.get("round_before") or {}
+        entry = {"round": n, "before": before, "after": d.get("round_after") or before,
+                 "approved": list(d["round_approved"]), "decisions": list(d["round_decisions"]),
+                 "constraints": list(d["constraints"]), "cost_usd": d.get("round_cost"),
+                 "seconds": round(time.time() - d["round_started"], 2),
+                 "params_version_before": d.get("round_version"), "params_version_after": d["params"].get("version")}
+        stop, reason = termination(entry, specs(), loop_cfg, rank_cfg["min_effect"])
+        d["rounds"].append(entry)
+        lines = [f"{n}회차 끝: 승인 {len(entry['approved'])}건 · 결정 {len(entry['decisions'])}건", reason]
+        if not stop:
+            start_round(n + 1)
+            d["round_before"] = entry["after"]
+            return {"round": n + 1, "stop": False, "stop_reason": reason,
+                    **_step("check_end", lines + [f"{n + 1}회차: 배정 에이전트부터 새 규칙으로 다시"])}
+        return {"stop": True, "stop_reason": reason, **_step("check_end", lines)}
+
+    def report(state: AgentsState):
+        rep = loop_report(d["rounds"], specs(), state.get("stop_reason", ""), findings=(d.get("report") or {}).get("findings"),
+                          constraints=d["constraints"])
+        d["final_report"] = rep
+        lines = list(rep["lines"]) + [f"종료 이유: {rep['stop_reason']}"]
+        if rep["constraints"]:
+            lines.append("쓴 제약: " + "; ".join(f"{c.get('path') or c.get('metric')} "
+                                                 + ", ".join(f"{k} {c[k]}" for k in ("min", "max", "max_drop", "max_rise")
+                                                             if k in c) + f" ({c.get('source')})"
+                                                 for c in rep["constraints"]))
+        lines.append("남은 문제: " + (", ".join(f"{f['id']} {f['title']}" for f in rep["remaining"]) or "없음"))
+        return _step("report", lines)
+
+    def after_proposals(state: AgentsState) -> str:
+        return HAS_PROPOSALS if state.get("queue") else NO_MORE
 
     def after_simulate(state: AgentsState) -> str:
         if state.get("improved"):
             return IMPROVED
-        return NOT_IMPROVED if state.get("queue") else NO_MORE
+        if state.get("queue"):
+            return NOT_IMPROVED
+        # 남은 제안이 없다: 이번 회차에 반려한 제안이 있으면 반려 사유를 기억으로 다시 제안받는다
+        rejected = any(x["action"] != "approve" for x in d.get("round_decisions") or [])
+        return ALL_REJECTED if rejected and can_repropose() else NO_MORE
+
+    def can_repropose() -> bool:
+        return d.get("reproposals", 0) < loop_cfg["max_reproposals"]
 
     def after_review(state: AgentsState) -> str:
-        if state.get("decision") == "approve":
+        decision = state.get("decision")
+        if decision == "approve":
             return APPROVED
-        return REJECTED if state.get("queue") else NO_MORE
+        if decision == "opinion":
+            return OPINION
+        if state.get("queue"):
+            return REJECTED
+        return ALL_REJECTED if can_repropose() else CAP
+
+    def after_opinion(state: AgentsState) -> str:
+        if state.get("opinion_error"):
+            return FORMAT_BAD
+        return CONSTRAINT_OK if can_repropose() else CAP
 
     fns = {"prepare": prepare, "dispatch_agent": dispatch_agent, "evaluate": evaluate, "rule_full": rule_full,
            "analysis_agent": analysis_agent, "proposal_agent": proposal_agent, "simulate": simulate,
-           "human_review": human_review, "apply": apply}
+           "human_review": human_review, "opinion_agent": opinion_agent, "apply": apply, "reevaluate": reevaluate,
+           "check_end": check_end, "report": report}
     g = StateGraph(AgentsState)
     for name, fn in fns.items():
         g.add_node(name, fn, metadata=NODES[name])
     g.add_edge(START, "prepare")
     for a, b in [("prepare", "dispatch_agent"), ("dispatch_agent", "evaluate"), ("evaluate", "rule_full"),
-                 ("rule_full", "analysis_agent"), ("analysis_agent", "proposal_agent")]:
+                 ("rule_full", "analysis_agent"), ("analysis_agent", "proposal_agent"), ("apply", "reevaluate"),
+                 ("reevaluate", "check_end"), ("report", END)]:
         g.add_edge(a, b)
-    g.add_conditional_edges("proposal_agent", lambda s: HAS_PROPOSALS if s.get("queue") else NO_MORE,
-                            {HAS_PROPOSALS: "simulate", NO_MORE: END})
+    g.add_conditional_edges("proposal_agent", after_proposals, {HAS_PROPOSALS: "simulate", NO_MORE: "check_end"})
     g.add_conditional_edges("simulate", after_simulate,
-                            {IMPROVED: "human_review", NOT_IMPROVED: "simulate", NO_MORE: END})
-    g.add_conditional_edges("human_review", after_review, {APPROVED: "apply", REJECTED: "simulate", NO_MORE: END})
-    g.add_edge("apply", END)
+                            {IMPROVED: "human_review", NOT_IMPROVED: "simulate", ALL_REJECTED: "proposal_agent",
+                             NO_MORE: "check_end"})
+    g.add_conditional_edges("human_review", after_review,
+                            {APPROVED: "apply", REJECTED: "simulate", OPINION: "opinion_agent",
+                             ALL_REJECTED: "proposal_agent", CAP: "check_end"})
+    g.add_conditional_edges("opinion_agent", after_opinion,
+                            {CONSTRAINT_OK: "proposal_agent", FORMAT_BAD: "human_review", CAP: "check_end"})
+    g.add_conditional_edges("check_end", lambda s: DONE if s.get("stop") else CONTINUE,
+                            {CONTINUE: "dispatch_agent", DONE: "report"})
     return g.compile(checkpointer=checkpointer or InMemorySaver(),
                      interrupt_before=[n for n in fns if n != "human_review"])
 
@@ -408,4 +663,5 @@ def describe_all(levels: dict[str, Level], level: str, perspectives: list[dict] 
     return {"top": describe(build_flow(ctx, levels)),
             "agents": {"dispatch_agent": describe(build_dispatch_agent(ctx, levels[level])),
                        "analysis_agent": describe(analysis),
-                       "proposal_agent": describe(proposal_agent_graph(ctx))}}
+                       "proposal_agent": describe(proposal_agent_graph(ctx)),
+                       "opinion_agent": describe(opinion_agent_graph(ctx))}}

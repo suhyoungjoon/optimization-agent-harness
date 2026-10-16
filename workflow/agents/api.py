@@ -108,10 +108,16 @@ class AgentRuns:
         snap, values = self.runs.base_snapshot(flow_id)
         ctx = self.runs.flows[flow_id]["_ctx"]
         proposals = [{"title": p["body"].get("title"), "kind": p["body"].get("kind"), "status": p["status"],
-                      "errors": p["errors"]} for p in ctx.data.get("proposals", [])]
+                      "errors": p["errors"], "rank": p.get("rank"),
+                      "minimal_change": (p.get("simulation") or {}).get("minimal_change")}
+                     for p in ctx.data.get("proposals", [])]
+        d = ctx.data
+        loop = {"round": values.get("round"), "rounds": d.get("rounds") or [], "constraints": d.get("constraints") or [],
+                "stop_reason": values.get("stop_reason"), "report": d.get("final_report"),
+                "decisions": d.get("round_decisions") or []}
         last = ctx.recent(limit=1)
         return {**snap, "steps": values.get("log", []), "events": ctx.recent(after),
-                "counts": ctx.counts(), "last_event": last[0] if last else None, "proposals": proposals,
+                "counts": ctx.counts(), "last_event": last[0] if last else None, "proposals": proposals, "loop": loop,
                 "inputs": {k: values.get(k) for k in ("domain", "seed", "faults", "items", "level", "perspectives")}}
 
     def step(self, flow_id: str, req: StepRequest) -> dict:

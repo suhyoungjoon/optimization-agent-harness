@@ -20,7 +20,7 @@ class StartRequest(BaseModel):
 
 
 class StepRequest(BaseModel):
-    action: Literal["next", "approve", "reject"] = "next"
+    action: Literal["next", "approve", "reject", "opinion"] = "next"   # opinion: 의견 한 줄(note) → 제약 (agents 탭, M15-B)
     note: str = ""
 
 
@@ -67,6 +67,8 @@ class Flows:
         return self.snapshot(self.runs.start(self.graph, {**req.model_dump(), "log": []}))
 
     def step(self, flow_id: str, req: StepRequest) -> dict:
+        if req.action == "opinion":   # 의견 → 제약 순환은 LangGraph agents 탭에만 있다 (docs/langgraph-agents.md)
+            raise HTTPException(400, "이 워크플로우는 승인·반려만 받는다 (의견은 LangGraph agents 탭)")
         return self.runs.step(flow_id, req.action, req.note, self.snapshot)
 
 

@@ -60,7 +60,9 @@ class GraphRuns:
         if snap["status"] == "done":
             raise HTTPException(400, "이미 끝난 워크플로우")
         if snap["waiting"] == "approval" and action == "next":
-            raise HTTPException(400, "사람 승인 단계: approve 또는 reject로 진행")
+            raise HTTPException(400, "사람 승인 단계: approve · reject · opinion으로 진행")
+        if action == "opinion" and not note.strip():
+            raise HTTPException(400, "의견은 한 줄 이상 적어야 함 (note)")
         if snap["waiting"] == "next" and action != "next":
             raise HTTPException(400, "승인할 단계가 아님")
         arg = self.Command(resume={"action": action, "note": note}) if snap["waiting"] == "approval" else None
