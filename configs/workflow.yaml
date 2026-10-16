@@ -1,0 +1,4 @@
+# 개선 루프 (M15-B): LangGraph agents 탭의 회차 순환 기준. 코어 설정, 도메인 용어 없음.
+# 목표값은 도메인 dimensions.yaml의 metrics[*].target (핵심 지표), 최소 효과는 configs/proposals.yaml의 min_effect.
+max_rounds: 2          # 최대 회차 (2~3). 이 회차를 마치면 결과 보고로 끝낸다
+max_reproposals: 2     # 한 회차에서 다시 제안받는 횟수 상한 (제안을 모두 반려했을 때, 의견을 제약으로 정리했을 때)

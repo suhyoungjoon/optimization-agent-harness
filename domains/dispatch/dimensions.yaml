@@ -22,7 +22,8 @@ resources:                      # 자원 단위 발견 (M12-d): 분석 발견의
       branch: {label: 지점}
 
 metrics:                        # 개선안 순위 (M15-A): 핵심 지표(primary)와 좋아지는 방향. 화면 어댑터와 같게 둔다
-  assignment_rate:         {label: 배정 성공률,     format: pct, primary: true, better: up}
+                                # target: 개선 루프 목표값 (M15-B, 핵심 지표가 이 값에 닿으면 회차를 끝낸다)
+  assignment_rate:         {label: 배정 성공률,     format: pct, primary: true, better: up, target: 0.85}
   desired_time_match_rate: {label: 희망시간 준수율, format: pct, better: up}
   on_time_rate:            {label: 정시 배정 비율,  format: pct, better: up}
   avg_travel_min:          {label: 평균 이동시간,   unit: 분, better: down}
