@@ -198,7 +198,8 @@ def proposal_memory_text(memory) -> str    # propose(..., memory_text=...)에 �
 
 ```python
 class Tracer:
-    def __init__(self, run_id: str, full: bool)    # full=False면 아무것도 기록하지 않음
+    def __init__(self, run_id: str, full: bool, listener=None)
+    # full=False면 아무것도 기록하지 않음. listener를 주면 레벨과 무관하게 단계마다 타임라인 이벤트로 알림 (M16)
     def record(self, item_id: str, kind: str, input: Any, output: Any) -> None   # step은 항목별 자동 증가
     records: list[TraceRecord]
 ```
@@ -231,8 +232,11 @@ class Usage: calls, cached_calls, tokens; add(resp); merge(other); cost_usd(mode
 @dataclass class LLMResponse: content: list[dict]; stop_reason: str; usage: dict[str, int]; model: str; from_cache: bool = False
 
 def run_tool_loop(llm, *, system: str, user: str, tools: list[dict], submit_tool: dict, max_calls: int = 30,
-                  salt: str = "", check_submission=None, max_feedback: int = 1) -> LoopResult
+                  salt: str = "", check_submission=None, max_feedback: int = 1, on_event=None,
+                  check_label: str = "제출 검사") -> LoopResult
 # 도구를 쓰다 submit_tool을 부르면 끝나는 범용 루프. check_submission이 문제를 돌려주면 한 번 고쳐 오게 한다.
+# on_event: 턴마다 {type: llm|tool|check|end, turn, ...} 알림 (core/llm/events.py, M16). analyze·propose도 on_event를 받는다
+# core/llm/events.py: LiveLog(실행 id별 진행), timeline_from_calls / timeline_from_traces (저장된 기록 → 같은 타임라인 형식)
 # LoopResult: submission, stop("submitted"|"max_calls"|"refusal"|"no_submit"), calls{tool_use_id: {name,input,output}}, usage, llm_calls, feedback_rounds, seconds
 ```
 

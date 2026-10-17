@@ -519,3 +519,30 @@ input.approver { width: 9em; }
 .kind-fixed, .kind-governance { color: var(--text-secondary); }
 .change-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 8px 0; background: var(--surface); }
 .change-card h3 { margin: 0 0 4px; font-size: 14px; }
+
+/* 에이전트 탭 (M16) */
+.agent-tab-grid { display: grid; grid-template-columns: minmax(250px, 300px) 1fr; gap: 12px; align-items: start; }
+@media (max-width: 860px) { .agent-tab-grid { grid-template-columns: 1fr; } }
+.agent-tab-side h2 { margin-top: 0; }
+.agent-list { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px; }
+.agent-pick { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 6px 8px; }
+.agent-pick.active { border-color: var(--series-1); box-shadow: inset 0 0 0 1px var(--series-1); }
+.agent-inputs { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.agent-inputs input:not([type="checkbox"]), .agent-inputs select { max-width: 100%; }
+.agent-inputs label { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.agent-confirm { border: 1px solid var(--border); border-radius: 6px; padding: 8px; background: var(--surface); }
+.agent-error { margin-top: 6px; }
+.agent-history { list-style: none; padding: 0; margin: 4px 0; max-height: 220px; overflow: auto; font-size: 13px; }
+.agent-history li { padding: 2px 0; }
+.agent-history .link { background: none; border: none; padding: 0; color: var(--series-1); cursor: pointer; font-family: monospace; }
+.agent-history .link.active { font-weight: 600; text-decoration: underline; }
+.agent-tab-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.agent-summary-line { font-size: 15px; margin-bottom: 4px; }
+.agent-timeline { list-style: none; padding: 0; margin: 0; max-height: 420px; overflow: auto; font-size: 13px; }
+.agent-timeline li { padding: 3px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.agent-timeline .tl-turn { display: inline-block; min-width: 42px; color: var(--text-secondary); font-size: 12px; }
+.agent-timeline .tl-kind { display: inline-block; min-width: 64px; font-weight: 600; margin-right: 4px; }
+.agent-timeline .tl-io { color: var(--text-secondary); }
+.agent-timeline .tl-item { font-weight: 600; padding-top: 6px; }
+.agent-timeline .tl-ok .tl-kind { color: var(--good, #1a7f37); }
+.agent-timeline .tl-bad .tl-kind { color: var(--critical, #cf222e); }

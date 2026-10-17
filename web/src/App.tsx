@@ -13,14 +13,16 @@ import type { CompareSummary, Dataset, DecisionRecord, DemoCatalogEntry, DomainI
 // LangGraph 탭 두 개는 탭을 열 때 불러온다 (그래프 라이브러리 React Flow가 커서 첫 화면을 가볍게)
 const WorkflowPanel = lazy(() => import("./components/WorkflowPanel"));
 const AgentsPanel = lazy(() => import("./components/AgentsPanel"));
+const AgentRunsPanel = lazy(() => import("./components/AgentRunsPanel"));
 
-type Tab = "domain" | "compare" | "trace" | "analysis" | "improve" | "workflow" | "agents";
+type Tab = "domain" | "compare" | "trace" | "analysis" | "improve" | "agentRuns" | "workflow" | "agents";
 const TABS: { id: Tab; term: TermKey; milestone?: string }[] = [
   { id: "domain", term: "tabDomain" },
   { id: "compare", term: "tabCompare" },
   { id: "trace", term: "tabTrace" },
   { id: "analysis", term: "tabAnalysis" },
   { id: "improve", term: "tabImprove" },
+  { id: "agentRuns", term: "tabAgentRuns" },
   { id: "workflow", term: "tabWorkflow" },
   { id: "agents", term: "tabAgents" },
 ];
@@ -299,6 +301,11 @@ export default function App() {
           <Suspense fallback={<p className="muted">불러오는 중…</p>}>
             <WorkflowPanel domain={domain} adapter={adapter} harness={harness} seed={seed} faults={faults} level={level}
             onAdopt={adoptWorkflow} />
+          </Suspense>
+        )}
+        {domain && adapter && tab === "agentRuns" && (
+          <Suspense fallback={<p className="muted">에이전트 화면 불러오는 중…</p>}>
+            <AgentRunsPanel domain={domain} adapter={adapter} seed={seed} faults={faults} />
           </Suspense>
         )}
         {domain && adapter && tab === "agents" && (

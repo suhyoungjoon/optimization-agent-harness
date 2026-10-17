@@ -6,7 +6,7 @@
 import json
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -31,6 +31,7 @@ from core.improvement.sweep import sensitivity, sweep_params
 from core.interfaces import DecisionRecord
 from core.improvement.ranking import metric_specs as _metric_specs
 from core.llm.embeddings import make_embedder
+from core.llm.events import LiveLog
 from core.registry import knowledge_dir, load_pack, load_params, load_perspectives
 from core.retrieval import open_index, prepare, retrieval_meta, search_tool
 from core.retrieval.records import case_chunk
@@ -90,6 +91,18 @@ class Context:
     llm_config: dict
     replay: bool = False      # 시연 모드: LLM 대신 저장된 결과를 재생
     retrieval_path: Path | None = None   # 검색 색인 파일 (M15-C). 없으면 검색 도구를 붙이지 않는다
+    live: LiveLog = field(default_factory=LiveLog)   # 실행 중 타임라인 (M16 에이전트 탭)
+    knowledge: Any = None     # (domain, kinds) → 검색 묶음. register가 채운다 (에이전트 탭 의견 정리가 같이 쓴다)
+
+
+def recorder(live: LiveLog, key: str):
+    """실행 중 타임라인: 화면용(live)과 저장용(목록)에 같이 쌓는다. 저장 목록은 끝날 때 기록에 넣는다."""
+    sink, kept = live.sink(key), []
+
+    def add(event: dict) -> None:
+        kept.append({**event, "seq": len(kept)})
+        sink(event)
+    return add, kept
 
 
 def _run_context(store: Store, run_id: str):
@@ -189,6 +202,8 @@ def register(app: FastAPI, ctx: Context) -> None:
             return prepare(index_holder[0], knowledge_dir(pack), domain, kinds,
                            {"case": case_records(domain, pack)} if "case" in kinds else None)
 
+    ctx.knowledge = knowledge
+
     # --- 파라미터 탐색 (M13) ---
     def _sweep_context(dataset_id: str):
         dataset = store.get_dataset(dataset_id)
@@ -269,6 +284,7 @@ def register(app: FastAPI, ctx: Context) -> None:
 
     def _analyze_job(report_id: str, run_id: str, llm, memory: dict | None = None, perspectives: list | None = None,
                      retrieval: dict | None = None):
+        on_event, timeline = recorder(ctx.live, f"analysis:{report_id}")
         try:
             _run, dataset, pack, instance, truth, decisions = _run_context(store, run_id)
             if perspectives:
@@ -277,12 +293,13 @@ def register(app: FastAPI, ctx: Context) -> None:
                 body = analyze_perspectives(pack, instance, decisions,
                                             lambda: first.pop() if first else ctx.make_llm("analysis"),
                                             ctx.llm_config, perspectives, salt=f"analysis:{run_id}",
-                                            memory_text=analysis_memory_text(memory))
+                                            memory_text=analysis_memory_text(memory), on_event=on_event)
             else:
                 extra = [search_tool(retrieval["index"], retrieval["kinds"], record=retrieval["record"])] if retrieval else None
                 body = analyze(pack, instance, decisions, llm, ctx.llm_config, salt=f"analysis:{run_id}",
-                               memory_text=analysis_memory_text(memory), extra_tools=extra)
+                               memory_text=analysis_memory_text(memory), extra_tools=extra, on_event=on_event)
             body["memory"] = memory
+            body["timeline"] = timeline      # 턴 → 도구 → 검사 (M16 에이전트 탭이 다시 볼 때)
             if retrieval:
                 body["retrieval"] = retrieval_meta(retrieval["index"], retrieval["record"])
             store.finish_report(report_id, body, score(body["findings"], truth.get("faults", {}), body["calls"]))
@@ -335,15 +352,18 @@ def register(app: FastAPI, ctx: Context) -> None:
 
     def _propose_job(batch_id: str, report: dict, llm, constraints: list[dict] | None = None,
                      memory: dict | None = None, retrieval: dict | None = None, saved_ids: list[str] | None = None):
+        on_event, timeline = recorder(ctx.live, f"proposals:{batch_id}")
         try:
             _run, dataset, pack, instance, _truth, _decisions = _run_context(store, report["run_id"])
             params = load_params(pack)
             spec_text = Path(pack.spec_path()).read_text(encoding="utf-8")
             out = propose(lambda p: load_pack(pack.name, p), instance, params, spec_text, pack.dimensions(),
                           report["body"], llm, ctx.llm_config, salt=f"proposals:{report['id']}",
-                          constraints=constraints, memory_text=proposal_memory_text(memory), retrieval=retrieval)
+                          constraints=constraints, memory_text=proposal_memory_text(memory), retrieval=retrieval,
+                          on_event=on_event)
             meta = {"usage": out["usage"], "trials": out["trials"], "stop": out["stop"],
-                    "params_version": params.get("version")}
+                    "params_version": params.get("version"),
+                    "calls": out["calls"], "timeline": timeline}   # 도구 호출·타임라인 (M16 에이전트 탭)
             if constraints:
                 meta["constraints"] = constraints
             if saved_ids:   # 저장된 제약 중 이 묶음에 쓴 것 (재현 조건)

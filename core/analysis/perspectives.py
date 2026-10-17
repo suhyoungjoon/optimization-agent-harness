@@ -127,15 +127,16 @@ def _sum_usage(usages: list[dict]) -> dict:
 
 def analyze_perspectives(pack: DomainPack, instance, decisions: list[DecisionRecord], make_llm: Callable[[], object],
                          llm_config: dict, perspectives: list[dict], salt: str = "", max_calls: int = 30,
-                         memory_text: str = "") -> dict:
+                         memory_text: str = "", on_event=None) -> dict:
     """관점마다 analyze를 병렬로 돌리고 합친다. make_llm: 관점마다 새 LLM 클라이언트를 만든다 (인자 없음).
     리포트 형식은 analyze와 같고 perspectives(관점별 결과)가 더 붙는다."""
     started = time.monotonic()
 
     def run(p: dict) -> dict:
         try:
+            sink = (lambda e, pid=p["id"]: on_event({**e, "item": pid})) if on_event else None   # 관점별로 나눠 보이게
             return analyze(pack, instance, decisions, make_llm(), llm_config, salt=salt, max_calls=max_calls,
-                           memory_text=memory_text, perspective=p)
+                           memory_text=memory_text, perspective=p, on_event=sink)
         except Exception as exc:  # 한 관점의 실패가 리포트 전체를 막지 않게
             return {"error": f"{type(exc).__name__}: {exc}"}
 

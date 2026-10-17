@@ -43,7 +43,7 @@ def run_rule_agent(store: Store, pack: DomainPack, dataset: dict, params: dict,
 def run_ai_agent(store: Store, pack: DomainPack, dataset: dict, level_name: str, llm: LLMClient,
                  llm_config: dict, scope: list[str] | None = None, repeat: int = 0,
                  group_id: str | None = None, progress: Callable[[int, int], None] | None = None,
-                 run_id: str | None = None, spec_text: str | None = None) -> str:
+                 run_id: str | None = None, spec_text: str | None = None, on_event=None) -> str:
     """AI agent를 하네스 레벨 하나로 실행한다. 사후 검증은 레벨과 무관하게 항상 한다."""
     level = get_level(level_name)
     params = load_params(pack)
@@ -53,7 +53,7 @@ def run_ai_agent(store: Store, pack: DomainPack, dataset: dict, level_name: str,
         runner = HarnessRunner(pack, llm, level, llm_config.get("max_llm_calls_per_item", 12), spec_text=spec_text)
         spec_salt = f":spec{hashlib.sha1(spec_text.encode()).hexdigest()[:10]}" if spec_text is not None else ""
         out = runner.run(instance, run_id=run_id, salt=f"{dataset['id']}:{level_name}:{repeat}{spec_salt}",
-                         progress=progress)
+                         progress=progress, on_event=on_event)
         violations = pack.validate(instance, out.decisions)
         metrics = pack.metrics(instance, out.decisions)
     except Exception as exc:

@@ -13,6 +13,7 @@ from pathlib import Path
 
 from core.interfaces import DecisionRecord, DomainPack, ToolContext
 from core.llm.client import LLMClient, Usage
+from core.llm.events import EventSink, summarize
 from core.storage.store import to_jsonable
 
 from . import guardrail, validator_loop
@@ -115,9 +116,10 @@ class HarnessRunner:
     # --- 실행 ---------------------------------------------------------------
 
     def run(self, instance, run_id: str, salt: str = "",
-            progress: Callable[[int, int], None] | None = None) -> RunOutput:
+            progress: Callable[[int, int], None] | None = None, on_event: EventSink | None = None) -> RunOutput:
+        """on_event: 항목·단계마다 타임라인 이벤트를 알린다 (레벨과 무관, M16 에이전트 탭). 저장은 L5만."""
         started = time.time()
-        tracer = Tracer(run_id, full=self.level.trace == "full")
+        tracer = Tracer(run_id, full=self.level.trace == "full", listener=on_event)
         usage = Usage()
         system = self._system()
         tools, handlers = self._tools(instance)
@@ -147,6 +149,11 @@ class HarnessRunner:
                     raise AbortRun(f"LLM 오류가 {errors}번 연속 발생: {exc!r}") from exc
                 record = self._failed(instance, item_id, "LLM_ERROR", f"LLM 호출 오류: {exc!r}")
             decisions.append(record)
+            if on_event:
+                on_event({"type": "decision", "turn": None, "item": item_id, "status": record.status,
+                          "text": f"{item_id}: {record.status}"
+                                  + (f" {summarize(record.decision)}" if record.decision else "")
+                                  + (f" {record.reason_code}" if record.reason_code else "")})
             if record.status in ("success", "pending_approval"):
                 placed.append(record)
             item_seconds[item_id] = time.time() - t0

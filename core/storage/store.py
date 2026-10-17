@@ -98,6 +98,16 @@ CREATE TABLE IF NOT EXISTS saved_constraints (  -- 사람이 확정한 제약 (M
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS opinion_runs (  -- 의견 정리 에이전트 단독 실행 (M16 에이전트 탭). 제약 확인 전 결과까지
+    id TEXT PRIMARY KEY,
+    proposal_id TEXT,              -- 의견을 남긴 개선안
+    opinion TEXT NOT NULL,         -- 의견 한 줄
+    status TEXT NOT NULL,          -- running | done | error
+    body TEXT,                     -- {constraints, problems, stop, calls, timeline, usage, ...}
+    error TEXT,
+    created_at REAL NOT NULL,
+    finished_at REAL
+);
 """
 
 # M3에서 runs에 추가한 열 (기존 DB는 ALTER TABLE로 보강)
@@ -422,3 +432,55 @@ class Store:
             row = self.conn.execute("SELECT id FROM proposal_batches WHERE status = 'done' AND report_id = ?"
                                     " ORDER BY created_at DESC LIMIT 1", (report_id,)).fetchone()
         return self.get_batch(row["id"]) if row else None
+
+    def list_traces(self, run_id: str) -> list[dict]:
+        """실행 하나의 모든 단계 기록 (항목·단계 순)."""
+        with self.lock:
+            rows = self.conn.execute("SELECT * FROM traces WHERE run_id = ? ORDER BY ts, item_id, step",
+                                     (run_id,)).fetchall()
+        return [{**dict(r), "input": json.loads(r["input"]), "output": json.loads(r["output"])} for r in rows]
+
+    # --- 에이전트 탭(M16)용 최근 실행 목록 ---
+    def recent_reports(self, limit: int = 20) -> list[dict]:
+        with self.lock:
+            ids = [r["id"] for r in self.conn.execute(
+                "SELECT id FROM reports ORDER BY created_at DESC LIMIT ?", (limit,))]
+        return [self.get_report(i) for i in ids]
+
+    def recent_batches(self, limit: int = 20) -> list[dict]:
+        with self.lock:
+            ids = [r["id"] for r in self.conn.execute(
+                "SELECT id FROM proposal_batches ORDER BY created_at DESC LIMIT ?", (limit,))]
+        return [self.get_batch(i) for i in ids]
+
+    # --- 의견 정리 단독 실행 (M16) ---
+    def create_opinion_run(self, proposal_id: str | None, opinion: str) -> str:
+        oid = f"opn-{uuid.uuid4().hex[:8]}"
+        with self.lock, self.conn:
+            self.conn.execute("INSERT INTO opinion_runs (id, proposal_id, opinion, status, created_at)"
+                              " VALUES (?, ?, ?, 'running', ?)", (oid, proposal_id, opinion, time.time()))
+        return oid
+
+    def finish_opinion_run(self, oid: str, body: dict) -> None:
+        with self.lock, self.conn:
+            self.conn.execute("UPDATE opinion_runs SET status = 'done', body = ?, finished_at = ? WHERE id = ?",
+                              (json.dumps(to_jsonable(body), ensure_ascii=False), time.time(), oid))
+
+    def fail_opinion_run(self, oid: str, error: str, body: dict | None = None) -> None:
+        with self.lock, self.conn:
+            self.conn.execute("UPDATE opinion_runs SET status = 'error', error = ?, body = ?, finished_at = ?"
+                              " WHERE id = ?", (error, json.dumps(to_jsonable(body or {}), ensure_ascii=False),
+                                                time.time(), oid))
+
+    def get_opinion_run(self, oid: str) -> dict | None:
+        with self.lock:
+            row = self.conn.execute("SELECT * FROM opinion_runs WHERE id = ?", (oid,)).fetchone()
+        if row is None:
+            return None
+        return {**dict(row), "body": json.loads(row["body"]) if row["body"] else None}
+
+    def recent_opinion_runs(self, limit: int = 20) -> list[dict]:
+        with self.lock:
+            ids = [r["id"] for r in self.conn.execute(
+                "SELECT id FROM opinion_runs ORDER BY created_at DESC LIMIT ?", (limit,))]
+        return [self.get_opinion_run(i) for i in ids]

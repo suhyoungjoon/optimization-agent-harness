@@ -557,3 +557,62 @@ export interface AgentsLoop {
     total: Record<string, { before: number | null; after: number | null }>;
   } | null;
 }
+
+// --- 에이전트 탭 (M16) ---
+export type TabAgent = "dispatch" | "analysis" | "proposals" | "opinion";
+
+export interface AgentTabInfo {
+  agents: { agent: TabAgent; label: string; provider: string; model: string; effort: string | null; max_calls: string }[];
+  demo: boolean;
+  fake: boolean;
+  note: string | null;
+}
+
+export interface AgentTabSources {
+  rule_runs: { id: string; label: string; dataset_id: string }[];
+  reports: { id: string; label: string; run_id: string }[];
+  proposals: { id: string; label: string; batch_id: string; status: string }[];
+}
+
+export interface AgentTabHistoryRow {
+  id: string;
+  status: string;
+  created_at: number;
+  label: string;
+}
+
+export interface TimelineEvent {
+  seq: number;
+  type: "llm" | "tool" | "check" | "item" | "decision" | "end" | string;
+  turn: number | null;
+  item?: string;
+  text: string;
+  name?: string;
+  input?: string;
+  output?: string;
+  ok?: boolean;
+  label?: string;
+  problems?: string[];
+  ref?: string;
+  status?: string;
+}
+
+export interface AgentTabTimeline {
+  agent: TabAgent;
+  id: string;
+  status: string;
+  live: boolean;
+  error?: string | null;
+  input: string;
+  output: string | null;
+  usage: { provider?: string | null; model?: string | null; deployment?: string | null; calls?: number | null;
+    input_tokens?: number | null; cache_read_tokens?: number | null; output_tokens?: number | null;
+    cost_usd?: number | null; seconds?: number | null };
+  graph: string;
+  level?: string;
+  note?: string | null;
+  events: TimelineEvent[];
+  total_events: number;
+  constraints?: unknown[];
+  problems?: string[];
+}
