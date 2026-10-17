@@ -293,7 +293,8 @@ def register(app: FastAPI, ctx: Context) -> None:
             return JSONResponse(status_code=202, content={"id": batch["id"], "status": "done", "replayed": True})
         if req.constraints:
             _run, _dataset, pack, instance, _truth, decisions = _run_context(store, report["run_id"])
-            errors = constraint_errors(req.constraints, load_params(pack), sorted(pack.metrics(instance, decisions)))
+            errors = constraint_errors(req.constraints, load_params(pack), sorted(pack.metrics(instance, decisions)),
+                                       pack.dimensions())
             if errors:
                 raise HTTPException(400, "; ".join(errors))
         llm = _llm_or_503(ctx, "proposals")
