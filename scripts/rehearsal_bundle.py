@@ -76,14 +76,20 @@ def _first_user_text(messages) -> str:
     return content if isinstance(content, str) else ""
 
 
-def _proposer(n, messages):
+def _proposer(n, messages, names=()):
     if CONSTRAINTS_HEADER in _first_user_text(messages):   # 사람이 정한 제약(의견 정리 포함)을 지키는 안 한 건
-        if n == 0:
+        search = "search_knowledge" in names                # 검색 도구가 있으면 규정을 먼저 찾아 인용한다 (M15-C)
+        if search and n == 0:
+            return tool_use("search_knowledge", {"query": "관할 밖 출동 거리 상한",
+                                                 "params": ["matching.area_extension_km[2]"], "kinds": ["regulation"]})
+        if n == (1 if search else 0):
             return tool_use("simulate_params", {"override_rules": [BOUNDARY_RULE_4KM]})
         return tool_use("submit_proposals", {"proposals": [
             {"title": "경계 지역만 3단계 지역 범위 +1km (제약 반영)", "kind": "params", "target_findings": ["F3"],
-             "rationale": "현장 제약(관할 밖 출동 거리 한도)을 지키면서 경계 지역 실패를 줄인다",
-             "expected_effect": "경계 지역 할당 증가, 제약 위반 없음", "override_rules": [BOUNDARY_RULE_4KM]}]})
+             "rationale": "현장 제약(관할 밖 출동 거리 한도)을 지키면서 경계 지역 실패를 줄인다"
+                          + (" (규정 DIST-01: 관할 밖 4km 이하, DIST-03: 경계 지역 먼저)" if search else ""),
+             "expected_effect": "경계 지역 할당 증가, 제약 위반 없음", "override_rules": [BOUNDARY_RULE_4KM],
+             **({"cited_docs": ["DIST-01", "DIST-03"]} if search else {})}]})
     if n == 0:
         return tool_use("simulate_params", {"override_rules": [BOUNDARY_RULE]})
     return tool_use("submit_proposals", {"proposals": [
@@ -123,8 +129,15 @@ def build_policy(pack, instance):
         if "submit_report" in names:
             return _analyst(n, messages)
         if "submit_proposals" in names:
-            return _proposer(n, messages)
+            return _proposer(n, messages, names)
+        if "choose_next_step" in names:     # Supervisor (M15-D): 고정 규칙의 판정을 그대로 고른다
+            ask = json.loads(_first_user_text(messages))
+            return tool_use("choose_next_step", {"next": ask["rule_recommendation"],
+                                                 "reason": "리허설: 고정 규칙과 같은 판단 (" + ask["rule_reason"] + ")"})
         if "submit_constraints" in names:
+            if "search_knowledge" in names and n == 0:     # 의견과 관련된 규정을 먼저 찾는다 (M15-C)
+                return tool_use("search_knowledge", {"query": _first_user_text(messages).split("\n")[1],
+                                                     "kinds": ["regulation"]})
             return _opinion(messages)
         d = rule[item]
         if d.status != "success":

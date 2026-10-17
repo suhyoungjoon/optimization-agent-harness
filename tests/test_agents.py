@@ -166,7 +166,7 @@ def run_until(client, snap, stop):
     return snap
 
 
-def test_rehearsal_story_opinion_constraint_round_two_report(client):
+def test_rehearsal_story_opinion_constraint_round_two_report(client, tmp_path):
     """M15-B 리허설 이야기: 5km 제안 → 의견 → 제약 → 4km 제안 → 승인 → 재배정 → 2회차 → 끝 → 결과 보고."""
     waiting = lambda s: s["waiting"] == "approval"   # noqa: E731
     snap = run_until(client, start(client), waiting)
@@ -188,6 +188,11 @@ def test_rehearsal_story_opinion_constraint_round_two_report(client):
     snap = run_until(client, snap, waiting)
     assert snap["approval"]["title"].endswith("(제약 반영)") and snap["approval"]["rank"] == 1
     assert "제약 1개 · 반려·의견 기억 2건" in lines(snap, "proposal_agent")[-2]
+    # 문서 검색 (M15-C): 개선 제안 에이전트가 규정을 찾아 인용, 쓴 조각과 인용이 기록된다
+    ret = snap["loop"]["retrieval"]
+    assert ret["mode"] == "keyword" and ret["cited"] == ["DIST-01", "DIST-03"]
+    assert {"DIST-01", "DIST-03"} <= {c["id"] for c in ret["chunks"]}
+    assert any(e["agent"] == "proposal_agent" and e["text"].startswith("search_knowledge") for e in snap["events"])
 
     snap = step(client, snap["id"], "approve", "현장 한도 안")
     snap = run_until(client, snap, lambda s: s["next"] == ["dispatch_agent"])
@@ -205,6 +210,12 @@ def test_rehearsal_story_opinion_constraint_round_two_report(client):
     assert rep["constraints"][0]["max"] == 4 and any(f["id"] != "F3" for f in rep["remaining"])
     out = lines(snap, "report")
     assert out[0].startswith("1회차: 배정 성공률") and any(line.startswith("종료 이유: 개선 없음") for line in out)
+
+    # 정리한 현장 의견은 색인에 남아 다음 실행의 검색 대상이 된다
+    from core.retrieval import Index
+    index = Index(next((tmp_path / "work").glob("demo-*")) / "retrieval.sqlite")
+    opinions = index.search("관할 밖 4km", kinds=["opinion"])
+    assert len(opinions) == 1 and "관할 밖 4km 초과 출동 불가" in opinions[0]["text"]
 
 
 def test_reject_all_reproposes_with_memory_then_caps(client):
@@ -228,3 +239,35 @@ def test_opinion_requires_text(client):
     snap = run_until(client, start(client), lambda s: s["waiting"] == "approval")
     res = client.post(f"/agents/runs/{snap['id']}/step", json={"action": "opinion", "note": "  "})
     assert res.status_code == 400 and "의견" in res.text
+
+
+def test_supervisor_end_check_is_configurable_and_capped(client):
+    """M15-D: 종료 판정을 Supervisor 에이전트로 바꿀 수 있다. 허용된 단계만 고르고(코드가 막음) 고정 규칙과 비교한다."""
+    g = client.get("/agents/graph?level=L3&end_check=supervisor").json()
+    assert g["end_check"] == "supervisor" and "check_end" in g["agents"]
+    edges = {(e["source"], e["target"]): e["label"] for e in g["top"]["edges"]}
+    assert edges[("check_end", "proposal_agent")] == "Supervisor: 다시 제안"
+    assert client.get("/agents/graph?level=L3").json()["end_check"] == "fixed"
+
+    res = client.post("/agents/runs", json={"domain": "dispatch", "seed": 42, "faults": ["P1", "P2", "P3", "P4"],
+                                            "items": 10, "level": "L3", "metrics": METRICS, "pace": 0,
+                                            "end_check": "supervisor"})
+    snap = run_until(client, res.json(), lambda s: s["waiting"] == "approval")
+    snap = step(client, snap["id"], "approve")
+    snap = run_until(client, snap, lambda s: False)
+    ends = [s["lines"] for s in snap["steps"] if s["node"] == "check_end"]
+    assert ends[0][1].startswith("고정 규칙: 다음 회차") and ends[0][2].startswith("Supervisor: 다음 회차")
+    assert ends[1][2].startswith("Supervisor: 끝내고 결과 보고")
+    assert snap["counts"]["check_end"]["check"] == 2 and snap["loop"]["report"]["stop_reason"].startswith("Supervisor")
+
+
+def test_supervisor_outside_allowed_falls_back_to_rule():
+
+    from tests.fake_llm import FakeLLM, tool_use
+    from workflow.agents.context import AgentContext
+    from workflow.agents.flow import supervisor_graph
+    from workflow.agents.tool_agent import run_tool_agent
+
+    llm = FakeLLM(lambda item, n, messages, tools: tool_use("choose_next_step", {"next": "next_round", "reason": "더"}))
+    out = run_tool_agent(supervisor_graph(AgentContext(), llm, ["repropose", "report"]), "{}")
+    assert out["problems"] and "next_round" in out["problems"][0] and out["feedback_rounds"] == 1

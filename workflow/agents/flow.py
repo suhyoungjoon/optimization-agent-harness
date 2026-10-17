@@ -30,12 +30,15 @@ from core.improvement import proposer as proposer_core
 from core.improvement.approval import write_params, write_spec
 from core.improvement.changes import apply_params, apply_spec, params_errors, spec_errors, spec_sections
 from core.improvement.constraints import constraint_errors, constraint_violations
-from core.improvement.loop import load_loop_config, loop_report, termination
+from core.improvement.loop import NEXT_STEPS, allowed_steps, load_loop_config, loop_report, termination
 from core.improvement.memory import _proposal_change, proposal_memory_text
 from core.improvement.ranking import load_ranking_config, metric_specs, minimal_change, rank_proposals
 from core.improvement.simulate import simulate_params
 from core.params import params_view
-from core.registry import load_pack, load_params, load_perspectives
+from core.registry import knowledge_dir, load_pack, load_params, load_perspectives
+from core.retrieval import prepare as prepare_retrieval, retrieval_meta, search_tool
+from core.retrieval.records import opinion_chunk
+from core.retrieval.tool import citation_errors
 
 from ..graph import (APPROVED, IMPROVED, NO_MORE, NOT_IMPROVED, REJECTED, HAS_PROPOSALS, _better, _fmt,
                      _primary, _worse, describe)
@@ -60,6 +63,7 @@ class AgentsState(TypedDict, total=False):
     opinion_error: str          # 의견을 제약으로 정리하지 못한 이유 (사람에게 다시 묻는다)
     stop: bool                  # 종료 판정 결과
     stop_reason: str
+    next_step: str              # 종료 판정이 고른 다음 단계: next_round | repropose | report (repropose는 Supervisor만)
     log: Annotated[list[dict], operator.add]
 
 
@@ -94,6 +98,7 @@ NODES: dict[str, dict] = {
 OPINION, ALL_REJECTED, CAP = "의견 → 제약으로 정리", "모두 반려 → 다시 제안", "다시 제안 횟수 소진"
 CONSTRAINT_OK, FORMAT_BAD = "제약 확인 → 다시 제안", "형식이 맞지 않음 → 다시 묻기"
 CONTINUE, DONE = "다음 회차", "끝 → 결과 보고"
+SUPERVISOR_REPROPOSE = "Supervisor: 다시 제안"
 CONSTRAINTS_HEADER = "# 지켜야 할 제약 (현장·운영이 정한 한도, source는 누가 정했는지)"
 
 
@@ -231,11 +236,16 @@ def proposal_agent_graph(ctx: AgentContext, llm=None):
                                                           "override_rules": proposer_core._RULES}}},
     ]
 
+    retrieval = d.get("retrieval")
+    if retrieval:   # 문서 검색 (M15-C): 규정·현장 의견. 인용은 cited_docs, 받지 않은 조각 인용은 적용 불가
+        tools.append(search_tool(retrieval["index"], retrieval["kinds"], record=retrieval["record"]))
+
     def check(submission: dict, calls: dict) -> list[str]:
         problems = []
         for i, p in enumerate(submission.get("proposals") or []):
             errs = (params_errors(params, p, dims) if p.get("kind") == "params"
                     else spec_errors(spec_text, p) if p.get("kind") == "spec" else ["알 수 없는 kind"])
+            errs += citation_errors(p.get("cited_docs"), calls) if isinstance(p, dict) else []
             problems += [f"제안 {i + 1} '{p.get('title', '')}': {e}" for e in errs]
         return problems
 
@@ -246,7 +256,8 @@ def proposal_agent_graph(ctx: AgentContext, llm=None):
 
     # 범위 밖 제안은 돌려보내지 않고 "적용 불가"로 표시한다 (기존 개선 탭과 같은 동작)
     return build_tool_agent(ctx, "proposal_agent", llm=llm, system=proposer_core.SYSTEM, tools=tools,
-                            submit_tool=proposer_core._submit_tool(), check=check, check_label="바꿀 수 있는 범위 검사",
+                            submit_tool=proposer_core._submit_tool(bool(retrieval)), check=check,
+                            check_label="바꿀 수 있는 범위 검사",
                             feedback=False, max_calls=20, salt="lg-proposals", tool_text=tool_text)
 
 
@@ -274,21 +285,52 @@ def opinion_agent_graph(ctx: AgentContext, llm=None):
                   "constraints": {"type": "array", "items": {"type": "object"}},
                   "summary": {"type": "string", "description": "어떻게 정리했는지, 또는 무엇이 빠져 정리하지 못했는지"}}}}
 
+    retrieval = d.get("retrieval")
+    if retrieval:   # 규정·이전 의견을 찾아 한도를 확인할 수 있다 (M15-C)
+        tools.append(search_tool(retrieval["index"], retrieval["kinds"], record=retrieval["record"]))
+        submit["input_schema"]["properties"]["cited_docs"] = proposer_core.CITED_DOCS
+
     def check(submission: dict, calls: dict) -> list[str]:
         constraints = submission.get("constraints")
         if constraints == []:
             return ["제약으로 정리할 한도가 없음" + (f" ({submission['summary']})" if submission.get("summary") else "")]
-        return constraint_errors(constraints, params, metric_names)
+        return constraint_errors(constraints, params, metric_names) + citation_errors(submission.get("cited_docs"), calls)
 
     return build_tool_agent(ctx, "opinion_agent", llm=llm, system=OPINION_SYSTEM, tools=tools, submit_tool=submit,
                             check=check, check_label="제약 형식 검사", max_calls=6, salt="lg-opinion")
 
 
+SUPERVISOR_SYSTEM = """너는 개선 루프의 Supervisor다. 한 회차가 끝났을 때 다음 단계를 고른다.
+입력: 이번 회차 기록(핵심 지표 전→후, 승인·반려·의견), 고정 규칙의 판정과 이유, 고를 수 있는 다음 단계.
+- 고를 수 있는 단계 밖은 고르지 마라 (최대 회차·다시 제안 횟수는 코드가 막는다).
+- 핵심 지표가 목표에 닿았거나 더 나아질 여지가 없으면 report, 승인한 변경이 효과가 있었고 남은 문제가 있으면 next_round,
+  모두 반려됐지만 사람의 반려 사유로 다른 안을 찾을 수 있으면 repropose.
+- choose_next_step으로 next와 한 줄 reason을 제출한다."""
+
+
+def supervisor_graph(ctx: AgentContext, llm=None, allowed: list[str] | None = None):
+    """종료 판정 Supervisor (M15-D): 도구 없이 허용된 다음 단계 중 하나를 고른다. 범위 밖이면 고쳐 오게 한 번."""
+    allowed = allowed or list(NEXT_STEPS)
+    submit = {"name": "choose_next_step", "description": "다음 단계를 고른다.",
+              "input_schema": {"type": "object", "required": ["next", "reason"], "properties": {
+                  "next": {"type": "string", "enum": allowed}, "reason": {"type": "string"}}}}
+
+    def check(submission: dict, calls: dict) -> list[str]:
+        return [] if submission.get("next") in allowed else [f"고를 수 있는 단계가 아님: {submission.get('next')!r} "
+                                                             f"(가능: {', '.join(allowed)})"]
+
+    return build_tool_agent(ctx, "check_end", llm=llm, system=SUPERVISOR_SYSTEM, tools=[], submit_tool=submit,
+                            check=check, check_label="허용 단계 검사", max_calls=4, salt="lg-supervisor")
+
+
 # --- 상위 그래프 ----------------------------------------------------------------------------
 
-def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
+def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None, end_check: str | None = None):
+    """end_check: fixed | supervisor (없으면 configs/workflow.yaml). supervisor면 종료 판정 노드가 에이전트가 되고
+    "다시 제안" 갈래가 생긴다 (M15-D)."""
     d = ctx.data
     loop_cfg, rank_cfg = load_loop_config(), load_ranking_config()
+    supervised = (end_check or loop_cfg.get("end_check")) == "supervisor"
 
     def specs() -> list[dict]:
         return metric_specs(d["pack"].dimensions())
@@ -308,6 +350,8 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
         rule = pack.solve(sub, params)
         d.update(pack=pack, params=params, instance=instance, truth=truth, scope=scope, sub_instance=sub, rule_sub=rule,
                  constraints=[], rejections=[], rounds=[])
+        if d.get("index") is not None:   # 문서 검색 (M15-C): 규정 + 이전 실행의 현장 의견
+            d["retrieval"] = prepare_retrieval(d["index"], knowledge_dir(pack), pack.name, ["regulation", "opinion"])
         start_round(1)
         v = len(pack.validate(sub, rule))
         return {"round": 1, **_step("prepare", [f"전체 {len(pack.items(instance))}건 중 처리 순서 앞 {len(scope)}건",
@@ -386,6 +430,8 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
                      + "\nsimulate_params 결과의 constraint_violations가 비도록 안을 설계하라. "
                        "어길 수밖에 없으면 rationale에 어떤 제약을 왜 어기는지 적어라.")
         user += proposal_memory_text({"rejections": d["rejections"]})   # 이 실행에서 반려·의견을 받은 안 (기억)
+        if d.get("retrieval"):
+            user += proposer_core.RETRIEVAL_NOTE
         llm = ctx.make_llm("proposals")
         out = run_tool_agent(proposal_agent_graph(ctx, llm), user)
         _charge(d, out["usage"].cost_usd(llm.model, ctx.llm_config))
@@ -399,6 +445,10 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
                       else spec_errors(spec_text, p) if p.get("kind") == "spec" else ["알 수 없는 kind"])
             proposals.append({"body": p, "errors": errors, "status": "invalid" if errors else "proposed"})
         d["proposals"], d["ranking"] = proposals, None
+        if d.get("retrieval"):
+            cited = [str(c) for p in proposals if isinstance(p["body"].get("cited_docs"), list) for c in p["body"]["cited_docs"]]
+            d["cited_docs"] = sorted(set(d.get("cited_docs") or []) | set(cited))
+            d["retrieval_meta"] = retrieval_meta(d["retrieval"]["index"], d["retrieval"]["record"], d["cited_docs"])
         usable = [i for i, p in enumerate(proposals) if not p["errors"]]
         usable.sort(key=lambda i: proposals[i]["body"].get("kind") != "params")
         head = f"{state.get('round', 1)}회차" + (f" · 다시 제안 {d['reproposals']}번째" if d["reproposals"] else "")
@@ -534,6 +584,12 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
         added = [{**c, "source": c.get("source") or "현장 의견", "note": c.get("note") or opinion}
                  for c in (out.get("submission") or {}).get("constraints") or []]
         d["constraints"] = d["constraints"] + added
+        if d.get("retrieval"):   # 현장 의견 기록: 다음 의견 정리·개선안이 찾아 쓸 수 있게 색인에 남긴다
+            cited = (out.get("submission") or {}).get("cited_docs")
+            d["cited_docs"] = sorted(set(d.get("cited_docs") or []) | set(map(str, cited if isinstance(cited, list) else [])))
+            d["retrieval_meta"] = retrieval_meta(d["retrieval"]["index"], d["retrieval"]["record"], d["cited_docs"])
+            d["retrieval"]["index"].add(f"{d['pack'].name}:opinion", [opinion_chunk(
+                opinion, added, p["body"].get("title", ""), _proposal_change(p["body"]), d["params"].get("version"))])
         lines = [f"의견 \"{opinion}\" → 제약 {len(added)}개"]
         lines += [f"{c.get('path') or c.get('metric')} "
                   + ", ".join(f"{k} {c[k]}" for k in ("min", "max", "max_drop", "max_rise") if k in c)
@@ -576,14 +632,41 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
                  "seconds": round(time.time() - d["round_started"], 2),
                  "params_version_before": d.get("round_version"), "params_version_after": d["params"].get("version")}
         stop, reason = termination(entry, specs(), loop_cfg, rank_cfg["min_effect"])
-        d["rounds"].append(entry)
+        choice = "report" if stop else "next_round"
         lines = [f"{n}회차 끝: 승인 {len(entry['approved'])}건 · 결정 {len(entry['decisions'])}건", reason]
-        if not stop:
+        if supervised:
+            choice, why = supervise(entry, choice, reason)
+            lines = [lines[0], f"고정 규칙: {reason}", f"Supervisor: {NEXT_STEPS[choice]} — {why}"]
+            reason = f"Supervisor: {NEXT_STEPS[choice]} ({why})"
+        if choice == "repropose":     # 같은 회차에서 다시 제안 (회차 기록은 아직 남기지 않는다)
+            return {"next_step": choice, "stop": False, "stop_reason": reason, **_step("check_end", lines)}
+        d["rounds"].append(entry)
+        if choice == "next_round":
             start_round(n + 1)
             d["round_before"] = entry["after"]
-            return {"round": n + 1, "stop": False, "stop_reason": reason,
+            return {"round": n + 1, "next_step": choice, "stop": False, "stop_reason": reason,
                     **_step("check_end", lines + [f"{n + 1}회차: 배정 에이전트부터 새 규칙으로 다시"])}
-        return {"stop": True, "stop_reason": reason, **_step("check_end", lines)}
+        return {"next_step": "report", "stop": True, "stop_reason": reason, **_step("check_end", lines)}
+
+    def supervise(entry: dict, rule_choice: str, rule_reason: str) -> tuple[str, str]:
+        """Supervisor 에이전트가 허용된 단계 중에서 고른다. 범위 밖이거나 제출하지 않으면 고정 규칙을 따른다."""
+        allowed = allowed_steps(entry, loop_cfg, d.get("reproposals", 0))
+        fallback = rule_choice if rule_choice in allowed else "report"
+        primary = [m["key"] for m in specs() if m.get("primary")]
+        user = json.dumps({
+            "round": entry["round"], "max_rounds": loop_cfg["max_rounds"],
+            "primary": {k: {"before": entry["before"].get(k), "after": entry["after"].get(k),
+                            "target": next((m.get("target") for m in specs() if m["key"] == k), None)} for k in primary},
+            "approved": entry["approved"], "decisions": entry["decisions"], "constraints": d["constraints"],
+            "rule_recommendation": fallback, "rule_reason": rule_reason,
+            "allowed": {k: NEXT_STEPS[k] for k in allowed}}, ensure_ascii=False, indent=1)
+        llm = ctx.make_llm("analysis")
+        out = run_tool_agent(supervisor_graph(ctx, llm, allowed), user)
+        _charge(d, out["usage"].cost_usd(llm.model, ctx.llm_config))
+        sub = out.get("submission") or {}
+        if out.get("stop") != "submitted" or out.get("problems") or sub.get("next") not in allowed:
+            return fallback, "Supervisor가 허용된 단계를 고르지 않아 고정 규칙을 따름"
+        return sub["next"], str(sub.get("reason") or "")
 
     def report(state: AgentsState):
         rep = loop_report(d["rounds"], specs(), state.get("stop_reason", ""), findings=(d.get("report") or {}).get("findings"),
@@ -634,7 +717,12 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
            "check_end": check_end, "report": report}
     g = StateGraph(AgentsState)
     for name, fn in fns.items():
-        g.add_node(name, fn, metadata=NODES[name])
+        meta = NODES[name]
+        if name == "check_end" and supervised:
+            meta = {**meta, "label": "종료 판정 (Supervisor)", "kind": "ai", "agent": True,
+                    "description": "Supervisor 에이전트가 허용된 다음 단계(다음 회차 · 다시 제안 · 결과 보고) 중에서 고른다. "
+                                   "최대 회차·다시 제안 횟수는 코드가 막는다"}
+        g.add_node(name, fn, metadata=meta)
     g.add_edge(START, "prepare")
     for a, b in [("prepare", "dispatch_agent"), ("dispatch_agent", "evaluate"), ("evaluate", "rule_full"),
                  ("rule_full", "analysis_agent"), ("analysis_agent", "proposal_agent"), ("apply", "reevaluate"),
@@ -649,19 +737,25 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None):
                              ALL_REJECTED: "proposal_agent", CAP: "check_end"})
     g.add_conditional_edges("opinion_agent", after_opinion,
                             {CONSTRAINT_OK: "proposal_agent", FORMAT_BAD: "human_review", CAP: "check_end"})
-    g.add_conditional_edges("check_end", lambda s: DONE if s.get("stop") else CONTINUE,
-                            {CONTINUE: "dispatch_agent", DONE: "report"})
+    after_end = {"next_round": CONTINUE, "report": DONE, "repropose": SUPERVISOR_REPROPOSE}
+    g.add_conditional_edges("check_end", lambda s: after_end[s.get("next_step") or "report"],
+                            {CONTINUE: "dispatch_agent", DONE: "report",
+                             **({SUPERVISOR_REPROPOSE: "proposal_agent"} if supervised else {})})
     return g.compile(checkpointer=checkpointer or InMemorySaver(),
                      interrupt_before=[n for n in fns if n != "human_review"])
 
 
-def describe_all(levels: dict[str, Level], level: str, perspectives: list[dict] | None = None) -> dict:
+def describe_all(levels: dict[str, Level], level: str, perspectives: list[dict] | None = None,
+                 end_check: str | None = None) -> dict:
     """상위 그래프와 에이전트 하위 그래프 (화면 그림용). 데이터 없이 구조만 만든다.
     perspectives를 주면 분석 에이전트를 관점별 병렬(fan-out) → 합치기(fan-in) 모양으로 그린다."""
     ctx = AgentContext()
     analysis = analysis_fanout_graph(ctx, perspectives) if perspectives else analysis_agent_graph(ctx)
-    return {"top": describe(build_flow(ctx, levels)),
+    flow = build_flow(ctx, levels, end_check=end_check)
+    agents = {"check_end": describe(supervisor_graph(ctx))} if any(
+        n.get("agent") for n in describe(flow)["nodes"] if n["id"] == "check_end") else {}
+    return {"top": describe(flow), "end_check": "supervisor" if agents else "fixed",
             "agents": {"dispatch_agent": describe(build_dispatch_agent(ctx, levels[level])),
                        "analysis_agent": describe(analysis),
                        "proposal_agent": describe(proposal_agent_graph(ctx)),
-                       "opinion_agent": describe(opinion_agent_graph(ctx))}}
+                       "opinion_agent": describe(opinion_agent_graph(ctx)), **agents}}

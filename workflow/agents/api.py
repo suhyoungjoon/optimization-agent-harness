@@ -28,6 +28,8 @@ class AgentsStart(BaseModel):
     llm: Literal["fake", "claude"] = "fake"
     perspectives: bool = False     # 분석 에이전트를 관점별로 나눠 병렬 실행 (M12-b)
     pace: float = Field(default=0.2, ge=0, le=2)     # 내부 단계 사이 간격 (초)
+    use_knowledge: bool = True    # 개선 제안·의견 정리 에이전트에 문서 검색 도구 (M15-C). RAG 비교 실험은 false
+    end_check: Literal["fixed", "supervisor"] | None = None   # 종료 판정 (M15-D). 없으면 configs/workflow.yaml
 
 
 def _fake_llm_factory(ctx):
@@ -65,12 +67,13 @@ def _perspectives(domain: str) -> list[dict]:
 
 
 class AgentRuns:
-    def __init__(self, demo: bool):
+    def __init__(self, demo: bool, retrieval_path=None):
         from langgraph.types import Command
 
         from ..runs import GraphRuns
 
         self.demo = demo
+        self.retrieval_path = retrieval_path    # 검색 색인 (M15-C). 현장 의견이 쌓여 다음 실행에서도 찾을 수 있다
         self.runs = GraphRuns(Command)
 
     def start(self, req: AgentsStart) -> dict:
@@ -88,6 +91,12 @@ class AgentRuns:
         config = load_config()
         ctx = AgentContext(llm_config=config, pace=req.pace)
         kind = "fake" if self.demo else req.llm
+        if self.retrieval_path is not None and req.use_knowledge:
+            from core.llm.embeddings import make_embedder
+            from core.retrieval import open_index
+
+            # 가짜 AI(리허설)는 임베딩도 부르지 않는다 (키워드 검색만, 네트워크 없음)
+            ctx.data["index"] = open_index(self.retrieval_path, make_embedder if kind == "claude" else None)
         if kind == "fake":
             try:
                 ctx.make_llm = _fake_llm_factory(ctx)
@@ -99,9 +108,9 @@ class AgentRuns:
             except Exception as exc:  # 자격 증명이 없는 경우 등
                 raise HTTPException(503, f"LLM 클라이언트를 만들 수 없음: {exc}")
             ctx.make_llm = lambda role=None: clients[role]
-        graph = build_flow(ctx, levels)
-        inputs = req.model_dump(exclude={"llm", "pace"})
-        flow_id = self.runs.start(graph, {**inputs, "log": []}, llm=kind, _ctx=ctx)
+        graph = build_flow(ctx, levels, end_check=req.end_check)
+        inputs = req.model_dump(exclude={"llm", "pace", "use_knowledge", "end_check"})
+        flow_id = self.runs.start(graph, {**inputs, "log": []}, llm=kind, end_check=req.end_check, _ctx=ctx)
         return self.snapshot(flow_id)
 
     def snapshot(self, flow_id: str, after: int = -1) -> dict:
@@ -114,7 +123,7 @@ class AgentRuns:
         d = ctx.data
         loop = {"round": values.get("round"), "rounds": d.get("rounds") or [], "constraints": d.get("constraints") or [],
                 "stop_reason": values.get("stop_reason"), "report": d.get("final_report"),
-                "decisions": d.get("round_decisions") or []}
+                "decisions": d.get("round_decisions") or [], "retrieval": d.get("retrieval_meta")}
         last = ctx.recent(limit=1)
         return {**snap, "steps": values.get("log", []), "events": ctx.recent(after),
                 "counts": ctx.counts(), "last_event": last[0] if last else None, "proposals": proposals, "loop": loop,
@@ -124,7 +133,7 @@ class AgentRuns:
         return self.runs.step(flow_id, req.action, req.note, self.snapshot)
 
 
-def register(app: FastAPI, demo: bool = False) -> None:
+def register(app: FastAPI, demo: bool = False, retrieval_path=None) -> None:
     holder: list[AgentRuns] = []
 
     def get_runs() -> AgentRuns:
@@ -132,11 +141,12 @@ def register(app: FastAPI, demo: bool = False) -> None:
         if reason:
             raise HTTPException(501, reason)
         if not holder:
-            holder.append(AgentRuns(demo))
+            holder.append(AgentRuns(demo, retrieval_path))
         return holder[0]
 
     @app.get("/agents/graph")
-    def agents_graph(level: str = "L3", domain: str | None = None, perspectives: bool = False):
+    def agents_graph(level: str = "L3", domain: str | None = None, perspectives: bool = False,
+                     end_check: Literal["fixed", "supervisor"] | None = None):
         reason = _unavailable()
         if reason:
             return {"available": False, "reason": reason}
@@ -149,7 +159,7 @@ def register(app: FastAPI, demo: bool = False) -> None:
             raise HTTPException(400, f"unknown harness level: {level}")
         ps = _perspectives(domain) if perspectives and domain else None
         return {"available": True, "demo": demo, "level": level, "perspectives": bool(ps),
-                **describe_all(levels, level, ps)}
+                **describe_all(levels, level, ps, end_check)}
 
     @app.post("/agents/runs")
     def start_agents(req: AgentsStart):
