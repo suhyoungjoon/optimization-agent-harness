@@ -9,6 +9,7 @@ import json
 from core.llm.client import LLMClient
 from core.params import params_view
 from core.llm.tool_loop import run_tool_loop, usage_dict
+from core.retrieval.tool import citation_errors, search_tool
 
 from .changes import apply_params, params_errors, spec_errors, spec_sections
 from .constraints import constraint_violations
@@ -47,7 +48,20 @@ BASE_KEYS = ("id", "title", "description", "slice", "reason_codes", "metric", "h
 # 개선 에이전트에 넘기는 발견 요약. resources는 적힌 발견에만 넣는다 (없으면 입력이 이전과 같다)
 FINDING_SUMMARY_KEYS = BASE_KEYS + ("resources",)
 
-def _submit_tool() -> dict:
+CITED_DOCS = {"type": "array", "items": {"type": "string"},
+              "description": "근거로 인용한 search_knowledge 결과의 ref (규정 조항·과거 사례·현장 의견)"}
+RETRIEVAL_NOTE = ("\n\n# 문서 검색\nsearch_knowledge로 운영 규정·과거 사례·현장 의견을 찾을 수 있다. 규정과 맞지 않는 안은 내지 말고, "
+                  "근거로 쓴 문서는 각 안의 cited_docs에 ref로 적어라. 인용하지 않은 문서는 근거가 아니다.")
+
+
+def _submit_tool(cited_docs: bool = False) -> dict:
+    tool = _submit_tool_base()
+    if cited_docs:   # 검색 도구가 있을 때만 (없으면 도구 정의·캐시 키가 이전과 같다)
+        tool["input_schema"]["properties"]["proposals"]["items"]["properties"]["cited_docs"] = CITED_DOCS
+    return tool
+
+
+def _submit_tool_base() -> dict:
     return {
         "name": SUBMIT,
         "description": "개선안 목록을 제출한다.",
@@ -76,11 +90,14 @@ def finding_slices(report: dict) -> dict[str, dict]:
 def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: dict, report: dict,
             llm: LLMClient, llm_config: dict, salt: str = "", max_calls: int = 20,
             feedback: list[str] | None = None, constraints: list[dict] | None = None,
-            memory_text: str = "") -> dict:
+            memory_text: str = "", retrieval: dict | None = None) -> dict:
     """feedback: 앞선 시도의 개선안이 탈락한 이유 (재시도할 때 같은 안을 다시 내지 않도록 입력에 붙인다).
     constraints: 사람이 정한 한도 (core.improvement.constraints 형식). 입력에 붙이고, simulate_params 도구
     결과에 위반을 함께 돌려줘 제출 전에 스스로 피하게 한다.
     memory_text: 이전 회차에서 사람이 반려한 개선안 (core.improvement.memory.proposal_memory_text).
+    retrieval: 문서 검색 (M15-C) {"index": core.retrieval.Index, "kinds": {종류: 설명}, "record": {}}.
+    주면 search_knowledge 도구와 cited_docs 칸을 붙이고, 검색 결과에 없는 인용은 적용 불가로 표시한다.
+    record에는 돌려준 조각 id → 해시가 모인다 (묶음 메타데이터용).
     모두 없으면 입력은 이전과 같다 (LLM 캐시 키도 같다)."""
     slices = finding_slices(report)
     trials: list[dict] = []
@@ -122,11 +139,14 @@ def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: di
                  + json.dumps(constraints, ensure_ascii=False, indent=1)
                  + "\nsimulate_params 결과의 constraint_violations가 비도록 안을 설계하라. "
                    "어길 수밖에 없으면 rationale에 어떤 제약을 왜 어기는지 적어라.")
+    if retrieval:
+        tools.append(search_tool(retrieval["index"], retrieval["kinds"], record=retrieval.setdefault("record", {})))
+        user += RETRIEVAL_NOTE
     user += memory_text
     if feedback:
         user += ("\n\n# 이전 시도에서 탈락한 이유\n" + "\n".join(f"- {f}" for f in feedback)
                  + "\n같은 변경을 다시 제안하지 말고, 위 이유를 피하는 안을 제안하라.")
-    result = run_tool_loop(llm, system=SYSTEM, user=user, tools=tools, submit_tool=_submit_tool(),
+    result = run_tool_loop(llm, system=SYSTEM, user=user, tools=tools, submit_tool=_submit_tool(bool(retrieval)),
                            max_calls=max_calls, salt=salt)
 
     proposals = []
@@ -137,6 +157,7 @@ def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: di
             continue
         errors = (params_errors(params, p, dimensions) if p.get("kind") == "params"
                   else spec_errors(spec_text, p) if p.get("kind") == "spec" else ["알 수 없는 kind"])
+        errors += citation_errors(p.get("cited_docs"), result.calls)
         proposals.append({"proposal": p, "errors": errors})
     return {"proposals": proposals, "trials": len(trials), "stop": result.stop, "calls": result.calls,
             "usage": usage_dict(result, llm.model, llm_config)}

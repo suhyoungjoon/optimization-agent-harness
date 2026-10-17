@@ -29,7 +29,11 @@ from core.improvement.ranking import load_ranking_config, metric_specs, minimal_
 from core.improvement.simulate import simulate_params
 from core.improvement.sweep import sensitivity, sweep_params
 from core.interfaces import DecisionRecord
-from core.registry import load_pack, load_params, load_perspectives
+from core.improvement.ranking import metric_specs as _metric_specs
+from core.llm.embeddings import make_embedder
+from core.registry import knowledge_dir, load_pack, load_params, load_perspectives
+from core.retrieval import open_index, prepare, retrieval_meta, search_tool
+from core.retrieval.records import case_chunk
 from core.storage.store import Store
 
 from .replay import equivalent_run_ids
@@ -41,6 +45,7 @@ class AnalysisRequest(BaseModel):
     run_id: str
     cached: bool = False      # 같은 조건 실행의 저장된 리포트를 재생 (시연 모드에서는 항상)
     use_memory: bool = True   # 이전 회차에서 사람이 내린 판정을 입력에 넣는다 (M12-c). 비교 실험은 false
+    use_knowledge: bool = True   # 과거 사례 검색 도구를 붙인다 (M15-C, 사례가 있을 때만). RAG 비교 실험은 false
     perspectives: bool = False   # 관점별 분석 (M12-b): 도메인의 analysis_perspectives.yaml 관점마다 병렬로 돌려 합친다
 
 
@@ -60,6 +65,7 @@ class ProposalRequest(BaseModel):
     cached: bool = False
     constraints: list[dict] | None = None   # 사람이 정한 한도 (core.improvement.constraints 형식). 개선안 묶음에 저장
     use_memory: bool = True                 # 이전 회차에서 반려된 개선안과 사유를 입력에 넣는다 (M12-c)
+    use_knowledge: bool = True              # 규정·과거 사례 검색 도구를 붙인다 (M15-C). RAG 비교 실험은 false
 
 
 class SimulateRequest(BaseModel):
@@ -82,6 +88,7 @@ class Context:
     make_llm: Any
     llm_config: dict
     replay: bool = False      # 시연 모드: LLM 대신 저장된 결과를 재생
+    retrieval_path: Path | None = None   # 검색 색인 파일 (M15-C). 없으면 검색 도구를 붙이지 않는다
 
 
 def _run_context(store: Store, run_id: str):
@@ -130,6 +137,33 @@ def register(app: FastAPI, ctx: Context) -> None:
     store = ctx.store
     sweep_cache: dict[str, dict] = {}     # (데이터셋, params 버전, 축) → 결과. 규칙 엔진이라 다시 계산해도 비용 0
     approve_lock = threading.Lock()
+    index_holder: list = []                # 검색 색인 (M15-C, 처음 쓸 때 연다)
+    index_lock = threading.Lock()
+
+    # --- 문서 검색 (M15-C) ---
+    def case_records(domain: str, pack) -> list:
+        """결정된 개선안 → 과거 회차 사례 조각 (DB 기록에서 매번 다시 맞춘다. 해시가 같으면 쓰지 않는다)."""
+        primary = [m["key"] for m in _metric_specs(pack.dimensions()) if m.get("primary")]
+        out = []
+        for p in store.decided_proposals():
+            report = store.get_report(p["report_id"])
+            run = store.get_run(report["run_id"]) if report else None
+            if not run or run["domain"] != domain:
+                continue
+            meta = (store.get_batch(p["batch_id"]) or {}).get("meta") or {}
+            out.append(case_chunk(p, (report.get("body") or {}).get("findings") or [], primary, meta.get("params_version")))
+        return out
+
+    def knowledge(domain: str, kinds: list[str]) -> dict | None:
+        """검색 도구에 넘길 묶음. 색인 파일이나 도메인 문서 선언이 없으면 None."""
+        if ctx.retrieval_path is None:
+            return None
+        pack = load_pack(domain)
+        with index_lock:
+            if not index_holder:
+                index_holder.append(open_index(ctx.retrieval_path, make_embedder))
+            return prepare(index_holder[0], knowledge_dir(pack), domain, kinds,
+                           {"case": case_records(domain, pack)} if "case" in kinds else None)
 
     # --- 파라미터 탐색 (M13) ---
     def _sweep_context(dataset_id: str):
@@ -190,8 +224,11 @@ def register(app: FastAPI, ctx: Context) -> None:
             if not perspectives:
                 raise HTTPException(400, "이 도메인에는 분석 관점 파일(analysis_perspectives.yaml)이 없음")
         memory = current_memory(run["domain"]) if req.use_memory else None
+        retrieval = knowledge(run["domain"], ["case"]) if req.use_knowledge and not perspectives else None
+        if retrieval and not retrieval["index"].chunks(["case"]):
+            retrieval = None          # 사례가 아직 없으면 도구를 붙이지 않는다 (입력이 이전과 같다)
         report_id = store.create_report(req.run_id)
-        ctx.executor.submit(_analyze_job, report_id, req.run_id, llm, memory, perspectives)
+        ctx.executor.submit(_analyze_job, report_id, req.run_id, llm, memory, perspectives, retrieval)
         return JSONResponse(status_code=202, content={"id": report_id, "status": "running"})
 
     def current_memory(domain: str) -> dict:
@@ -206,7 +243,8 @@ def register(app: FastAPI, ctx: Context) -> None:
         except KeyError:
             raise HTTPException(404, f"unknown domain: {domain}")
 
-    def _analyze_job(report_id: str, run_id: str, llm, memory: dict | None = None, perspectives: list | None = None):
+    def _analyze_job(report_id: str, run_id: str, llm, memory: dict | None = None, perspectives: list | None = None,
+                     retrieval: dict | None = None):
         try:
             _run, dataset, pack, instance, truth, decisions = _run_context(store, run_id)
             if perspectives:
@@ -217,9 +255,12 @@ def register(app: FastAPI, ctx: Context) -> None:
                                             ctx.llm_config, perspectives, salt=f"analysis:{run_id}",
                                             memory_text=analysis_memory_text(memory))
             else:
+                extra = [search_tool(retrieval["index"], retrieval["kinds"], record=retrieval["record"])] if retrieval else None
                 body = analyze(pack, instance, decisions, llm, ctx.llm_config, salt=f"analysis:{run_id}",
-                               memory_text=analysis_memory_text(memory))
+                               memory_text=analysis_memory_text(memory), extra_tools=extra)
             body["memory"] = memory
+            if retrieval:
+                body["retrieval"] = retrieval_meta(retrieval["index"], retrieval["record"])
             store.finish_report(report_id, body, score(body["findings"], truth.get("faults", {}), body["calls"]))
         except Exception as exc:
             store.fail_report(report_id, repr(exc))
@@ -257,24 +298,30 @@ def register(app: FastAPI, ctx: Context) -> None:
                 raise HTTPException(400, "; ".join(errors))
         llm = _llm_or_503(ctx, "proposals")
         memory = current_memory(store.get_run(report["run_id"])["domain"]) if req.use_memory else None
+        domain = store.get_run(report["run_id"])["domain"]
+        retrieval = knowledge(domain, ["regulation", "case", "opinion"]) if req.use_knowledge else None
         batch_id = store.create_batch(req.report_id)
-        ctx.executor.submit(_propose_job, batch_id, report, llm, req.constraints or None, memory)
+        ctx.executor.submit(_propose_job, batch_id, report, llm, req.constraints or None, memory, retrieval)
         return JSONResponse(status_code=202, content={"id": batch_id, "status": "running"})
 
     def _propose_job(batch_id: str, report: dict, llm, constraints: list[dict] | None = None,
-                     memory: dict | None = None):
+                     memory: dict | None = None, retrieval: dict | None = None):
         try:
             _run, dataset, pack, instance, _truth, _decisions = _run_context(store, report["run_id"])
             params = load_params(pack)
             spec_text = Path(pack.spec_path()).read_text(encoding="utf-8")
             out = propose(lambda p: load_pack(pack.name, p), instance, params, spec_text, pack.dimensions(),
                           report["body"], llm, ctx.llm_config, salt=f"proposals:{report['id']}",
-                          constraints=constraints, memory_text=proposal_memory_text(memory))
+                          constraints=constraints, memory_text=proposal_memory_text(memory), retrieval=retrieval)
             meta = {"usage": out["usage"], "trials": out["trials"], "stop": out["stop"],
                     "params_version": params.get("version")}
             if constraints:
                 meta["constraints"] = constraints
             meta["memory"] = memory
+            if retrieval:   # 쓴 문서 조각 id·해시, 인용한 id, 검색 방식·임베딩 모델 (재현 조건)
+                cited = [str(c) for p in out["proposals"] if isinstance(p["proposal"], dict)
+                         and isinstance(p["proposal"].get("cited_docs"), list) for c in p["proposal"]["cited_docs"]]
+                meta["retrieval"] = retrieval_meta(retrieval["index"], retrieval["record"], cited)
             store.finish_batch(batch_id, report["id"], out["proposals"], meta)
         except Exception as exc:
             store.fail_batch(batch_id, repr(exc))

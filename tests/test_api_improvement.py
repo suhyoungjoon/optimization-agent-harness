@@ -344,3 +344,47 @@ def test_batch_ranking_and_minimal_change(client):
     r = client.get(f"/proposals/batches/{batch['id']}").json()["ranking"]
     assert r["entries"][ok["id"]]["tier"] == "main" and r["entries"][ok["id"]]["rank"] == 1
     assert r["order"][0] == ok["id"] and r["config"]["max_proposals"] == 3
+
+
+def test_proposals_search_regulations_and_citations_are_checked(tmp_path, files):
+    """M15-C: 개선 에이전트가 search_knowledge로 규정을 찾아 인용한다. 받지 않은 조각 인용은 적용 불가.
+    묶음 메타데이터에 쓴 조각 id·해시와 검색 방식이 남는다. 승인·반려한 안은 다음 분석의 사례 검색 대상이 된다."""
+    def policy(item, n, messages, tools):
+        names = {t["name"] for t in tools}
+        if "submit_report" in names:
+            if "search_knowledge" in names and n == 0:      # 두 번째 분석: 과거 사례 검색이 붙어 있다
+                return tool_use("search_knowledge", {"query": "경계 지역 출동 거리", "kinds": ["case"]})
+            if "search_knowledge" in names:                 # 검색 왕복을 빼고 기존 가짜 분석가에게
+                return analyst_or_proposer(item, n - 1, [messages[0]] + messages[3:], tools)
+            return analyst_or_proposer(item, n, messages, tools)
+        assert "search_knowledge" in names
+        if n == 0:
+            return tool_use("search_knowledge", {"query": "관할 밖 출동 거리 상한", "params": ["matching.area_extension_km[2]"]})
+        return tool_use("submit_proposals", {"proposals": [
+            {"title": "경계 4km", "kind": "params", "rationale": "DIST-01 한도 안", "target_findings": ["F1"],
+             "override_rules": [BOUNDARY_RULE], "cited_docs": ["DIST-01"]},
+            {"title": "근거 지어냄", "kind": "params", "rationale": "x", "target_findings": ["F1"],
+             "override_rules": [BOUNDARY_RULE], "cited_docs": ["DIST-99"]}]})
+
+    client = TestClient(create_app(tmp_path / "h.db", serve_web=False, llm_factory=lambda: FakeLLM(policy)))
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    report = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    assert "retrieval" not in report["body"]                          # 사례가 없으면 분석에는 검색을 붙이지 않는다
+    batch = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id']}).json()['id']}")
+    ok, made_up = batch["proposals"]
+    assert ok["status"] == "proposed" and made_up["status"] == "invalid"
+    assert any("DIST-99" in e for e in made_up["errors"])
+    meta = batch["meta"]["retrieval"]
+    assert meta["mode"] == "keyword" and meta["embedding_model"] is None and meta["cited"] == ["DIST-01", "DIST-99"]
+    assert "DIST-01" in {c["id"] for c in meta["chunks"]} and all(c["hash"] for c in meta["chunks"])
+
+    client.post(f"/proposals/{ok['id']}/simulate", json={})
+    client.post(f"/proposals/{ok['id']}/reject", json={"note": "현장 협의 필요"})
+    report2 = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    assert report2["status"] == "done", report2.get("error")
+    used = report2["body"]["retrieval"]["chunks"]
+    assert [c["id"] for c in used] == [f"case-{ok['id'][-8:]}"]
+
+    off = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id'], 'use_knowledge': False}).json()['id']}")
+    assert off["status"] == "error" and "AssertionError" in off["error"]   # use_knowledge=false면 검색 도구가 없다

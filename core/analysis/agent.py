@@ -185,13 +185,16 @@ _problems = grounding_problems
 
 
 def analyze(pack: DomainPack, instance, decisions: list[DecisionRecord], llm: LLMClient, llm_config: dict,
-            salt: str = "", max_calls: int = 30, memory_text: str = "", perspective: dict | None = None) -> dict:
+            salt: str = "", max_calls: int = 30, memory_text: str = "", perspective: dict | None = None,
+            extra_tools: list[dict] | None = None) -> dict:
     """memory_text: 이전 회차에서 사람이 내린 판정 (core.improvement.memory.analysis_memory_text). 비면 입력이 이전과 같다.
     perspective: 관점 하나 ({id, name, question, tools}, core.analysis.perspectives). 주면 그 관점의 도구만 주고
-    질문을 시스템 프롬프트 뒤에 붙인다. 없으면 입력이 이전과 같다."""
+    질문을 시스템 프롬프트 뒤에 붙인다. 없으면 입력이 이전과 같다.
+    extra_tools: 더 붙일 도구 (예: 과거 사례 검색 search_knowledge, M15-C). 숫자 근거는 여전히 집계 도구 인용만 인정한다."""
     dimensions = pack.dimensions()
     tools = Aggregator(decisions, dimensions).tools() + pack.analysis_tools(instance, decisions)
     system, tools = perspective_view(analysis_system(dimensions), tools, perspective)
+    tools = tools + list(extra_tools or [])
     metric_names = sorted(pack.metrics(instance, decisions))
 
     def check(submission: dict, calls: dict) -> list[str]:

@@ -298,7 +298,8 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
             raise HTTPException(400, "runs 파라미터가 비어 있음")
         return compare(store, run_ids)
 
-    improvement.register(app, improvement.Context(store, executor, make_llm, llm_config, replay=bool(demo)))
+    improvement.register(app, improvement.Context(store, executor, make_llm, llm_config, replay=bool(demo),
+                                                  retrieval_path=store.path.parent / "retrieval.sqlite"))
     register_workflow(app)   # LangGraph가 없으면 /workflow/graph가 이유만 돌려준다
     register_agents(app, demo=bool(demo))   # M10: 모든 에이전트를 LangGraph로 (시연 모드는 가짜 AI)
 

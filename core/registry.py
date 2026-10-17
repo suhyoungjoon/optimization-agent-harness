@@ -59,6 +59,11 @@ def load_perspectives(pack: DomainPack) -> list[dict]:
     return (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("perspectives") or []
 
 
+def knowledge_dir(pack: DomainPack) -> Path:
+    """검색 문서 폴더 (M15-C, knowledge/index.yaml + *.md). 커밋된 파일만 읽으므로 시연 작업 복사본을 거치지 않는다."""
+    return DOMAINS_DIR / pack.name / "knowledge"
+
+
 def list_faults(pack: DomainPack) -> list[dict]:
     """심을 수 있는 결함의 ID와 이름. 정답(answer)은 노출하지 않는다."""
     return [{"id": fid, "name": spec.get("name", fid)} for fid, spec in load_faults(pack).items()]
