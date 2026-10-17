@@ -251,6 +251,44 @@ def run_tool_loop(llm, *, system: str, user: str, tools: list[dict], submit_tool
 | `core/harness/*` | `HarnessRunner`, `Level`, `load_levels`, `get_level`, `CORE_REASON_CODES`, guardrail, validator_loop | LLM이 항목별로 결정하는 AI agent (L0~L5) |
 | `core/storage/store.py` | `Store(path)`, `to_jsonable`, `dataset_id` | SQLite: datasets, runs, decisions, traces, reports, proposal_batches, proposals |
 
+### 2.13 개선안 제시 기준 · 개선 루프 · 문서 검색 (M15)
+
+```python
+from core import rank_proposals, metric_specs, load_ranking_config, minimal_change
+# metric_specs(pack.dimensions()) → [{key, label, primary, better: up|down, format, unit, target}] (dimensions.yaml metrics)
+# rank_proposals(proposals, specs, config=None) → {order: [id], entries: {id: {tier, rank, gain, loss, worse, reasons}},
+#                                                  cut: [id], config}
+#   proposals: [{id, status, errors, body{target_findings}, simulation{before, after, violations_before,
+#                violations_after, constraint_violations}}]
+#   tier: main(본안, rank 1..) | cut(개수 상한 초과) | reference(참고: 적용 불가·위반 증가·개선 없음·최소 효과 미만·
+#         같은 발견의 아랫순위) | hidden(모든 지표에서 다른 안보다 나쁨) | pending(미리 돌려보기 전)
+#   정렬: 사람 제약 지킴 → 핵심 지표 개선폭(방향 반영) 큰 순 → 비핵심 지표 상대 하락폭 합 작은 순
+#   config: configs/proposals.yaml {max_proposals: 3, per_finding: 1, min_effect: 0.01, min_change_steps: 4}
+# minimal_change(pack_factory, instance, params, body, simulation, primary_keys) → 숫자 하나 바꾸는 안이면
+#   {path, current, proposed, recommended, same_primary: True, metrics, violations_after}, 아니면 None
+
+from core import termination, loop_report, allowed_steps, load_loop_config
+# 회차 기록 entry: {round, before, after, approved: [제목], decisions: [{action, title, note, target_findings}],
+#                   constraints, cost_usd, seconds, params_version_before, params_version_after}
+# termination(entry, specs, config, min_effect) → (끝내는가, 이유): 목표(target) 달성 / 개선 없음 / 최대 회차
+# allowed_steps(entry, config, reproposals) → Supervisor가 고를 수 있는 단계 ["next_round"|"repropose"|"report"]
+# loop_report(rounds, specs, stop_reason, findings, constraints) → {rounds, total, decisions, remaining, cost_usd, seconds, lines}
+# config: configs/workflow.yaml {max_rounds: 2, max_reproposals: 2, end_check: fixed | supervisor}
+
+from core import Index, Chunk, open_index, prepare, search_tool, citation_errors, retrieval_meta, make_embedder
+# Index(path, embedder=None): SQLite 색인. sync(collection, chunks) / add(collection, chunks) — 해시가 같으면 안 씀
+#   search(query, k=5, kinds=None, filters=None) → [{id, kind, title, text, meta, hash, score, ranks{keyword, vector}}]
+#   벡터(코사인) + BM25를 RRF로 합침. embedder가 없으면 BM25만 (mode "keyword")
+# prepare(index, knowledge_folder, namespace, kinds, records={kind: [Chunk]}) → {"index", "kinds", "record"} | None
+# search_tool(index, kinds, record) → 도구 정의 + handler (결과 hits[*].ref = 조각 id)
+# citation_errors(cited_docs, calls) → 검색 결과로 받지 않은 ref 인용 오류
+# make_embedder() → configs/llm.yaml embedding (auto | azure_openai | none). none이면 None
+# propose(..., retrieval={"index", "kinds", "record"}) → search_knowledge 도구 + cited_docs 칸 + 인용 검사
+# analyze(..., extra_tools=[search_tool(...)]) → 과거 사례 검색 (숫자 근거는 여전히 집계 도구만)
+```
+
+자세한 설명: [improvement-loop.md 11~13장](improvement-loop.md), [knowledge-retrieval.md](knowledge-retrieval.md), [langgraph-agents.md](langgraph-agents.md).
+
 ## 3. 인터페이스 원문
 
 `core/interfaces.py` 현재 코드 그대로(발췌 없음, `ToolContext` 포함):
@@ -452,6 +490,8 @@ overrides:                        # 구간 조건
 | 4. 시뮬레이션 | params 안: 규칙 엔진 전후 재실행(`simulate_params`, 비용 없음). spec 안: AI agent를 전·후 명세로 2회 실행(비용, 확인 필요). 묶음에 제약이 있으면 `constraint_violations` 표시 | `core/improvement/simulate.py`, `core/improvement/constraints.py`, `api/improvement.py` `simulate`·`_simulate_spec_job` |
 | 5. 승인 | 시뮬레이션을 마친 안만(강제 승인은 사유 필수). params → `write_params`(version +1), spec → `write_spec` | `api/improvement.py` `approve`, `core/improvement/approval.py` |
 | 6. 후처리 | 같은 종류의 다른 미결 안을 `stale`로 표시, 이력 조회 | `core/storage/store.py` `mark_stale`, `decided_proposals`, `GET /history` |
+| 7. 제시 기준 (M15-A) | 묶음 조회에 순위·참고·잘림·숨김, params 시뮬레이션에 최소 변경 추천 | `core/improvement/ranking.py`, `GET /proposals/batches/{id}`의 `ranking` |
+| 8. 회차 순환 (M15-B) | 승인·반려·의견(→ 제약) 분기, 재배정·재평가, 종료 판정, 결과 보고. **LangGraph agents 탭에만 있다** | `workflow/agents/flow.py`, `core/improvement/loop.py` |
 
 개선안 상태: `proposed` → (`simulating`) → `simulated` → `approved` / `rejected`, 또는 `stale`.
 

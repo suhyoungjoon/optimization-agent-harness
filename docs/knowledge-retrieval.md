@@ -14,7 +14,7 @@
 | `core/retrieval/tool.py` | 도구 정의(`search_knowledge`), 인용 검사(`citation_errors`), 재현 메타데이터(`retrieval_meta`) |
 | `core/retrieval/session.py` | 실행 하나의 준비: 문서·기록을 색인에 맞추고(해시가 같으면 다시 쓰지 않음) 도구 묶음을 만든다 |
 | `core/llm/embeddings.py` | 임베딩 클라이언트. `configs/llm.yaml`의 `embedding` (auto: LLM 제공사가 azure_openai면 Azure `text-embedding-3-small`, 아니면 none) |
-| `domains/dispatch/knowledge/` | 가상 운영 규정 4분야 × 5조항 + 선언(`index.yaml`: 종류·필드·분야) |
+| `domains/dispatch/knowledge/` | 가상 운영 규정 4분야(출동 반경·관할, 자격·인증, 근무시간·가능시간, 안전) × 5조항 + 선언(`index.yaml`: 종류·필드·분야) |
 
 임베딩 제공사가 없으면(Anthropic 제공사의 기본값, 리허설의 가짜 AI) **키워드 검색만** 쓴다. 결과의 `mode`가 `keyword`로 남는다.
 임베딩 클라이언트를 못 만들면(키 없음 등) 실패하지 않고 키워드로 내려간다.
@@ -63,8 +63,8 @@ fictional: true         # 가상 문서 표시 (없으면 오류)
 본문 …
 ```
 
-- 수치는 `params.yaml`의 허용 범위·분류와 모순되지 않게 쓴다 (테스트가 검사: DIST-01 4km ≤ bounds 5km, TIME-01 90분 ≤ 120분, 규정이 가리키는 파라미터는 실제로 있다).
-- 추정값·고정값·통제 설정을 다룬 조항(DIST-05, TIME-05, CTRL-01)은 그 값을 개선안으로 바꾸지 않는다는 분류(M13)와 같은 말을 한다.
+- 수치는 `params.yaml`의 허용 범위·분류와 모순되지 않게 쓴다 (테스트가 검사: DIST-01 4km ≤ bounds 5km, HOUR-03 90분 ≤ 120분, 규정이 가리키는 파라미터는 실제로 있다).
+- 추정값·고정값·통제 설정을 다룬 조항(SAFE-01~03)은 그 값을 개선안으로 바꾸지 않는다는 분류(M13)와 같은 말을 한다.
 
 ## 6. 온톨로지 (도메인 팩 스키마)
 
@@ -80,7 +80,7 @@ fictional: true         # 가상 문서 표시 (없으면 오류)
 파라미터 ──분류──▶ policy | estimate | fixed | governance                                  params.yaml kinds (M13)
          ──허용 범위──▶ bounds,  ──구간 조건──▶ overrides(when: 차원 값)
 지표 ──핵심 여부·방향·목표──▶ primary, better, target                                      dimensions.yaml metrics (M15)
-규정 조항 ──분야──▶ 출동 거리·희망시간·자격·안전·승인·통제                                   knowledge/index.yaml areas
+규정 조항 ──분야──▶ 출동 반경·관할 · 자격·인증 · 근무시간·가능시간 · 안전                                   knowledge/index.yaml areas
           ──관련──▶ 파라미터 경로(params), 차원 구간(dims)                                  조항 meta
 발견 ──구간──▶ 차원 구간,  ──사유──▶ 사유 코드,  ──자원──▶ 작업자                            분석 리포트
 개선안 ──해소──▶ 발견(target_findings),  ──바꿈──▶ 파라미터,  ──근거──▶ 규정·사례·의견(cited_docs)
@@ -105,7 +105,7 @@ fictional: true         # 가상 문서 표시 (없으면 오류)
 |---|---|
 | 비교 | 같은 리포트로 RAG 있이 / 없이 (`use_knowledge` true·false) × 개선안 3회씩. 같은 모델·effort, `LLM_CACHE=0` |
 | 제약 위반 수 | 개선안 묶음의 미리 돌려보기에서 `constraint_violations` 건수 (현장 의견 제약을 준 경우와 안 준 경우 둘 다) |
-| 규정 위반 안 | 규정 한도(DIST-01 4km, TIME-01 90분, SAFE-04 70점)를 넘는 안의 수 (코드로 셀 수 있다: 값 비교) |
+| 규정 위반 안 | 규정 한도(DIST-01 4km, HOUR-03 90분, QUAL-04 70점)를 넘는 안의 수 (코드로 셀 수 있다: 값 비교) |
 | 반려된 안 재제안 수 | 이전 회차에 반려한 안과 같은 변경을 다시 낸 수 (사례 검색이 기억(M12-c)보다 나은지) |
 | 규정 인용 정확도 | 인용한 조항이 안이 바꾸는 파라미터(`params` 메타)와 맞는 비율, 인용 검사 실패 수 |
 | 임베딩 비교 | `EMBEDDING_MODEL=text-embedding-3-small` / `-large`, 키워드만(`EMBEDDING_PROVIDER=none`). 지표: 질의 20개(규정 분야별 5)의 상위 3 안 정답 조항 비율 |
