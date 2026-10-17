@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.llm.client import LLMClient, Usage
+from core.llm.events import EventSink, check_event, llm_event, tool_event
 from core.storage.store import to_jsonable
 
 
@@ -66,8 +67,11 @@ def decode_json_args(args: dict, schema: dict) -> dict:
 def run_tool_loop(llm: LLMClient, *, system: str, user: str, tools: list[dict], submit_tool: dict,
                   max_calls: int = 30, salt: str = "",
                   check_submission: Callable[[dict, dict], list[str]] | None = None,
-                  max_feedback: int = 1) -> LoopResult:
-    """check_submission(submission, calls)가 문제 목록을 돌려주면 한 번(max_feedback) 고쳐 오게 한다."""
+                  max_feedback: int = 1, on_event: EventSink | None = None,
+                  check_label: str = "제출 검사") -> LoopResult:
+    """check_submission(submission, calls)가 문제 목록을 돌려주면 한 번(max_feedback) 고쳐 오게 한다.
+    on_event: 턴마다 AI 응답·도구 호출·제출 검사를 알린다 (core.llm.events 형식, M16 에이전트 탭). 없으면 알리지 않는다."""
+    emit = on_event or (lambda event: None)
     started = time.time()
     handlers = {t["name"]: t["handler"] for t in tools}
     api_tools = [{k: v for k, v in t.items() if k != "handler"} for t in tools] + [submit_tool]
@@ -81,11 +85,14 @@ def run_tool_loop(llm: LLMClient, *, system: str, user: str, tools: list[dict], 
         resp = llm.create(system=system_blocks, messages=messages, tools=api_tools, salt=salt)
         result.llm_calls += 1
         result.usage.add(resp)
+        turn = result.llm_calls
+        uses = [b for b in resp.content if b.get("type") == "tool_use"]
+        emit(llm_event(turn, [u["name"] for u in uses],
+                       " ".join(b.get("text", "") for b in resp.content if b.get("type") == "text")))
         if resp.stop_reason == "refusal":
             result.stop = "refusal"
             break
         messages.append({"role": "assistant", "content": resp.content})
-        uses = [b for b in resp.content if b.get("type") == "tool_use"]
         if not uses:
             if nudged:
                 result.stop = "no_submit"
@@ -108,12 +115,14 @@ def run_tool_loop(llm: LLMClient, *, system: str, user: str, tools: list[dict], 
             ref = call_ref(len(result.calls) + 1)
             result.calls[use["id"]] = {"ref": ref, "name": use["name"], "input": use.get("input"),
                                        "output": to_jsonable(out), "is_error": is_error}
+            emit(tool_event(turn, use["name"], use.get("input"), to_jsonable(out), not is_error, ref=ref))
             tool_results.append({"type": "tool_result", "tool_use_id": use["id"],
                                  "content": tool_result_content(ref, out), "is_error": is_error})
 
         if submitted is not None:
             submission = decode_json_args(submitted.get("input") or {}, submit_tool.get("input_schema") or {})
             problems = check_submission(submission, result.calls) if check_submission else []
+            emit(check_event(turn, check_label, problems))
             if problems and result.feedback_rounds < max_feedback:
                 result.feedback_rounds += 1
                 tool_results.append({"type": "tool_result", "tool_use_id": submitted["id"], "is_error": True,
@@ -125,6 +134,7 @@ def run_tool_loop(llm: LLMClient, *, system: str, user: str, tools: list[dict], 
         messages.append({"role": "user", "content": tool_results})
 
     result.seconds = time.time() - started
+    emit({"type": "end", "turn": result.llm_calls, "stop": result.stop, "text": f"끝: {result.stop}"})
     return result
 
 

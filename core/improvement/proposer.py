@@ -7,8 +7,9 @@
 import json
 
 from core.llm.client import LLMClient
-from core.params import params_view
+from core.llm.events import check_event
 from core.llm.tool_loop import run_tool_loop, usage_dict
+from core.params import params_view
 from core.retrieval.tool import citation_errors, search_tool
 
 from .changes import apply_params, params_errors, spec_errors, spec_sections
@@ -90,7 +91,7 @@ def finding_slices(report: dict) -> dict[str, dict]:
 def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: dict, report: dict,
             llm: LLMClient, llm_config: dict, salt: str = "", max_calls: int = 20,
             feedback: list[str] | None = None, constraints: list[dict] | None = None,
-            memory_text: str = "", retrieval: dict | None = None) -> dict:
+            memory_text: str = "", retrieval: dict | None = None, on_event=None) -> dict:
     """feedback: 앞선 시도의 개선안이 탈락한 이유 (재시도할 때 같은 안을 다시 내지 않도록 입력에 붙인다).
     constraints: 사람이 정한 한도 (core.improvement.constraints 형식). 입력에 붙이고, simulate_params 도구
     결과에 위반을 함께 돌려줘 제출 전에 스스로 피하게 한다.
@@ -147,7 +148,7 @@ def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: di
         user += ("\n\n# 이전 시도에서 탈락한 이유\n" + "\n".join(f"- {f}" for f in feedback)
                  + "\n같은 변경을 다시 제안하지 말고, 위 이유를 피하는 안을 제안하라.")
     result = run_tool_loop(llm, system=SYSTEM, user=user, tools=tools, submit_tool=_submit_tool(bool(retrieval)),
-                           max_calls=max_calls, salt=salt)
+                           max_calls=max_calls, salt=salt, on_event=on_event)
 
     proposals = []
     submitted = (result.submission or {}).get("proposals") or []
@@ -159,5 +160,7 @@ def propose(pack_factory, instance, params: dict, spec_text: str, dimensions: di
                   else spec_errors(spec_text, p) if p.get("kind") == "spec" else ["알 수 없는 kind"])
         errors += citation_errors(p.get("cited_docs"), result.calls)
         proposals.append({"proposal": p, "errors": errors})
+        if on_event:   # 제출 뒤 코드 검사 (허용 범위·분류·형식·인용) — 안마다 하나 (M16 타임라인)
+            on_event(check_event(result.llm_calls, "개선안 검사", errors, text=f"개선안 검사 {'✓' if not errors else '✕'} {p.get('title', '')}"))
     return {"proposals": proposals, "trials": len(trials), "stop": result.stop, "calls": result.calls,
             "usage": usage_dict(result, llm.model, llm_config)}

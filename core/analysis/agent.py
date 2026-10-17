@@ -186,11 +186,12 @@ _problems = grounding_problems
 
 def analyze(pack: DomainPack, instance, decisions: list[DecisionRecord], llm: LLMClient, llm_config: dict,
             salt: str = "", max_calls: int = 30, memory_text: str = "", perspective: dict | None = None,
-            extra_tools: list[dict] | None = None) -> dict:
+            extra_tools: list[dict] | None = None, on_event=None) -> dict:
     """memory_text: 이전 회차에서 사람이 내린 판정 (core.improvement.memory.analysis_memory_text). 비면 입력이 이전과 같다.
     perspective: 관점 하나 ({id, name, question, tools}, core.analysis.perspectives). 주면 그 관점의 도구만 주고
     질문을 시스템 프롬프트 뒤에 붙인다. 없으면 입력이 이전과 같다.
-    extra_tools: 더 붙일 도구 (예: 과거 사례 검색 search_knowledge, M15-C). 숫자 근거는 여전히 집계 도구 인용만 인정한다."""
+    extra_tools: 더 붙일 도구 (예: 과거 사례 검색 search_knowledge, M15-C). 숫자 근거는 여전히 집계 도구 인용만 인정한다.
+    on_event: 턴마다 진행을 알린다 (core.llm.events, M16 에이전트 탭)."""
     dimensions = pack.dimensions()
     tools = Aggregator(decisions, dimensions).tools() + pack.analysis_tools(instance, decisions)
     system, tools = perspective_view(analysis_system(dimensions), tools, perspective)
@@ -203,7 +204,8 @@ def analyze(pack: DomainPack, instance, decisions: list[DecisionRecord], llm: LL
     user = ("실행 결과를 분석해 실패 패턴과 원인 가설을 찾아라. 먼저 overview로 전체와 차원을 확인하라.\n"
             f"분석 대상 항목 수: {len(decisions)}") + memory_text
     result = run_tool_loop(llm, system=system, user=user, tools=tools, submit_tool=report_submit_tool(dimensions, metric_names),
-                           max_calls=max_calls, salt=salt, check_submission=check)
+                           max_calls=max_calls, salt=salt, check_submission=check, on_event=on_event,
+                           check_label="근거 검사")
 
     kept, dropped = finalize_findings((result.submission or {}).get("findings") or [], result.calls, dimensions)
     return {
