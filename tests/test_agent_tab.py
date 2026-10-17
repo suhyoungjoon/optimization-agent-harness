@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from api.main import create_app
 from core.harness.tracer import Tracer
+from core.llm.client import load_config
 from core.llm.events import LiveLog, timeline_from_calls, timeline_from_traces
 from core.llm.tool_loop import run_tool_loop
 from core.registry import load_pack, load_params, set_domain_files_root
@@ -37,6 +38,14 @@ def test_tool_loop_without_listener_unchanged():
     llm = FakeLLM(lambda item, n, m, t: tool_use("submit", {}))
     out = run_tool_loop(llm, system="s", user="u", tools=[], submit_tool={"name": "submit", "input_schema": {}})
     assert out.stop == "submitted" and out.llm_calls == 1
+
+
+def test_no_check_event_without_checker():
+    events = []
+    llm = FakeLLM(lambda item, n, m, t: tool_use("submit", {}))
+    run_tool_loop(llm, system="s", user="u", tools=[], submit_tool={"name": "submit", "input_schema": {}},
+                  on_event=events.append)
+    assert [e["type"] for e in events] == ["llm", "end"]               # 검사가 없으면 검사 줄도 없다
 
 
 def test_tracer_notifies_at_any_level_but_stores_only_full():
@@ -102,7 +111,7 @@ def wait(client, url):
 def test_four_agents_run_alone_and_replay(client):
     info = {a["agent"]: a for a in client.get("/agent-tab/info").json()["agents"]}
     assert set(info) == {"dispatch", "analysis", "proposals", "opinion"}
-    assert info["dispatch"]["provider"] == "anthropic" and "최대" in info["analysis"]["max_calls"]
+    assert info["dispatch"]["provider"] == load_config()["provider"] and "최대" in info["analysis"]["max_calls"]
     ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": FAULTS}).json()
 
     run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "ai", "level": "L5", "scope": client.scope})

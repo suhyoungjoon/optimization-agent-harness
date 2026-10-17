@@ -122,7 +122,8 @@ def run_tool_loop(llm: LLMClient, *, system: str, user: str, tools: list[dict], 
         if submitted is not None:
             submission = decode_json_args(submitted.get("input") or {}, submit_tool.get("input_schema") or {})
             problems = check_submission(submission, result.calls) if check_submission else []
-            emit(check_event(turn, check_label, problems))
+            if check_submission:
+                emit(check_event(turn, check_label, problems))
             if problems and result.feedback_rounds < max_feedback:
                 result.feedback_rounds += 1
                 tool_results.append({"type": "tool_result", "tool_use_id": submitted["id"], "is_error": True,

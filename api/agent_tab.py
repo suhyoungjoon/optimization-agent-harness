@@ -12,6 +12,7 @@
 
 import inspect
 import json
+import time
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
@@ -227,6 +228,7 @@ def register(app: FastAPI, ctx: Context, demo: bool = False) -> None:
     def _opinion_job(oid: str, graph, user: str, agent_ctx, llm, opinion: str):
         from workflow.agents.tool_agent import run_tool_agent
 
+        started = time.monotonic()
         try:
             out = run_tool_agent(graph, user)
             calls = out.get("calls") or {}
@@ -236,7 +238,8 @@ def register(app: FastAPI, ctx: Context, demo: bool = False) -> None:
             constraints = [] if problems else [
                 {**c, "source": c.get("source") or "현장 의견", "note": c.get("note") or opinion}
                 for c in (out.get("submission") or {}).get("constraints") or []]
-            usage = {**out["usage"].to_dict(llm.model, ctx.llm_config), "llm_calls": out.get("llm_calls", 0)}
+            usage = {**out["usage"].to_dict(llm.model, ctx.llm_config), "llm_calls": out.get("llm_calls", 0),
+                     "seconds": round(time.monotonic() - started, 2)}
             body = {"constraints": constraints, "problems": problems, "stop": out.get("stop"),
                     "summary": (out.get("submission") or {}).get("summary"), "calls": calls,
                     "timeline": agent_ctx.timeline(calls), "usage": usage}
