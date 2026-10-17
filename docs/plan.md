@@ -850,6 +850,8 @@ M15-B의 의견 → 제약은 최소 기능이었다: AI가 정리한 제약을 
 
 완료 기준: 리허설에서 의견 → 정리 → 확인(고쳐서 확정) → 다시 제안 → 승인이 이어지고, 새 실행이 저장된 제약을 불러와 첫 제안부터 지킨다. 두 제공사 설정에서 테스트 통과, `npm run build` 통과.
 
+구현 결과 (2026-10-17): flow 노드 `confirm_constraints`(사람, `interrupt`), `StepRequest.action`에 `confirm`과 `constraints`. `constraint_errors(..., dimensions)`와 `when`(파라미터 제약만, 겹치는 구간 조건만 대조). `Store` 표 `saved_constraints`와 `save_constraint`·`list_constraints`·`set_constraint_active`, API `GET /constraints`, `POST /constraints/{id}/activate|deactivate`, `ProposalRequest`·`AgentsStart`의 `use_saved_constraints`, 묶음 `meta.saved_constraints`. 화면: agents 탭 제약 확인 표(한도·구간 고치기, 빼기), "저장된 제약 불러오기", 개선 탭 "저장된 제약"(끄기·켜기). 의견 원문 색인은 확정할 때 남기도록 옮겼다. 계획에 더한 것: 다시 적기는 정리된 제약을 버리고 같은 제안의 사람 검토로 돌아간다(의견 결정 기록은 이력에 남는다). 지금 규칙과 맞지 않는 저장 제약은 빼고 쓰고 그 수를 보인다.
+
 # 부록. 구현 명세
 
 ## 개요

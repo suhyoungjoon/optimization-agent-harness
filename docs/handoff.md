@@ -275,6 +275,12 @@ from core import termination, loop_report, allowed_steps, load_loop_config
 # loop_report(rounds, specs, stop_reason, findings, constraints) → {rounds, total, decisions, remaining, cost_usd, seconds, lines}
 # config: configs/workflow.yaml {max_rounds: 2, max_reproposals: 2, end_check: fixed | supervisor}
 
+# 제약 (M15 후속): 파라미터 제약에 선택 칸 when {차원: [값]} — 그 구간에 적용되는 값만 대조
+# constraint_errors(constraints, params, metric_names, dimensions=None)  # dimensions를 주면 when 차원·값 검사
+# Store.save_constraint(domain, constraint, opinion, origin, params_version) / list_constraints(domain, active_only)
+#      / set_constraint_active(id, bool) / constraint_id(domain, constraint)  — 표 saved_constraints
+# API: GET /constraints?domain=&all=, POST /constraints/{id}/activate|deactivate, POST /proposals {use_saved_constraints}
+
 from core import Index, Chunk, open_index, prepare, search_tool, citation_errors, retrieval_meta, make_embedder
 # Index(path, embedder=None): SQLite 색인. sync(collection, chunks) / add(collection, chunks) — 해시가 같으면 안 씀
 #   search(query, k=5, kinds=None, filters=None) → [{id, kind, title, text, meta, hash, score, ranks{keyword, vector}}]
