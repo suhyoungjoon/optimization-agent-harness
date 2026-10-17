@@ -1,0 +1,6 @@
+# 코드로 셀 수 있는 규정 한도 (평가용, scripts/m15_eval.py). 제약 형식(core.improvement.constraints)과 같다.
+# 조항 본문(*.md)의 숫자와 같아야 한다 (tests/test_m15_eval.py가 검사). 경로에 인덱스가 없으면 모든 단계 값을 본다.
+limits:
+  - {clause: DIST-01, type: param, path: matching.area_extension_km, max: 4, source: 가상 운영 규정}
+  - {clause: HOUR-03, type: param, path: matching.time_window_min, max: 90, source: 가상 운영 규정}
+  - {clause: QUAL-04, type: param, path: cei.master_threshold, min: 70, source: 가상 운영 규정}

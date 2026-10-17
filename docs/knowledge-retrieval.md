@@ -101,6 +101,8 @@ fictional: true         # 가상 문서 표시 (없으면 오류)
 
 ## 7. 평가 설계 (실행은 로컬, 실제 API 필요)
 
+실행: `python -m scripts.m15_eval rag --repeats 3 --max-usd 3` (`all`이면 임베딩 확인과 고정 규칙 vs Supervisor까지). 같은 리포트로 개선안 묶음을 RAG 있이/없이 번갈아 만든다. 첫 묶음(준비)의 1순위 안은 반려해 기억과 사례를 만든다. 규정 위반은 `domains/dispatch/knowledge/limits.yaml`(조항 본문과 같은 숫자, 테스트로 검사)로 코드가 센다. 결과 표는 `runs/m15_eval/<시각>/summary.md`.
+
 | 항목 | 방법 |
 |---|---|
 | 비교 | 같은 리포트로 RAG 있이 / 없이 (`use_knowledge` true·false) × 개선안 3회씩. 같은 모델·effort, `LLM_CACHE=0` |

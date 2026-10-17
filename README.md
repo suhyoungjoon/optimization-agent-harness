@@ -109,6 +109,13 @@ LLM_PROVIDER=azure_openai python -m api.main
 
 개선 루프 기준은 설정 파일에 있다 (M15): 개선안 제시 기준(본안 최대 개수, 발견당 개수, 최소 효과)은 `configs/proposals.yaml`, LangGraph agents 탭의 회차 순환(최대 회차, 다시 제안 횟수, 종료 판정 `fixed | supervisor`)은 `configs/workflow.yaml`, 핵심 지표·방향·목표는 도메인 `dimensions.yaml`의 `metrics`. 문서 검색(가상 규정·과거 사례·현장 의견)은 임베딩이 있으면 벡터 + 키워드, 없으면 키워드만 쓴다. 임베딩은 `configs/llm.yaml`의 `embedding`(기본 auto: Azure 제공사면 `text-embedding-3-small`)이고 `EMBEDDING_PROVIDER`(auto | azure_openai | none), `EMBEDDING_MODEL`로 덮어쓴다. 색인은 `runs/retrieval.sqlite` ([docs/knowledge-retrieval.md](docs/knowledge-retrieval.md)).
 
+M15 기능을 실제 API로 확인하는 실험은 스크립트 하나로 돌린다. 결과는 `runs/m15_eval/<시각>/summary.md`(표)와 `results.json`이다. 작업 폴더를 따로 써서 레포의 `params.yaml`은 바뀌지 않는다.
+
+```bash
+LLM_PROVIDER=azure_openai LLM_CACHE=0 python -m scripts.m15_eval all --repeats 3 --max-usd 3
+python -m scripts.m15_eval all --fake      # 키 없이 흐름만 (가짜 AI)
+```
+
 비용 때문에 AI는 실행 범위를 **1일차 앞 10건(시범)**부터 돌려 건당 비용을 확인한 뒤 넓힌다. 규칙 agent는 비용이 없으니 전체로 돌린다.
 
 실행 결과는 `runs/harness.db`(SQLite)에 쌓인다. `runs/`는 커밋하지 않는다.
