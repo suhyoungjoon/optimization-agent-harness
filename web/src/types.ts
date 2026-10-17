@@ -121,7 +121,7 @@ export interface HarnessLevel {
 
 export interface HarnessInfo {
   levels: Record<string, HarnessLevel>;
-  llm: { model: string; effort: string; cache: boolean; concurrency: number; max_llm_calls_per_item: number };
+  llm: { provider?: string; model: string; effort: string; cache: boolean; concurrency: number; max_llm_calls_per_item: number };
   demo?: DemoManifest | null;   // 시연 모드일 때 번들 정보
 }
 

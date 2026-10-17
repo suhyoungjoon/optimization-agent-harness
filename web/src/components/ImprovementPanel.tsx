@@ -28,6 +28,18 @@ const TIER_LABEL: Record<RankTier, string> = {
 };
 const FOLDED: RankTier[] = ["cut", "reference", "hidden"];
 
+const TIER_SHORT: Partial<Record<RankTier, string>> = { cut: "잘림", reference: "참고", hidden: "지배당함" };
+
+/** 접힌 제안의 분류별 건수 (있는 분류만, 예: "참고 2" · "잘림 1 · 참고 1") */
+function foldedSummary(folded: Proposal[], ranking: Ranking | null | undefined) {
+  const counts = new Map<RankTier, number>();
+  for (const p of folded) {
+    const t = ranking?.entries[p.id]?.tier ?? "reference";
+    counts.set(t, (counts.get(t) ?? 0) + 1);
+  }
+  return FOLDED.filter((t) => counts.has(t)).map((t) => `${TIER_SHORT[t]} ${counts.get(t)}`).join(" · ");
+}
+
 // 제시 기준 (M15-A) 순서대로: 본안 → 아직 → (접음) 잘림 · 참고 · 숨김
 function orderedProposals(batch: ProposalBatch | null, ranking: Ranking | null | undefined) {
   const all = batch?.proposals ?? [];
@@ -304,7 +316,7 @@ export default function ImprovementPanel({
             scopes={scopes} busy={!!busy} guard={guard} onApproved={(msg) => setNotice(msg)} />
         ))}
         {folded.length > 0 && (
-          <Details summary={`참고 (접음) ${folded.length}건: 잘림 · 참고 · 지배당한 안`}>
+          <Details summary={`참고 (접음) ${folded.length}건: ${foldedSummary(folded, ranking)}`}>
             {folded.map((p) => (
               <ProposalCard key={p.id} proposal={p} rank={ranking?.entries[p.id]} current={current} specs={adapter.metrics} harness={harness}
                 scopes={scopes} busy={!!busy} guard={guard} onApproved={(msg) => setNotice(msg)} />
