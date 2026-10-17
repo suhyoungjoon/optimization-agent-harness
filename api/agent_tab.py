@@ -44,6 +44,12 @@ def _default(fn, name: str):
     return inspect.signature(fn).parameters[name].default
 
 
+def _decision_event(d: dict) -> dict:
+    return {"type": "decision", "turn": None, "item": d["item_id"], "status": d["status"],
+            "text": f"{d['item_id']}: {d['status']}" + (f" {json.dumps(d['decision'], ensure_ascii=False)}" if d.get("decision") else "")
+                    + (f" {d.get('reason_code')}" if d.get("reason_code") else "")}
+
+
 def _usage_summary(usage: dict | None, seconds=None) -> dict:
     u = usage or {}
     return {"provider": u.get("provider"), "model": u.get("model"), "deployment": u.get("deployment"),
@@ -120,10 +126,17 @@ def register(app: FastAPI, ctx: Context, demo: bool = False) -> None:
         meta = run.get("meta") or {}
         traces = store.list_traces(run_id) if run["status"] == "done" else []
         decisions = store.get_decisions(run_id) if run["status"] == "done" else []
-        events = timeline_from_traces(traces) if traces else numbered([
-            {"type": "decision", "turn": None, "item": d["item_id"], "status": d["status"],
-             "text": f"{d['item_id']}: {d['status']}" + (f" {d.get('reason_code')}" if d.get("reason_code") else "")}
-            for d in decisions])
+        decided = {d["item_id"]: _decision_event(d) for d in decisions}
+        if traces:   # 단계 기록 + 항목마다 마지막에 결정 줄 (실행 중 화면과 같은 모양)
+            events, current = [], None
+            for e in timeline_from_traces(traces):
+                if e["type"] == "item" and current in decided:
+                    events.append(decided.pop(current))
+                current = e.get("item") if e["type"] == "item" else current
+                events.append(e)
+            events = numbered(events + ([decided.pop(current)] if current in decided else []))
+        else:
+            events = numbered(list(decided.values()))
         done = sum(d["status"] in ("success", "pending_approval") for d in decisions)
         items = meta.get("items") or len(run.get("scope") or [])
         output = (f"배정 {done}/{len(decisions)}건 · 규칙 위반 {len(run.get('violations') or [])}건"

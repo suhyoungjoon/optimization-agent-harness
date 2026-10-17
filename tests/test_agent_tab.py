@@ -120,6 +120,7 @@ def test_four_agents_run_alone_and_replay(client):
     t = client.get(f"/agent-tab/timeline/dispatch/{run_id}").json()
     assert t["status"] == "done" and t["graph"] == "dispatch_agent" and "지시서 3건" in t["input"]
     assert {"item", "llm", "check"} <= {e["type"] for e in t["events"]} and t["usage"]["calls"] >= 3
+    assert sum(e["type"] == "decision" for e in t["events"]) == 3                 # 다시 볼 때도 항목마다 결정 줄
     assert client.get(f"/agent-tab/timeline/dispatch/{run_id}?after=2").json()["events"][0]["seq"] == 3
 
     rule = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
