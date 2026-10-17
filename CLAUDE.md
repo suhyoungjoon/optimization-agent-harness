@@ -72,6 +72,7 @@ python -m scripts.snapshot export --out demo/bundle --note "..."   # 시연 번�
 python -m api.main --demo demo/bundle   # 시연 모드: 저장된 AI 결과만 재생, LLM·네트워크 없음
 python -m scripts.rehearsal_bundle      # API 키 없이 쓰는 리허설 번들 (가짜 LLM) → demo/rehearsal
 node scripts/record_demo.mjs --stills   # 시연 장면 녹화 (시연 모드 서버에 대해, runs/recordings)
+python -m scripts.m15_eval all --max-usd 3   # M15 로컬 확인 실험: 임베딩·RAG 있이/없이·고정 규칙 vs Supervisor (실제 API, runs/m15_eval)
 ```
 AI agent 실행에는 API 키가 필요하다: 환경변수 또는 `.env`의 `OAH_ANTHROPIC_API_KEY`(우선) 또는 `ANTHROPIC_API_KEY`. 모델·effort·캐시는 `configs/llm.yaml`(배정은 기본값, 분석·개선안은 `roles`의 역할별 모델), 최종 측정 때는 `LLM_CACHE=0`으로 입력 해시 캐시를 끈다. 실험할 때만 모델을 바꾸려면 `LLM_MODEL`, `LLM_THINKING`(adaptive | off), `LLM_EFFORT`(low~max | none)로 덮어쓴다 (쓴 모델은 사용량 기록 `usage.model`에 남는다).
 제공사는 `configs/llm.yaml`의 `provider`(anthropic | azure_openai)로 고르고 `LLM_PROVIDER`로 덮어쓴다. Azure OpenAI는 `pip install -e ".[azure]"`, 키는 `.env`의 `MY_PROJECT_AZURE_API_KEY`, 모델·deployment 대응·모델별 옵션은 `llm.yaml`의 `azure` 섹션 (`core/llm/azure_openai.py`가 Anthropic 형식 ↔ OpenAI 형식 변환, 에이전트 코드는 그대로).
