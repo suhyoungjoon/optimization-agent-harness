@@ -15,8 +15,20 @@ import yaml
 from core.improvement.ranking import _fmt, _label, _sign
 
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "configs" / "workflow.yaml"
-DEFAULTS = {"max_rounds": 2, "max_reproposals": 2}
+DEFAULTS = {"max_rounds": 2, "max_reproposals": 2, "end_check": "fixed"}
 GOAL, NO_GAIN, MAX_ROUNDS = "목표 달성", "개선 없음", "최대 회차"
+NEXT_STEPS = {"next_round": "다음 회차 (배정부터 새 규칙으로)", "repropose": "이번 회차에서 개선안 다시 받기",
+              "report": "끝내고 결과 보고"}
+
+
+def allowed_steps(entry: dict, config: dict, reproposals: int) -> list[str]:
+    """Supervisor가 고를 수 있는 다음 단계 (M15-D). 최대 회차·다시 제안 횟수는 코드가 막는다."""
+    steps = ["report"]
+    if entry["round"] < config["max_rounds"] and entry.get("approved"):
+        steps.insert(0, "next_round")
+    if reproposals < config["max_reproposals"] and not entry.get("approved"):
+        steps.insert(0, "repropose")
+    return steps
 
 
 def load_loop_config(path: str | Path = CONFIG_PATH) -> dict:

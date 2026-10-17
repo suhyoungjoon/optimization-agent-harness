@@ -47,3 +47,12 @@ def test_report_lists_rounds_decisions_remaining_and_cost():
 def test_config_file():
     cfg = load_loop_config()
     assert 2 <= cfg["max_rounds"] <= 3 and cfg["max_reproposals"] >= 1
+
+
+def test_supervisor_allowed_steps_are_capped_by_code():
+    from core.improvement.loop import allowed_steps
+
+    assert allowed_steps(entry(1, 0.70, 0.78), CFG, 0) == ["next_round", "report"]
+    assert allowed_steps(entry(2, 0.78, 0.80), CFG, 0) == ["report"]                 # 최대 회차
+    assert allowed_steps(entry(1, 0.70, 0.70, approved=()), CFG, 0) == ["repropose", "report"]
+    assert allowed_steps(entry(1, 0.70, 0.70, approved=()), CFG, 2) == ["report"]     # 다시 제안 횟수 소진

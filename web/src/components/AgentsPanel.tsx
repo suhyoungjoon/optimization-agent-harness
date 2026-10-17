@@ -19,6 +19,7 @@ const AGENT_NAMES: Record<string, string> = {
   analysis_agent: "분석 에이전트",
   proposal_agent: "개선 제안 에이전트",
   opinion_agent: "의견 정리 에이전트",
+  check_end: "종료 판정 Supervisor",
   simulate: "미리 돌려보기 (배정 에이전트 재실행)",
 };
 
@@ -40,6 +41,7 @@ export default function AgentsPanel({
   const [form, setForm] = useState({
     seed, faults: faults.length ? faults : domain.faults.map((f) => f.id), items: 10, level,
     llm: "fake" as "fake" | "claude", pace: 0.2, perspectives: false,
+    end_check: "fixed" as "fixed" | "supervisor",
   });
   const [graph, setGraph] = useState<AgentsGraph | null>(null);
   const [flowId, setFlowId] = useState<string | null>(null);
@@ -55,10 +57,12 @@ export default function AgentsPanel({
   const runLevel = inFlight && run ? run.inputs.level ?? form.level : form.level;
   // 관점별 분석이면 분석 에이전트 그림이 "관점 노드들(병렬) → 합치기"로 바뀐다 (M12-b)
   const runPerspectives = inFlight && run ? !!run.inputs.perspectives : form.perspectives;
+  // 종료 판정: 고정 규칙 또는 Supervisor 에이전트 (M15-D). 실행 중에는 그 실행의 방식
+  const runEndCheck = inFlight && run ? run.end_check ?? "fixed" : form.end_check;
 
   useEffect(() => {
-    api.agentsGraph(runLevel, domain.name, runPerspectives).then(setGraph).catch((e) => setError(String(e)));
-  }, [runLevel, runPerspectives, domain.name]);
+    api.agentsGraph(runLevel, domain.name, runPerspectives, runEndCheck).then(setGraph).catch((e) => setError(String(e)));
+  }, [runLevel, runPerspectives, runEndCheck, domain.name]);
 
   const polled = usePoll<AgentsRun>(flowId ? () => api.agentsGet(flowId, lastI.current) : null,
     (r) => r.status !== "running", [flowId, tick], 300);
@@ -171,6 +175,14 @@ export default function AgentsPanel({
           <input type="checkbox" checked={form.perspectives} disabled={inFlight}
             onChange={(e) => { setForm({ ...form, perspectives: e.target.checked }); setPicked("analysis_agent"); }} />{" "}
           관점별 분석
+        </label>
+        <label title="회차가 끝났을 때 다음 단계를 누가 고를지. Supervisor는 허용된 단계(다음 회차·다시 제안·결과 보고) 중에서만 고르고, 최대 회차는 코드가 막습니다">
+          종료 판정{" "}
+          <select value={form.end_check} disabled={inFlight}
+            onChange={(e) => { setForm({ ...form, end_check: e.target.value as "fixed" | "supervisor" }); setPicked("check_end"); }}>
+            <option value="fixed">고정 규칙</option>
+            <option value="supervisor">Supervisor 에이전트</option>
+          </select>
         </label>
         <label title="내부 단계 사이 간격. 가짜 AI는 너무 빨라 눈으로 따라가기 어렵다">
           속도{" "}

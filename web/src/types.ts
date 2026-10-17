@@ -486,6 +486,7 @@ export interface AgentsGraph {
   demo?: boolean;
   level?: string;
   perspectives?: boolean;
+  end_check?: "fixed" | "supervisor";
   top: { nodes: (WorkflowNode & { agent?: boolean })[]; edges: WorkflowEdge[] };
   agents: Record<string, { nodes: WorkflowNode[]; edges: WorkflowEdge[] }>;
 }
@@ -510,6 +511,7 @@ export interface AgentsRun extends Omit<WorkflowRun, "ids" | "inputs" | "approva
   proposals: { title: string; kind: string; status: string; errors: string[]; rank?: { tier: string; rank: number | null; reasons: string[] } | null }[];
   inputs: { domain?: string; seed?: number; faults?: string[]; items?: number; level?: string; perspectives?: boolean };
   loop?: AgentsLoop;
+  end_check?: "fixed" | "supervisor" | null;
 }
 
 // 개선 루프 (M15-B): 회차 기록과 결과 보고

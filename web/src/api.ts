@@ -24,10 +24,11 @@ export interface RunOptions {
 }
 
 export const api = {
-  agentsGraph: (level: string, domain?: string, perspectives = false) =>
-    request<AgentsGraph>(`/agents/graph?level=${level}` + (perspectives && domain ? `&domain=${domain}&perspectives=true` : "")),
+  agentsGraph: (level: string, domain?: string, perspectives = false, endCheck?: "fixed" | "supervisor") =>
+    request<AgentsGraph>(`/agents/graph?level=${level}` + (perspectives && domain ? `&domain=${domain}&perspectives=true` : "")
+      + (endCheck ? `&end_check=${endCheck}` : "")),
   agentsStart: (body: { domain: string; seed: number; faults: string[]; items: number; level: string; metrics: unknown[];
-    llm: "fake" | "claude"; pace: number; perspectives?: boolean }) => request<AgentsRun>("/agents/runs", { method: "POST", body: JSON.stringify(body) }),
+    llm: "fake" | "claude"; pace: number; perspectives?: boolean; end_check?: "fixed" | "supervisor" }) => request<AgentsRun>("/agents/runs", { method: "POST", body: JSON.stringify(body) }),
   agentsGet: (id: string, after = -1) => request<AgentsRun>(`/agents/runs/${id}?after=${after}`),
   agentsStep: (id: string, action: "next" | "approve" | "reject" | "opinion", note = "") =>
     request<AgentsRun>(`/agents/runs/${id}/step`, { method: "POST", body: JSON.stringify({ action, note }) }),

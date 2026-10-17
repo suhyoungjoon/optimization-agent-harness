@@ -2,3 +2,6 @@
 # 목표값은 도메인 dimensions.yaml의 metrics[*].target (핵심 지표), 최소 효과는 configs/proposals.yaml의 min_effect.
 max_rounds: 2          # 최대 회차 (2~3). 이 회차를 마치면 결과 보고로 끝낸다
 max_reproposals: 2     # 한 회차에서 다시 제안받는 횟수 상한 (제안을 모두 반려했을 때, 의견을 제약으로 정리했을 때)
+# 종료 판정 방식 (M15-D): fixed(위 기준으로 코드가 정함) | supervisor(Supervisor 에이전트가 허용된 다음 단계 중에서 고름).
+# supervisor여도 최대 회차·다시 제안 횟수는 코드가 막는다. agents 탭 요청의 end_check가 우선한다 (비교 실험)
+end_check: fixed
