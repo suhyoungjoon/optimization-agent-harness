@@ -24,6 +24,8 @@ const AGENT_NAMES: Record<string, string> = {
   simulate: "미리 돌려보기 (배정 에이전트 재실행)",
 };
 
+const PROVIDER_LABEL: Record<string, string> = { anthropic: "Claude", azure_openai: "Azure OpenAI" };
+
 export default function AgentsPanel({
   domain,
   adapter,
@@ -44,6 +46,8 @@ export default function AgentsPanel({
     llm: "fake" as "fake" | "claude", pace: 0.2, perspectives: false,
     end_check: "fixed" as "fixed" | "supervisor", use_saved_constraints: true,
   });
+  // 실제 AI 이름: 서버 설정의 제공사·모델 (값 "claude"는 API 계약상 이름이고 제공사는 서버 설정이 정한다)
+  const realAi = `${PROVIDER_LABEL[harness?.llm.provider ?? "anthropic"] ?? harness?.llm.provider} ${harness?.llm.model ?? ""}`.trim();
   const [graph, setGraph] = useState<AgentsGraph | null>(null);
   const [flowId, setFlowId] = useState<string | null>(null);
   const [run, setRun] = useState<AgentsRun | null>(null);
@@ -164,12 +168,12 @@ export default function AgentsPanel({
             {levels.map((l) => <option key={l}>{l}</option>)}
           </select>
         </label>
-        <label title={demo ? "저장된 결과 보기에서는 가짜 AI만 쓴다 (비용 없음)" : "Claude API는 실제 비용이 든다"}>
+        <label title={demo ? "저장된 결과 보기에서는 가짜 AI만 쓴다 (비용 없음)" : `실제 AI(${realAi})는 비용이 든다. 제공사·모델은 configs/llm.yaml (LLM_PROVIDER)`}>
           AI{" "}
           <select value={demo ? "fake" : form.llm} disabled={demo}
             onChange={(e) => setForm({ ...form, llm: e.target.value as "fake" | "claude" })}>
             <option value="fake">가짜 AI (리허설)</option>
-            <option value="claude">Claude API (비용)</option>
+            <option value="claude">실제 AI (비용)</option>
           </select>
         </label>
         <label title="분석 에이전트를 관점(실패 패턴·자원 활용·시간 수급)마다 따로 동시에 돌린 뒤 합칩니다 (LangGraph fan-out/fan-in). AI 비용은 관점 수만큼 늘어납니다">
@@ -206,7 +210,7 @@ export default function AgentsPanel({
       </div>
       <div className="status-line" aria-live="polite">
         {error && <span className="critical-text">✕ {error}</span>}
-        {run && <span className="muted small">AI: {run.llm === "fake" ? "가짜 AI (수치는 AI 성능과 무관)" : "Claude API"}</span>}
+        {run && <span className="muted small">AI: {run.llm === "fake" ? "가짜 AI (수치는 AI 성능과 무관)" : `실제 AI · ${realAi}`}</span>}
       </div>
 
       {run?.waiting === "approval" && run.approval?.kind === "confirm_constraints" ? (
@@ -262,7 +266,7 @@ function Legend() {
       <span><i className="gc-dot gc-check" /> 검사</span>
       <span><i className="gc-dot gc-rule" /> 규칙 계산·도구</span>
       <span><i className="gc-dot gc-human" /> 사람</span>
-      <span>── 바로 연결 · ╌╌ 조건부 연결 (라벨 = 갈래) · 아래로 도는 선 = 되돌아감</span>
+      <span>── 바로 연결 · ╌╌ 조건부 연결 (라벨 = 갈래) · 아래로 도는 선 = 되돌아감 (이름은 마우스를 올리거나 지나갈 때)</span>
       <span className="gc-legend-active">━ 방금 지나간 연결</span>
     </div>
   );

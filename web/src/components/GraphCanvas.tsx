@@ -4,7 +4,7 @@ import {
   type Edge, type EdgeProps, type Node, type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { WorkflowEdge, WorkflowNode } from "../types";
 
 // 서버가 컴파일한 LangGraph 그래프(get_graph의 노드·연결)를 왼쪽→오른쪽으로 자동 배치해 그린다 (M11).
@@ -133,7 +133,7 @@ export default function GraphCanvas({
   const shape = JSON.stringify([nodes.map((n) => n.id), edges.map((e) => [e.source, e.target])]);
   const layout = useMemo(() => {
     const g = new dagre.graphlib.Graph();
-    g.setGraph({ rankdir: "LR", nodesep: 24, ranksep: 38, marginx: 10, marginy: 10 });
+    g.setGraph({ rankdir: "LR", nodesep: 28, ranksep: 84, marginx: 10, marginy: 10 });
     g.setDefaultEdgeLabel(() => ({}));
     for (const n of nodes) {
       const terminal = n.id.startsWith("__");
@@ -165,6 +165,8 @@ export default function GraphCanvas({
     draggable: false, connectable: false, selectable: false,
   }));
 
+  // 되돌아가는 연결은 노드 아래 같은 띠를 지나 라벨이 겹친다: 라벨은 마우스를 올렸을 때와 방금 지나갔을 때만 보인다
+  const [hovered, setHovered] = useState<string | null>(null);
   // 같은 두 노드 사이 되돌아가는 연결이 여러 개면 곡선 높이를 조금씩 다르게
   let back = 0;
   const rfEdges: Edge[] = edges.map((e) => {
@@ -184,7 +186,8 @@ export default function GraphCanvas({
     if (self) return { ...base, type: "self", sourceHandle: "ts", targetHandle: "tt" };
     if (backward) {
       back += 1;
-      return { ...base, type: "smoothstep", sourceHandle: "bs", targetHandle: "bt",
+      const showLabel = active || hovered === base.id;
+      return { ...base, label: showLabel ? base.label : undefined, type: "smoothstep", sourceHandle: "bs", targetHandle: "bt",
         pathOptions: { offset: 18 + back * 10, borderRadius: 12 } } as Edge;
     }
     return { ...base, type: "default", sourceHandle: "r", targetHandle: "l" };
@@ -196,7 +199,8 @@ export default function GraphCanvas({
         fitView fitViewOptions={{ padding, minZoom: minFitZoom, maxZoom: 1.1 }} minZoom={0.3} maxZoom={1.6}
         nodesDraggable={false} nodesConnectable={false} elementsSelectable={false}
         zoomOnScroll={false} preventScrolling={false} panOnScroll={false}
-        onNodeClick={(_, n) => onNodeClick?.(n.id)}>
+        onNodeClick={(_, n) => onNodeClick?.(n.id)}
+        onEdgeMouseEnter={(_, e) => setHovered(e.id)} onEdgeMouseLeave={() => setHovered(null)}>
         <Controls showInteractive={false} position="bottom-right" />
         <Follow id={follow} />
       </ReactFlow>
