@@ -93,7 +93,7 @@ def test_dispatch_knowledge_is_declared_fictional_and_consistent_with_params():
             assert key in params[section], path
     dist = next(c for c in chunks if c.id == "DIST-01")
     assert "4km" in dist.text and params["matching"]["bounds"]["area_extension_km"][1] >= 4   # 허용 범위 안
-    assert "90분" in next(c for c in chunks if c.id == "TIME-01").text
+    assert "90분" in next(c for c in chunks if c.id == "HOUR-03").text
     assert params["matching"]["bounds"]["time_window_min"][1] >= 90
 
 

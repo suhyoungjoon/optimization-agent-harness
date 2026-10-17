@@ -10,8 +10,8 @@ fields:                        # 조각 메타데이터 필드 (검색 필터로
   dims: "관련 차원 구간 ({차원: [값]})"
   status: 사례의 결정 (approved | rejected)
   params_version: 사례·의견이 만들어질 때의 규칙 버전
-areas:                         # 규정 분야 (파일 하나가 한 분야)
-  distance: 출동 거리
-  time: 희망시간
-  safety: 자격·안전
-  control: 승인·통제
+areas:                         # 규정 분야 (파일 하나가 한 분야, 기획서 결정 25)
+  distance: 출동 반경·관할
+  qualification: 자격·인증
+  hours: 근무시간·가능시간
+  safety: 안전

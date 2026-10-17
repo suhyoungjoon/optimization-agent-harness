@@ -2,7 +2,7 @@
 area: distance
 fictional: true
 ---
-# 가상 운영 규정 — 출동 거리 (가상 문서, 실제 규정 아님)
+# 가상 운영 규정 — 출동 반경·관할 (가상 문서, 실제 규정 아님)
 
 ## DIST-01 관할 밖 출동 거리 상한
 <!-- meta: {"params": ["matching.area_extension_km"], "dims": {"area_zone": ["boundary", "core"]}} -->
@@ -24,6 +24,7 @@ fictional: true
 출동 거리를 넓히는 변경은 평균 이동시간과 희망시간 준수율의 변화를 함께 확인한 뒤 반영한다.
 평균 이동시간이 2분 넘게 늘면 현장 관리자와 협의한다.
 
-## DIST-05 이동 속도 가정 변경 금지
-<!-- meta: {"params": ["travel.avg_speed_kmh", "travel.detour_factor"]} -->
-이동 속도와 도로 우회계수는 실적으로 확인한 추정·고정값이다. 배정 성공률을 올리려고 이 값을 바꾸지 않는다.
+## DIST-05 경계 지역의 뜻
+<!-- meta: {"dims": {"area_zone": ["boundary"]}} -->
+경계 지역은 고객 위치가 관할 경계 근처인 곳이다. 경계 지역 실패가 관할 밖 후보 부족(OUT_OF_AREA) 때문이면
+경계 지역에만 적용하는 구간 조건으로 완화한다.
