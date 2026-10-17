@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { DomainAdapter } from "../domains/types";
-import type { AgentEvent, AgentsGraph, AgentsLoop, AgentsRun, DomainInfo, HarnessInfo } from "../types";
+import type { AgentEvent, AgentsGraph, AgentsLoop, AgentsRun, Constraint, DomainInfo, HarnessInfo } from "../types";
 import type { MetricSpec } from "../domains/types";
 import { fmtMetric, fmtUsd } from "./MetricsPanel";
 import { TERMS, tip } from "../terms";
@@ -93,9 +93,9 @@ export default function AgentsPanel({
     setFlowId(r.id);
     setTick((t) => t + 1);
   });
-  const step = (action: StepAction) => guard(async () => {
+  const step = (action: StepAction, constraints?: Constraint[]) => guard(async () => {
     if (!flowId) return;
-    setRun(await api.agentsStep(flowId, action, note));
+    setRun(await api.agentsStep(flowId, action, note, constraints));
     setNote("");
     setTick((t) => t + 1);
   });
@@ -203,11 +203,16 @@ export default function AgentsPanel({
         {run && <span className="muted small">AI: {run.llm === "fake" ? "가짜 AI (수치는 AI 성능과 무관)" : "Claude API"}</span>}
       </div>
 
+      {run?.waiting === "approval" && run.approval?.kind === "confirm_constraints" ? (
+        <ConfirmConstraints key={run.steps.length} ask={run.approval} onConfirm={(cs) => step("confirm", cs)}
+          onRewrite={() => step("reject")} />
+      ) : (
       <StepBar run={run} nextLabel={run?.next[0] ? topLabel(run.next[0]) : null}
         currentLabel={run?.current ? topLabel(run.current) : null} note={note} setNote={setNote} onStep={step}
         approval={run?.approval ?? null}
         idleText="입력을 고르고 [에이전트 준비]를 누르면 첫 단계 앞에서 멈춥니다. 에이전트 하나가 끝날 때마다 멈춥니다."
         doneText="그래프의 노드를 누르면 그 단계의 결과와 에이전트 내부를 다시 볼 수 있습니다." />
+      )}
 
       {graph && (
         <div className="panel gc-panel">
@@ -411,6 +416,92 @@ function LoopPanel({ loop, specs }: { loop: AgentsLoop; specs: MetricSpec[] }) {
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+const BOUND_KEYS = { param: ["min", "max"], metric: ["min", "max", "max_drop", "max_rise"] } as const;
+const BOUND_LABEL: Record<string, string> = { min: "최소", max: "최대", max_drop: "감소 한도", max_rise: "증가 한도" };
+
+function whenText(w?: Record<string, string[]>) {
+  return w ? Object.entries(w).map(([k, v]) => `${k}=${v.join(",")}`).join("; ") : "";
+}
+
+function parseWhen(text: string): Record<string, string[]> | undefined | null {
+  const t = text.trim();
+  if (!t) return undefined;
+  const out: Record<string, string[]> = {};
+  for (const part of t.split(";").map((x) => x.trim()).filter(Boolean)) {
+    const m = /^([\w]+)\s*=\s*(.+)$/.exec(part);
+    if (!m) return null;
+    out[m[1]] = m[2].split(",").map((x) => x.trim()).filter(Boolean);
+  }
+  return out;
+}
+
+// 제약 확인 (M15 후속): 의견 정리 에이전트가 만든 제약을 사람이 확정 · 고쳐서 확정 · 다시 적기
+function ConfirmConstraints({ ask, onConfirm, onRewrite }: {
+  ask: NonNullable<AgentsRun["approval"]>;
+  onConfirm: (cs: Constraint[]) => void;
+  onRewrite: () => void;
+}) {
+  const [rows, setRows] = useState(() => (ask.constraints ?? []).map((c) => ({
+    c, keep: true, when: whenText(c.when),
+    bounds: Object.fromEntries(BOUND_KEYS[c.type].map((k) => [k, c[k] != null ? String(c[k]) : ""])) as Record<string, string>,
+  })));
+  const [err, setErr] = useState<string | null>(null);
+  const confirm = () => {
+    const out: Constraint[] = [];
+    for (const r of rows.filter((x) => x.keep)) {
+      const { min: _a, max: _b, max_drop: _c, max_rise: _d, when: _w, ...base } = r.c;   // eslint-disable-line @typescript-eslint/no-unused-vars
+      const next: Constraint = { ...base };
+      for (const [k, v] of Object.entries(r.bounds)) {
+        if (v.trim() === "") continue;
+        const n = Number(v);
+        (next as unknown as Record<string, unknown>)[k] = Number.isFinite(n) ? n : v;   // 숫자가 아니면 그대로 보내 서버가 형식 오류로 돌려준다
+      }
+      if (r.c.type === "param") {
+        const w = parseWhen(r.when);
+        if (w === null) { setErr(`구간 형식: "차원=값1,값2; 차원=값" (${r.when})`); return; }
+        if (w) next.when = w;
+      }
+      out.push(next);
+    }
+    setErr(null);
+    onConfirm(out);
+  };
+  return (
+    <div className="verdict wf-bar wf-review confirm-constraints" role="status">
+      <span><strong>제약 확인</strong>{ask.round ? ` · ${ask.round}회차` : ""} · 의견 “{ask.opinion}” → 제약 {ask.constraints?.length ?? 0}개</span>
+      <span className="muted small">AI가 정리한 제약입니다. 맞으면 확정, 숫자·구간을 고쳐서 확정, 뜻이 다르면 다시 적기. 확정한 제약만 다음 제안에 쓰입니다.</span>
+      {ask.error && <span className="warning-text small">⚠ 고친 제약이 형식에 맞지 않습니다: {ask.error}</span>}
+      {err && <span className="warning-text small">⚠ {err}</span>}
+      <table className="compare-table-inner small">
+        <thead><tr><th>쓰기</th><th>대상</th><th>한도</th><th>구간 (파라미터만)</th></tr></thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}>
+              <td><input type="checkbox" checked={r.keep} aria-label="이 제약 쓰기"
+                onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, keep: e.target.checked } : x)))} /></td>
+              <td><code>{r.c.type === "param" ? r.c.path : r.c.metric}</code></td>
+              <td>
+                {BOUND_KEYS[r.c.type].map((k) => (
+                  <label key={k} className="bound">{BOUND_LABEL[k]}{" "}
+                    <input value={r.bounds[k]} size={6} aria-label={BOUND_LABEL[k]}
+                      onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, bounds: { ...x.bounds, [k]: e.target.value } } : x)))} />
+                  </label>
+                ))}
+              </td>
+              <td>{r.c.type === "param"
+                ? <input value={r.when} placeholder="예: area_zone=boundary" aria-label="구간"
+                    onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, when: e.target.value } : x)))} />
+                : <span className="muted">–</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button className="primary" onClick={confirm}>확정</button>
+      <button onClick={onRewrite} title="정리된 제약을 버리고 사람 검토로 돌아가 의견을 다시 적습니다">다시 적기</button>
     </div>
   );
 }

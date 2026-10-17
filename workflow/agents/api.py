@@ -123,14 +123,16 @@ class AgentRuns:
         d = ctx.data
         loop = {"round": values.get("round"), "rounds": d.get("rounds") or [], "constraints": d.get("constraints") or [],
                 "stop_reason": values.get("stop_reason"), "report": d.get("final_report"),
-                "decisions": d.get("round_decisions") or [], "retrieval": d.get("retrieval_meta")}
+                "decisions": d.get("round_decisions") or [], "retrieval": d.get("retrieval_meta"),
+                "pending_constraints": d.get("pending_constraints") or []}
         last = ctx.recent(limit=1)
         return {**snap, "steps": values.get("log", []), "events": ctx.recent(after),
                 "counts": ctx.counts(), "last_event": last[0] if last else None, "proposals": proposals, "loop": loop,
                 "inputs": {k: values.get(k) for k in ("domain", "seed", "faults", "items", "level", "perspectives")}}
 
     def step(self, flow_id: str, req: StepRequest) -> dict:
-        return self.runs.step(flow_id, req.action, req.note, self.snapshot)
+        return self.runs.step(flow_id, req.action, req.note, self.snapshot,
+                              {"constraints": req.constraints} if req.constraints is not None else None)
 
 
 def register(app: FastAPI, demo: bool = False, retrieval_path=None) -> None:

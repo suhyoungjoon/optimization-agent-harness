@@ -202,7 +202,7 @@ g.add_edge("review_agent", "simulate")`}</pre>
   );
 }
 
-export type StepAction = "next" | "approve" | "reject" | "opinion";
+export type StepAction = "next" | "approve" | "reject" | "opinion" | "confirm";
 
 export function StepBar({
   run,

@@ -415,6 +415,8 @@ details.more > .more-body { margin-top: 8px; }
 .wf-bar { position: sticky; top: 0; z-index: 2; margin-top: 0; }
 .wf-bar .note { flex: 1; min-width: 160px; }
 .wf-review { flex-wrap: wrap; row-gap: 6px; }
+.confirm-constraints table { width: 100%; }
+.confirm-constraints .bound { margin-right: 8px; white-space: nowrap; }
 .loop-panel table td { vertical-align: top; }
 .wf-nodes { list-style: none; margin: 0; padding: 0; }
 .wf-arrow { text-align: center; color: var(--text-muted); line-height: 1.4; }

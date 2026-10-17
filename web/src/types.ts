@@ -323,8 +323,10 @@ export interface Constraint {
   max?: number;
   max_drop?: number;
   max_rise?: number;
+  when?: Record<string, string[]>;   // 구간 조건 (파라미터 제약만, M15 후속)
   source: string;
   note?: string;
+  id?: string;                        // 저장된 제약의 id (M15 후속)
 }
 
 export interface Proposal {
@@ -504,6 +506,7 @@ export interface AgentsRun extends Omit<WorkflowRun, "ids" | "inputs" | "approva
   approval: {
     proposal: number; title: string; question: string; round?: number; rank?: number | null; reasons?: string[];
     opinion_error?: string; minimal_change?: { path: string; current: number; recommended: number; proposed: number } | null;
+    kind?: "confirm_constraints"; opinion?: string; constraints?: Constraint[]; error?: string;   // 제약 확인 (M15 후속)
   } | null;
   events: AgentEvent[];
   counts: Record<string, Record<string, number>>;

@@ -61,6 +61,8 @@ class AgentsState(TypedDict, total=False):
     decision: str               # 사람 검토: approve / reject / opinion
     round: int                  # 회차 (1부터, M15-B)
     opinion_error: str          # 의견을 제약으로 정리하지 못한 이유 (사람에게 다시 묻는다)
+    confirm: str                # 제약 확인 결과: ok | rewrite(의견 다시 적기) | invalid(고친 제약 형식 오류)
+    confirm_error: str
     stop: bool                  # 종료 판정 결과
     stop_reason: str
     next_step: str              # 종료 판정이 고른 다음 단계: next_round | repropose | report (repropose는 Supervisor만)
@@ -85,6 +87,8 @@ NODES: dict[str, dict] = {
                      "description": "사람이 미리 돌려본 결과를 보고 승인 · 반려 · 의견(한 줄)을 남긴다"},
     "opinion_agent": {"label": "의견 정리 에이전트", "kind": "ai", "agent": True,
                       "description": "LangGraph 하위 그래프: 사람의 한 줄 의견 → 제약 형식 → 형식 검사 (틀리면 사람에게 다시 묻기)"},
+    "confirm_constraints": {"label": "제약 확인", "kind": "human",
+                            "description": "의견 정리 에이전트가 만든 제약을 사람이 확인한다: 확정 · 고쳐서 확정 · 다시 적기"},
     "apply": {"label": "반영", "kind": "rule", "description": "승인한 제안을 규칙 파일에 반영한다 (git 커밋은 사람이)"},
     "reevaluate": {"label": "재배정·재평가", "kind": "rule",
                    "description": "반영한 규칙으로 전체를 다시 배정하고 회차 전·후 지표를 잰다"},
@@ -96,7 +100,8 @@ NODES: dict[str, dict] = {
 
 # 조건부 연결의 갈래 이름 (M15-B, 그래프 그림에 그대로 나온다)
 OPINION, ALL_REJECTED, CAP = "의견 → 제약으로 정리", "모두 반려 → 다시 제안", "다시 제안 횟수 소진"
-CONSTRAINT_OK, FORMAT_BAD = "제약 확인 → 다시 제안", "형식이 맞지 않음 → 다시 묻기"
+CONSTRAINT_OK, FORMAT_BAD = "제약 확정 → 다시 제안", "형식이 맞지 않음 → 다시 묻기"
+INTERPRETED, REWRITE, EDIT_BAD = "정리됨 → 사람이 확인", "다시 적기", "고친 제약 형식 오류 → 다시 확인"
 CONTINUE, DONE = "다음 회차", "끝 → 결과 보고"
 SUPERVISOR_REPROPOSE = "Supervisor: 다시 제안"
 CONSTRAINTS_HEADER = "# 지켜야 할 제약 (현장·운영이 정한 한도, source는 누가 정했는지)"
@@ -106,6 +111,13 @@ def _charge(d: dict, cost) -> None:
     """회차 AI 비용 합 (단가를 모르면 None으로 남긴다)."""
     if cost is not None:
         d["round_cost"] = (d.get("round_cost") or 0.0) + cost
+
+
+def _constraint_text(c: dict) -> str:
+    """제약 한 줄 (화면·결과 보고용)."""
+    bounds = ", ".join(f"{k} {c[k]}" for k in ("min", "max", "max_drop", "max_rise") if k in c)
+    when = (" · 구간 " + ", ".join(f"{k}={'/'.join(map(str, v))}" for k, v in c["when"].items())) if c.get("when") else ""
+    return f"{c.get('path') or c.get('metric')} {bounds}{when} ({c.get('source')})"
 
 
 def _step(node: str, lines: list[str], **data) -> dict:
@@ -263,9 +275,11 @@ def proposal_agent_graph(ctx: AgentContext, llm=None):
 
 OPINION_SYSTEM = """현장·운영 담당자가 개선 제안을 보고 남긴 한 줄 의견을 개선 제약 형식으로 바꾼다.
 제약 형식 (목록, 항목마다):
-  {"type": "param",  "path": "섹션.키[i]", "min": 수, "max": 수, "source": "현장 의견", "note": "의견 원문"}
+  {"type": "param",  "path": "섹션.키[i]", "min": 수, "max": 수, "when": {"차원": ["값"]}, "source": "현장 의견", "note": "의견 원문"}
   {"type": "metric", "metric": "지표 이름", "min": 수, "max": 수, "max_drop": 수, "max_rise": 수, "source": "현장 의견", "note": "의견 원문"}
 - path는 get_params의 경로만, metric은 get_params의 metrics 이름만 쓴다. 지금 다루는 제안이 바꾸려는 경로를 먼저 본다.
+- 의견이 특정 구간("경계 지역은 …", "오전에는 …")에만 해당하면 파라미터 제약에 when을 붙인다. 차원과 값은 get_params의
+  dimensions에 있는 것만 쓴다. 구간이 없으면 when을 쓰지 않는다. 지표 제약에는 when을 쓰지 않는다.
 - 한도는 의견에 있는 숫자로만 정한다. 의견에 숫자가 없으면 지어내지 말고 빈 목록을 제출하고 summary에 무엇이 빠졌는지 적어라.
 - submit_constraints로 제출한다. 형식 검사를 통과하지 못하면 사람에게 다시 묻는다."""
 
@@ -275,11 +289,14 @@ def opinion_agent_graph(ctx: AgentContext, llm=None):
     pack, params = d.get("pack"), d.get("params") or {}
     metric_names = sorted(pack.metrics(d["instance"], d.get("full_rule") or [])) if pack and d.get("instance") else []
 
+    dims = pack.dimensions() if pack else {}
+
     def get_params(args):
-        return {"params": params, **params_view(params), "metrics": metric_names}
+        return {"params": params, **params_view(params), "metrics": metric_names,
+                "dimensions": {k: v.get("values") for k, v in (dims.get("dimensions") or {}).items()}}
 
     tools = [{"name": "get_params", "handler": get_params, "input_schema": {"type": "object", "properties": {}},
-              "description": "현재 규칙 파라미터(경로·허용 범위·바꿀 수 있는 범위)와 지표 이름."}]
+              "description": "현재 규칙 파라미터(경로·허용 범위·바꿀 수 있는 범위), 지표 이름, 구간에 쓸 차원과 값."}]
     submit = {"name": "submit_constraints", "description": "의견을 정리한 제약 목록을 제출한다.",
               "input_schema": {"type": "object", "required": ["constraints"], "properties": {
                   "constraints": {"type": "array", "items": {"type": "object"}},
@@ -294,7 +311,8 @@ def opinion_agent_graph(ctx: AgentContext, llm=None):
         constraints = submission.get("constraints")
         if constraints == []:
             return ["제약으로 정리할 한도가 없음" + (f" ({submission['summary']})" if submission.get("summary") else "")]
-        return constraint_errors(constraints, params, metric_names) + citation_errors(submission.get("cited_docs"), calls)
+        return (constraint_errors(constraints, params, metric_names, dims)
+                + citation_errors(submission.get("cited_docs"), calls))
 
     return build_tool_agent(ctx, "opinion_agent", llm=llm, system=OPINION_SYSTEM, tools=tools, submit_tool=submit,
                             check=check, check_label="제약 형식 검사", max_calls=6, salt="lg-opinion")
@@ -583,18 +601,49 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None, e
                     **_step("opinion_agent", [f"✕ 제약으로 정리하지 못함: {problems[0]}", "사람에게 다시 묻는다"])}
         added = [{**c, "source": c.get("source") or "현장 의견", "note": c.get("note") or opinion}
                  for c in (out.get("submission") or {}).get("constraints") or []]
-        d["constraints"] = d["constraints"] + added
-        if d.get("retrieval"):   # 현장 의견 기록: 다음 의견 정리·개선안이 찾아 쓸 수 있게 색인에 남긴다
+        d["pending_constraints"] = added      # 사람이 확인하기 전까지는 쓰지 않는다 (제약 확인 노드)
+        if d.get("retrieval"):
             cited = (out.get("submission") or {}).get("cited_docs")
             d["cited_docs"] = sorted(set(d.get("cited_docs") or []) | set(map(str, cited if isinstance(cited, list) else [])))
             d["retrieval_meta"] = retrieval_meta(d["retrieval"]["index"], d["retrieval"]["record"], d["cited_docs"])
-            d["retrieval"]["index"].add(f"{d['pack'].name}:opinion", [opinion_chunk(
-                opinion, added, p["body"].get("title", ""), _proposal_change(p["body"]), d["params"].get("version"))])
-        lines = [f"의견 \"{opinion}\" → 제약 {len(added)}개"]
-        lines += [f"{c.get('path') or c.get('metric')} "
-                  + ", ".join(f"{k} {c[k]}" for k in ("min", "max", "max_drop", "max_rise") if k in c)
-                  + f" ({c['source']})" for c in added]
+        lines = [f"의견 \"{opinion}\" → 제약 {len(added)}개로 정리 (사람 확인 대기)"] + [_constraint_text(c) for c in added]
         return {"opinion_error": "", **_step("opinion_agent", lines, constraints=added)}
+
+    def confirm_constraints(state: AgentsState):
+        """정리된 제약을 사람이 확인한다. 확정(그대로 또는 고쳐서) · 다시 적기. 고친 제약도 코드가 형식을 검사한다."""
+        p = d["proposals"][state["proposal"]]
+        opinion = d["round_decisions"][-1]["note"]
+        ask = {"kind": "confirm_constraints", "proposal": state["proposal"], "title": p["body"].get("title"),
+               "round": state.get("round", 1), "opinion": opinion, "constraints": d.get("pending_constraints") or [],
+               "question": "의견을 이렇게 제약으로 정리했습니다. 맞으면 확정, 고칠 곳은 고쳐서 확정, 아니면 다시 적기"}
+        if state.get("confirm_error"):
+            ask["error"] = state["confirm_error"]
+        answer = interrupt(ask)
+        action = answer.get("action") if isinstance(answer, dict) else answer
+        if action not in ("confirm", "approve"):   # 다시 적기: 의견을 다시 쓰러 사람 검토로
+            d["pending_constraints"] = []
+            return {"confirm": "rewrite", "confirm_error": "",
+                    **_step("confirm_constraints", ["다시 적기: 정리된 제약을 버리고 의견을 다시 받는다"])}
+        edited = answer.get("constraints") if isinstance(answer, dict) else None
+        cs = [dict(c) for c in (edited if isinstance(edited, list) else d.get("pending_constraints") or [])
+              if isinstance(c, dict)]
+        cs = [{**c, "source": c.get("source") or "현장 의견", "note": c.get("note") or opinion} for c in cs]
+        metric_names = sorted(d["pack"].metrics(d["instance"], d["full_rule"]))
+        errors = (constraint_errors(cs, d["params"], metric_names, d["pack"].dimensions()) if cs
+                  else ["확정할 제약이 없음 (다시 적기를 고르세요)"])
+        if errors:
+            d["pending_constraints"] = cs
+            return {"confirm": "invalid", "confirm_error": "; ".join(errors),
+                    **_step("confirm_constraints", [f"✕ 고친 제약 형식 오류: {errors[0]}", "다시 확인한다"])}
+        changed = edited is not None and cs != [{**c} for c in d.get("pending_constraints") or []]
+        d["constraints"] = d["constraints"] + cs
+        d["pending_constraints"] = []
+        d["round_decisions"][-1]["constraints"] = cs
+        if d.get("retrieval"):   # 현장 의견 기록: 확정한 제약과 함께 색인에 남긴다 (다음 의견 정리·개선안이 찾는다)
+            d["retrieval"]["index"].add(f"{d['pack'].name}:opinion", [opinion_chunk(
+                opinion, cs, p["body"].get("title", ""), _proposal_change(p["body"]), d["params"].get("version"))])
+        lines = [("고쳐서 확정" if changed else "확정") + f": 제약 {len(cs)}개"] + [_constraint_text(c) for c in cs]
+        return {"confirm": "ok", "confirm_error": "", **_step("confirm_constraints", lines, constraints=cs)}
 
     def apply(state: AgentsState):
         pack, body = d["pack"], d["proposals"][state["proposal"]]["body"]
@@ -674,10 +723,7 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None, e
         d["final_report"] = rep
         lines = list(rep["lines"]) + [f"종료 이유: {rep['stop_reason']}"]
         if rep["constraints"]:
-            lines.append("쓴 제약: " + "; ".join(f"{c.get('path') or c.get('metric')} "
-                                                 + ", ".join(f"{k} {c[k]}" for k in ("min", "max", "max_drop", "max_rise")
-                                                             if k in c) + f" ({c.get('source')})"
-                                                 for c in rep["constraints"]))
+            lines.append("쓴 제약: " + "; ".join(_constraint_text(c) for c in rep["constraints"]))
         lines.append("남은 문제: " + (", ".join(f"{f['id']} {f['title']}" for f in rep["remaining"]) or "없음"))
         return _step("report", lines)
 
@@ -707,13 +753,19 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None, e
         return ALL_REJECTED if can_repropose() else CAP
 
     def after_opinion(state: AgentsState) -> str:
-        if state.get("opinion_error"):
-            return FORMAT_BAD
+        return FORMAT_BAD if state.get("opinion_error") else INTERPRETED
+
+    def after_confirm(state: AgentsState) -> str:
+        if state.get("confirm") == "rewrite":
+            return REWRITE
+        if state.get("confirm") == "invalid":
+            return EDIT_BAD
         return CONSTRAINT_OK if can_repropose() else CAP
 
     fns = {"prepare": prepare, "dispatch_agent": dispatch_agent, "evaluate": evaluate, "rule_full": rule_full,
            "analysis_agent": analysis_agent, "proposal_agent": proposal_agent, "simulate": simulate,
-           "human_review": human_review, "opinion_agent": opinion_agent, "apply": apply, "reevaluate": reevaluate,
+           "human_review": human_review, "opinion_agent": opinion_agent, "confirm_constraints": confirm_constraints,
+           "apply": apply, "reevaluate": reevaluate,
            "check_end": check_end, "report": report}
     g = StateGraph(AgentsState)
     for name, fn in fns.items():
@@ -736,13 +788,16 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None, e
                             {APPROVED: "apply", REJECTED: "simulate", OPINION: "opinion_agent",
                              ALL_REJECTED: "proposal_agent", CAP: "check_end"})
     g.add_conditional_edges("opinion_agent", after_opinion,
-                            {CONSTRAINT_OK: "proposal_agent", FORMAT_BAD: "human_review", CAP: "check_end"})
+                            {INTERPRETED: "confirm_constraints", FORMAT_BAD: "human_review"})
+    g.add_conditional_edges("confirm_constraints", after_confirm,
+                            {CONSTRAINT_OK: "proposal_agent", REWRITE: "human_review", EDIT_BAD: "confirm_constraints",
+                             CAP: "check_end"})
     after_end = {"next_round": CONTINUE, "report": DONE, "repropose": SUPERVISOR_REPROPOSE}
     g.add_conditional_edges("check_end", lambda s: after_end[s.get("next_step") or "report"],
                             {CONTINUE: "dispatch_agent", DONE: "report",
                              **({SUPERVISOR_REPROPOSE: "proposal_agent"} if supervised else {})})
     return g.compile(checkpointer=checkpointer or InMemorySaver(),
-                     interrupt_before=[n for n in fns if n != "human_review"])
+                     interrupt_before=[n for n in fns if NODES[n]["kind"] != "human"])
 
 
 def describe_all(levels: dict[str, Level], level: str, perspectives: list[dict] | None = None,

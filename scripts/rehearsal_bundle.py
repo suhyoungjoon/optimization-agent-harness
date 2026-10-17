@@ -10,6 +10,7 @@ LLM 대신 가짜 LLM(tests/fake_llm.py)을 쓴다. 수치는 AI 성능과 무�
 - 개선 agent: 경계 지역 구간 조건 5km(적용 가능, 최소 변경 추천 4km), 허용 범위 밖 변경(검증 실패),
   명세 수정(AI 전후 실행) 세 건을 제안한다. 입력에 제약이 있으면 제약을 지키는 경계 지역 4km 한 건만 낸다.
 - 의견 정리 agent (M15-B): 의견 한 줄에서 "N km"를 읽어 지금 제안이 바꾸는 경로의 max 제약으로 낸다.
+  "경계"가 들어 있으면 구간 조건 when {area_zone: [boundary]}을 붙인다.
   숫자가 없으면 한도 없는 제약을 내서 형식 검사에 걸린다 (사람에게 다시 묻는 흐름).
 실행에는 개발 의존성이 필요하다 (pip install -e ".[dev]").
 """
@@ -116,6 +117,8 @@ def _opinion(messages):
          "note": opinion}
     if km:
         c["max"] = float(km.group(1)) if "." in km.group(1) else int(km.group(1))
+    if "경계" in opinion:          # 구간이 붙은 의견 (M15 후속): "경계 지역은 …"
+        c["when"] = {"area_zone": ["boundary"]}
     return tool_use("submit_constraints", {"constraints": [c], "summary": "의견의 거리 한도를 제약으로" if km
                                            else "의견에 숫자 한도가 없음"})
 

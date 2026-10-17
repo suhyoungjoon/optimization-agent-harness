@@ -30,13 +30,13 @@ export const api = {
   agentsStart: (body: { domain: string; seed: number; faults: string[]; items: number; level: string; metrics: unknown[];
     llm: "fake" | "claude"; pace: number; perspectives?: boolean; end_check?: "fixed" | "supervisor" }) => request<AgentsRun>("/agents/runs", { method: "POST", body: JSON.stringify(body) }),
   agentsGet: (id: string, after = -1) => request<AgentsRun>(`/agents/runs/${id}?after=${after}`),
-  agentsStep: (id: string, action: "next" | "approve" | "reject" | "opinion", note = "") =>
-    request<AgentsRun>(`/agents/runs/${id}/step`, { method: "POST", body: JSON.stringify({ action, note }) }),
+  agentsStep: (id: string, action: "next" | "approve" | "reject" | "opinion" | "confirm", note = "", constraints?: unknown[]) =>
+    request<AgentsRun>(`/agents/runs/${id}/step`, { method: "POST", body: JSON.stringify({ action, note, constraints }) }),
   workflowGraph: () => request<WorkflowGraph>("/workflow/graph"),
   workflowStart: (body: { domain: string; seed: number; faults: string[]; items: number; level: string; metrics: unknown[] }) =>
     request<WorkflowRun>("/workflow/runs", { method: "POST", body: JSON.stringify(body) }),
   workflowGet: (id: string) => request<WorkflowRun>(`/workflow/runs/${id}`),
-  workflowStep: (id: string, action: "next" | "approve" | "reject" | "opinion", note = "") =>
+  workflowStep: (id: string, action: "next" | "approve" | "reject" | "opinion" | "confirm", note = "") =>
     request<WorkflowRun>(`/workflow/runs/${id}/step`, { method: "POST", body: JSON.stringify({ action, note }) }),
   domains: () => request<DomainInfo[]>("/domains"),
   harness: () => request<HarnessInfo>("/harness/levels"),

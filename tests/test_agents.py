@@ -18,7 +18,7 @@ from scripts.rehearsal_bundle import build  # noqa: E402
 METRICS = [{"key": "assignment_rate", "label": "배정 성공률", "format": "pct", "primary": True, "better": "up"},
            {"key": "desired_time_match_rate", "label": "희망시간 준수율", "format": "pct", "better": "up"}]
 TOP = ["prepare", "dispatch_agent", "evaluate", "rule_full", "analysis_agent", "proposal_agent", "simulate"]
-LOOP = ["human_review", "opinion_agent", "apply", "reevaluate", "check_end", "report"]
+LOOP = ["human_review", "opinion_agent", "confirm_constraints", "apply", "reevaluate", "check_end", "report"]
 
 
 def forbidden_llm():
@@ -53,6 +53,15 @@ def step(client, flow_id, action="next", note=""):
     return snap
 
 
+def wait_paused(client, flow_id):
+    deadline = time.time() + 120
+    while (snap := client.get(f"/agents/runs/{flow_id}").json())["status"] == "running":
+        assert time.time() < deadline
+        time.sleep(0.05)
+    assert snap["error"] is None, snap["error"]
+    return snap
+
+
 def lines(snap, node):
     return [line for s in snap["steps"] if s["node"] == node for line in s["lines"]]
 
@@ -72,6 +81,12 @@ def test_harness_level_changes_the_dispatch_agent_graph(client):
     top = {(e["source"], e["target"]): e["label"] for e in g["top"]["edges"]}
     assert top[("human_review", "opinion_agent")] == "의견 → 제약으로 정리"
     assert top[("opinion_agent", "human_review")] == "형식이 맞지 않음 → 다시 묻기"
+    assert top[("opinion_agent", "confirm_constraints")] == "정리됨 → 사람이 확인"
+    assert top[("confirm_constraints", "proposal_agent")] == "제약 확정 → 다시 제안"
+    assert top[("confirm_constraints", "human_review")] == "다시 적기"
+    assert top[("confirm_constraints", "confirm_constraints")] == "고친 제약 형식 오류 → 다시 확인"
+    kinds = {n["id"]: n.get("kind") for n in g["top"]["nodes"]}
+    assert kinds["confirm_constraints"] == "human"
     assert top[("human_review", "proposal_agent")] == "모두 반려 → 다시 제안"
     assert top[("check_end", "dispatch_agent")] == "다음 회차" and top[("check_end", "report")] == "끝 → 결과 보고"
     assert "check" in {n["id"] for n in g["agents"]["opinion_agent"]["nodes"]}
@@ -182,9 +197,26 @@ def test_rehearsal_story_opinion_constraint_round_two_report(client, tmp_path):
 
     snap = step(client, snap["id"], "opinion", "관할 밖 4km 초과 출동 불가")
     snap = step(client, snap["id"])
-    assert snap["next"] == ["proposal_agent"]
-    assert snap["loop"]["constraints"] == [{"type": "param", "path": "matching.area_extension_km[2]", "max": 4,
-                                            "source": "현장 의견", "note": "관할 밖 4km 초과 출동 불가"}]
+    # 제약 확인 (M15 후속): 정리된 제약은 사람이 확인하기 전까지 쓰지 않는다
+    assert snap["next"] == ["confirm_constraints"] and snap["waiting"] == "approval"
+    ask = snap["approval"]
+    assert ask["kind"] == "confirm_constraints" and ask["opinion"] == "관할 밖 4km 초과 출동 불가"
+    interpreted = {"type": "param", "path": "matching.area_extension_km[2]", "max": 4,
+                   "source": "현장 의견", "note": "관할 밖 4km 초과 출동 불가"}
+    assert ask["constraints"] == [interpreted] and snap["loop"]["constraints"] == []
+    # 고친 제약이 형식에 안 맞으면 다시 확인
+    res = client.post(f"/agents/runs/{snap['id']}/step",
+                      json={"action": "confirm", "constraints": [{**interpreted, "max": "4km"}]})
+    assert res.status_code == 200
+    snap = wait_paused(client, snap["id"])
+    assert snap["next"] == ["confirm_constraints"] and "숫자" in snap["approval"]["error"]
+    # 고쳐서 확정: 경계 지역에만 거는 한도로 (구간 조건 when)
+    fixed = {**interpreted, "when": {"area_zone": ["boundary"]}}
+    res = client.post(f"/agents/runs/{snap['id']}/step", json={"action": "confirm", "constraints": [fixed]})
+    snap = wait_paused(client, snap["id"])
+    assert snap["next"] == ["proposal_agent"] and snap["loop"]["constraints"] == [fixed]
+    assert lines(snap, "confirm_constraints")[-2].startswith("고쳐서 확정: 제약 1개")
+    assert "구간 area_zone=boundary" in lines(snap, "confirm_constraints")[-1]
     snap = run_until(client, snap, waiting)
     assert snap["approval"]["title"].endswith("(제약 반영)") and snap["approval"]["rank"] == 1
     assert "제약 1개 · 반려·의견 기억 2건" in lines(snap, "proposal_agent")[-2]
@@ -271,3 +303,20 @@ def test_supervisor_outside_allowed_falls_back_to_rule():
     llm = FakeLLM(lambda item, n, messages, tools: tool_use("choose_next_step", {"next": "next_round", "reason": "더"}))
     out = run_tool_agent(supervisor_graph(AgentContext(), llm, ["repropose", "report"]), "{}")
     assert out["problems"] and "next_round" in out["problems"][0] and out["feedback_rounds"] == 1
+
+
+def test_confirm_rewrite_goes_back_to_review_and_slice_opinion(client):
+    """다시 적기 → 사람 검토로 돌아가 의견을 다시 받는다. 구간이 붙은 의견은 when 제약으로 정리된다."""
+    snap = run_until(client, start(client), lambda s: s["waiting"] == "approval")
+    snap = step(client, snap["id"], "opinion", "관할 밖 3km 초과 불가")
+    snap = step(client, snap["id"])
+    assert snap["approval"]["kind"] == "confirm_constraints" and snap["approval"]["constraints"][0]["max"] == 3
+    snap = step(client, snap["id"], "reject")                      # 다시 적기
+    assert snap["next"] == ["human_review"] and snap["loop"]["constraints"] == []
+    assert snap["approval"].get("kind") is None and snap["approval"]["title"].endswith("+2km")
+    snap = step(client, snap["id"], "opinion", "경계 지역은 관할 밖 4km 초과 출동 불가")
+    snap = step(client, snap["id"])
+    c = snap["approval"]["constraints"][0]
+    assert c["when"] == {"area_zone": ["boundary"]} and c["max"] == 4
+    snap = step(client, snap["id"], "confirm")
+    assert snap["next"] == ["proposal_agent"] and snap["loop"]["constraints"] == [c]
