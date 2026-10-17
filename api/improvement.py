@@ -66,6 +66,7 @@ class ProposalRequest(BaseModel):
     constraints: list[dict] | None = None   # 사람이 정한 한도 (core.improvement.constraints 형식). 개선안 묶음에 저장
     use_memory: bool = True                 # 이전 회차에서 반려된 개선안과 사유를 입력에 넣는다 (M12-c)
     use_knowledge: bool = True              # 규정·과거 사례 검색 도구를 붙인다 (M15-C). RAG 비교 실험은 false
+    use_saved_constraints: bool = True      # 사람이 확정해 저장한 제약을 요청의 제약에 더한다 (M15 후속)
 
 
 class SimulateRequest(BaseModel):
@@ -139,6 +140,29 @@ def register(app: FastAPI, ctx: Context) -> None:
     approve_lock = threading.Lock()
     index_holder: list = []                # 검색 색인 (M15-C, 처음 쓸 때 연다)
     index_lock = threading.Lock()
+
+    # --- 저장된 제약 (M15 후속): 사람이 확정한 제약을 다음 요청이 불러온다 ---
+    def usable_saved_constraints(pack, params: dict, metric_names: list[str], given: list[dict]):
+        """켜진 저장 제약 중 지금 규칙으로도 형식이 맞고, 요청에 같은 한도가 없는 것. (제약 목록, id 목록)"""
+        have = {store.constraint_id(pack.name, c) for c in given}
+        out, ids = [], []
+        for row in store.list_constraints(pack.name):
+            if row["id"] in have or constraint_errors([row["body"]], params, metric_names, pack.dimensions()):
+                continue
+            out.append(row["body"])
+            ids.append(row["id"])
+        return out, ids
+
+    @app.get("/constraints")
+    def list_saved_constraints(domain: str, all: bool = False):   # noqa: A002 (쿼리 이름)
+        """저장된 제약 (켜진 것만, all=true면 꺼진 것도)."""
+        return store.list_constraints(domain, active_only=not all)
+
+    @app.post("/constraints/{cid}/{state}")
+    def toggle_saved_constraint(cid: str, state: Literal["activate", "deactivate"]):
+        if store.get_constraint(cid) is None:
+            raise HTTPException(404, f"unknown constraint: {cid}")
+        return store.set_constraint_active(cid, state == "activate")
 
     # --- 문서 검색 (M15-C) ---
     def case_records(domain: str, pack) -> list:
@@ -291,22 +315,26 @@ def register(app: FastAPI, ctx: Context) -> None:
             if batch is None:
                 raise HTTPException(404, "이 리포트로 만든 저장된 개선안이 없음")
             return JSONResponse(status_code=202, content={"id": batch["id"], "status": "done", "replayed": True})
-        if req.constraints:
+        constraints, saved_ids = list(req.constraints or []), []
+        if req.constraints or req.use_saved_constraints:
             _run, _dataset, pack, instance, _truth, decisions = _run_context(store, report["run_id"])
-            errors = constraint_errors(req.constraints, load_params(pack), sorted(pack.metrics(instance, decisions)),
-                                       pack.dimensions())
+            params, metric_names = load_params(pack), sorted(pack.metrics(instance, decisions))
+            errors = constraint_errors(constraints, params, metric_names, pack.dimensions())
             if errors:
                 raise HTTPException(400, "; ".join(errors))
+            if req.use_saved_constraints:
+                extra, saved_ids = usable_saved_constraints(pack, params, metric_names, constraints)
+                constraints += extra
         llm = _llm_or_503(ctx, "proposals")
         memory = current_memory(store.get_run(report["run_id"])["domain"]) if req.use_memory else None
         domain = store.get_run(report["run_id"])["domain"]
         retrieval = knowledge(domain, ["regulation", "case", "opinion"]) if req.use_knowledge else None
         batch_id = store.create_batch(req.report_id)
-        ctx.executor.submit(_propose_job, batch_id, report, llm, req.constraints or None, memory, retrieval)
+        ctx.executor.submit(_propose_job, batch_id, report, llm, constraints or None, memory, retrieval, saved_ids)
         return JSONResponse(status_code=202, content={"id": batch_id, "status": "running"})
 
     def _propose_job(batch_id: str, report: dict, llm, constraints: list[dict] | None = None,
-                     memory: dict | None = None, retrieval: dict | None = None):
+                     memory: dict | None = None, retrieval: dict | None = None, saved_ids: list[str] | None = None):
         try:
             _run, dataset, pack, instance, _truth, _decisions = _run_context(store, report["run_id"])
             params = load_params(pack)
@@ -318,6 +346,8 @@ def register(app: FastAPI, ctx: Context) -> None:
                     "params_version": params.get("version")}
             if constraints:
                 meta["constraints"] = constraints
+            if saved_ids:   # 저장된 제약 중 이 묶음에 쓴 것 (재현 조건)
+                meta["saved_constraints"] = saved_ids
             meta["memory"] = memory
             if retrieval:   # 쓴 문서 조각 id·해시, 인용한 id, 검색 방식·임베딩 모델 (재현 조건)
                 cited = [str(c) for p in out["proposals"] if isinstance(p["proposal"], dict)

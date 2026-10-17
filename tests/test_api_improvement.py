@@ -388,3 +388,26 @@ def test_proposals_search_regulations_and_citations_are_checked(tmp_path, files)
 
     off = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id'], 'use_knowledge': False}).json()['id']}")
     assert off["status"] == "error" and "AssertionError" in off["error"]   # use_knowledge=false면 검색 도구가 없다
+
+
+def test_saved_constraints_join_proposal_requests(client, tmp_path):
+    """저장된 제약 (M15 후속): 켜진 제약은 개선안 요청의 제약에 더해지고, 쓴 id가 묶음에 남는다. 끄면 빠진다."""
+    from core.storage.store import Store
+
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    report = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    saved_c = {**AREA_LIMIT, "max": 3, "when": {"area_zone": ["boundary"]}}
+    db = Store(tmp_path / "h.db")                                   # 앱과 같은 DB 파일 (agents 탭이 확정하면 여기에 쌓인다)
+    row = db.save_constraint("dispatch", saved_c, "경계는 3km", "test", 1)
+    batch = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id']}).json()['id']}")
+    assert batch["meta"]["constraints"] == [saved_c] and batch["meta"]["saved_constraints"] == [row["id"]]
+    sim = client.post(f"/proposals/{batch['proposals'][0]['id']}/simulate", json={}).json()["simulation"]
+    assert "구간 area_zone=boundary" in sim["constraint_violations"][0]["message"]       # 경계 4km > 3km
+    # 요청에 같은 한도가 있으면 중복하지 않는다
+    batch = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id'], 'constraints': [saved_c]}).json()['id']}")
+    assert batch["meta"]["constraints"] == [saved_c] and "saved_constraints" not in batch["meta"]
+    client.post(f"/constraints/{row['id']}/deactivate")
+    batch = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id']}).json()['id']}")
+    assert "constraints" not in (batch["meta"] or {})
+    assert client.get("/constraints?domain=dispatch&all=true").json()[0]["active"] is False

@@ -368,12 +368,31 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None, e
         rule = pack.solve(sub, params)
         d.update(pack=pack, params=params, instance=instance, truth=truth, scope=scope, sub_instance=sub, rule_sub=rule,
                  constraints=[], rejections=[], rounds=[])
+        loaded = load_saved_constraints(pack, params, instance)
         if d.get("index") is not None:   # 문서 검색 (M15-C): 규정 + 이전 실행의 현장 의견
             d["retrieval"] = prepare_retrieval(d["index"], knowledge_dir(pack), pack.name, ["regulation", "opinion"])
         start_round(1)
         v = len(pack.validate(sub, rule))
-        return {"round": 1, **_step("prepare", [f"전체 {len(pack.items(instance))}건 중 처리 순서 앞 {len(scope)}건",
-                                                _line(state, "규칙 방식 기준선", v, pack.metrics(sub, rule))])}
+        lines = [f"전체 {len(pack.items(instance))}건 중 처리 순서 앞 {len(scope)}건",
+                 _line(state, "규칙 방식 기준선", v, pack.metrics(sub, rule))] + loaded
+        return {"round": 1, **_step("prepare", lines)}
+
+    def load_saved_constraints(pack, params: dict, instance) -> list[str]:
+        """이전에 확정해 저장한 제약을 불러온다 (지금 규칙으로 형식이 맞는 것만). 화면 줄을 돌려준다."""
+        store = d.get("store")
+        d.update(saved_loaded=[], saved_skipped=[])
+        if store is None or not d.get("use_saved_constraints", True):
+            return []
+        metric_names = sorted(pack.metrics(instance, []))   # 지표 이름만 (결정 없이)
+        for row in store.list_constraints(pack.name):
+            errors = constraint_errors([row["body"]], params, metric_names, pack.dimensions())
+            (d["saved_skipped"] if errors else d["saved_loaded"]).append({"id": row["id"], **({"error": errors[0]} if errors else {})})
+            if not errors:
+                d["constraints"].append(row["body"])
+        if not d["saved_loaded"] and not d["saved_skipped"]:
+            return []
+        return ([f"저장된 제약 {len(d['saved_loaded'])}개 불러옴: " + "; ".join(_constraint_text(c) for c in d["constraints"])]
+                + ([f"지금 규칙과 맞지 않아 뺀 저장 제약 {len(d['saved_skipped'])}개"] if d["saved_skipped"] else []))
 
     def dispatch_agent(state: AgentsState):
         llm = ctx.make_llm()
@@ -639,6 +658,9 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None, e
         d["constraints"] = d["constraints"] + cs
         d["pending_constraints"] = []
         d["round_decisions"][-1]["constraints"] = cs
+        if d.get("store") is not None:   # 저장: 다음 실행과 개선 탭 개선안 요청이 불러온다
+            for c in cs:
+                d["store"].save_constraint(d["pack"].name, c, opinion, "agents", d["params"].get("version"))
         if d.get("retrieval"):   # 현장 의견 기록: 확정한 제약과 함께 색인에 남긴다 (다음 의견 정리·개선안이 찾는다)
             d["retrieval"]["index"].add(f"{d['pack'].name}:opinion", [opinion_chunk(
                 opinion, cs, p["body"].get("title", ""), _proposal_change(p["body"]), d["params"].get("version"))])

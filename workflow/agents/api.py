@@ -30,6 +30,7 @@ class AgentsStart(BaseModel):
     pace: float = Field(default=0.2, ge=0, le=2)     # 내부 단계 사이 간격 (초)
     use_knowledge: bool = True    # 개선 제안·의견 정리 에이전트에 문서 검색 도구 (M15-C). RAG 비교 실험은 false
     end_check: Literal["fixed", "supervisor"] | None = None   # 종료 판정 (M15-D). 없으면 configs/workflow.yaml
+    use_saved_constraints: bool = True   # 이전에 확정해 저장한 제약을 불러와 처음부터 쓴다 (M15 후속)
 
 
 def _fake_llm_factory(ctx):
@@ -67,13 +68,14 @@ def _perspectives(domain: str) -> list[dict]:
 
 
 class AgentRuns:
-    def __init__(self, demo: bool, retrieval_path=None):
+    def __init__(self, demo: bool, retrieval_path=None, store=None):
         from langgraph.types import Command
 
         from ..runs import GraphRuns
 
         self.demo = demo
         self.retrieval_path = retrieval_path    # 검색 색인 (M15-C). 현장 의견이 쌓여 다음 실행에서도 찾을 수 있다
+        self.store = store                      # 확정한 제약을 저장하고 다음 실행이 불러온다 (M15 후속)
         self.runs = GraphRuns(Command)
 
     def start(self, req: AgentsStart) -> dict:
@@ -91,6 +93,8 @@ class AgentRuns:
         config = load_config()
         ctx = AgentContext(llm_config=config, pace=req.pace)
         kind = "fake" if self.demo else req.llm
+        if self.store is not None:
+            ctx.data.update(store=self.store, use_saved_constraints=req.use_saved_constraints)
         if self.retrieval_path is not None and req.use_knowledge:
             from core.llm.embeddings import make_embedder
             from core.retrieval import open_index
@@ -109,7 +113,7 @@ class AgentRuns:
                 raise HTTPException(503, f"LLM 클라이언트를 만들 수 없음: {exc}")
             ctx.make_llm = lambda role=None: clients[role]
         graph = build_flow(ctx, levels, end_check=req.end_check)
-        inputs = req.model_dump(exclude={"llm", "pace", "use_knowledge", "end_check"})
+        inputs = req.model_dump(exclude={"llm", "pace", "use_knowledge", "end_check", "use_saved_constraints"})
         flow_id = self.runs.start(graph, {**inputs, "log": []}, llm=kind, end_check=req.end_check, _ctx=ctx)
         return self.snapshot(flow_id)
 
@@ -124,7 +128,8 @@ class AgentRuns:
         loop = {"round": values.get("round"), "rounds": d.get("rounds") or [], "constraints": d.get("constraints") or [],
                 "stop_reason": values.get("stop_reason"), "report": d.get("final_report"),
                 "decisions": d.get("round_decisions") or [], "retrieval": d.get("retrieval_meta"),
-                "pending_constraints": d.get("pending_constraints") or []}
+                "pending_constraints": d.get("pending_constraints") or [],
+                "saved_loaded": d.get("saved_loaded") or [], "saved_skipped": d.get("saved_skipped") or []}
         last = ctx.recent(limit=1)
         return {**snap, "steps": values.get("log", []), "events": ctx.recent(after),
                 "counts": ctx.counts(), "last_event": last[0] if last else None, "proposals": proposals, "loop": loop,
@@ -135,7 +140,7 @@ class AgentRuns:
                               {"constraints": req.constraints} if req.constraints is not None else None)
 
 
-def register(app: FastAPI, demo: bool = False, retrieval_path=None) -> None:
+def register(app: FastAPI, demo: bool = False, retrieval_path=None, store=None) -> None:
     holder: list[AgentRuns] = []
 
     def get_runs() -> AgentRuns:
@@ -143,7 +148,7 @@ def register(app: FastAPI, demo: bool = False, retrieval_path=None) -> None:
         if reason:
             raise HTTPException(501, reason)
         if not holder:
-            holder.append(AgentRuns(demo, retrieval_path))
+            holder.append(AgentRuns(demo, retrieval_path, store))
         return holder[0]
 
     @app.get("/agents/graph")

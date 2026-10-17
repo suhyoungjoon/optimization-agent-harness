@@ -4,6 +4,7 @@ import type { DomainAdapter } from "../domains/types";
 import type { AgentEvent, AgentsGraph, AgentsLoop, AgentsRun, Constraint, DomainInfo, HarnessInfo } from "../types";
 import type { MetricSpec } from "../domains/types";
 import { fmtMetric, fmtUsd } from "./MetricsPanel";
+import { constraintText } from "./ImprovementPanel";
 import { TERMS, tip } from "../terms";
 import GraphCanvas, { type NodeView } from "./GraphCanvas";
 import { usePoll } from "./usePoll";
@@ -41,7 +42,7 @@ export default function AgentsPanel({
   const [form, setForm] = useState({
     seed, faults: faults.length ? faults : domain.faults.map((f) => f.id), items: 10, level,
     llm: "fake" as "fake" | "claude", pace: 0.2, perspectives: false,
-    end_check: "fixed" as "fixed" | "supervisor",
+    end_check: "fixed" as "fixed" | "supervisor", use_saved_constraints: true,
   });
   const [graph, setGraph] = useState<AgentsGraph | null>(null);
   const [flowId, setFlowId] = useState<string | null>(null);
@@ -175,6 +176,11 @@ export default function AgentsPanel({
           <input type="checkbox" checked={form.perspectives} disabled={inFlight}
             onChange={(e) => { setForm({ ...form, perspectives: e.target.checked }); setPicked("analysis_agent"); }} />{" "}
           관점별 분석
+        </label>
+        <label title="이전 실행에서 사람이 확정해 저장한 제약을 처음부터 씁니다 (개선 제안 탭의 저장된 제약에서 끄고 켭니다)">
+          <input type="checkbox" checked={form.use_saved_constraints} disabled={inFlight}
+            onChange={(e) => setForm({ ...form, use_saved_constraints: e.target.checked })} />{" "}
+          저장된 제약 불러오기
         </label>
         <label title="회차가 끝났을 때 다음 단계를 누가 고를지. Supervisor는 허용된 단계(다음 회차·다시 제안·결과 보고) 중에서만 고르고, 최대 회차는 코드가 막습니다">
           종료 판정{" "}
@@ -400,10 +406,11 @@ function LoopPanel({ loop, specs }: { loop: AgentsLoop; specs: MetricSpec[] }) {
       )}
       {cons.length > 0 && (
         <p className="small">쓴 제약: {cons.map((c, i) => (
-          <span key={i} className="chip">{c.type === "param" ? c.path : c.metric}{" "}
-            {[c.min != null && `최소 ${c.min}`, c.max != null && `최대 ${c.max}`, c.max_drop != null && `감소 ${c.max_drop} 이내`,
-              c.max_rise != null && `증가 ${c.max_rise} 이내`].filter(Boolean).join(", ")} <span className="muted">({c.source})</span></span>
-        ))}</p>
+          <span key={i} className="chip">{constraintText(c)} <span className="muted">({c.source})</span></span>
+        ))}
+          {!!loop.saved_loaded?.length && <span className="muted"> · 그중 저장된 제약에서 불러온 것 {loop.saved_loaded.length}개</span>}
+          {!!loop.saved_skipped?.length && <span className="warning-text"> · 지금 규칙과 맞지 않아 뺀 저장 제약 {loop.saved_skipped.length}개</span>}
+        </p>
       )}
       {loop.report && (
         <div className="small">

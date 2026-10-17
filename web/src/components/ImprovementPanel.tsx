@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../api";
 import type { DomainAdapter, MetricSpec, Scope } from "../domains/types";
-import type { HarnessInfo, HistoryRow, Memory, Proposal, ProposalBatch, Ranking, RankTier, SpecEstimate } from "../types";
+import type { Constraint, HarnessInfo, HistoryRow, Memory, Proposal, ProposalBatch, Ranking, RankTier, SavedConstraint, SpecEstimate } from "../types";
 import { fmtCost, fmtMetric, fmtSeconds, fmtUsd } from "./MetricsPanel";
 import { usePoll } from "./usePoll";
 import { TERMS, tip } from "../terms";
@@ -104,6 +104,7 @@ export default function ImprovementPanel({
   const [current, setCurrent] = useState<{ params: Record<string, unknown>; spec_sections: Record<string, string> } | null>(null);
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [memory, setMemory] = useState<Memory | null>(null);
+  const [saved, setSaved] = useState<SavedConstraint[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -113,6 +114,7 @@ export default function ImprovementPanel({
     api.params(domainName).then(setCurrent).catch(() => undefined);
     api.history().then(setHistory).catch(() => undefined);
     api.memory(domainName).then(setMemory).catch(() => undefined);
+    api.savedConstraints(domainName, true).then(setSaved).catch(() => undefined);
   };
   useEffect(reload, [domainName, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -188,13 +190,12 @@ export default function ImprovementPanel({
         )}
         {batch?.status === "done" && !!batch.meta?.constraints?.length && (
           <details className="small">
-            <summary>적용한 제약 {batch.meta.constraints.length}개 (사람이 정한 한도)</summary>
+            <summary>적용한 제약 {batch.meta.constraints.length}개 (사람이 정한 한도
+              {batch.meta.saved_constraints?.length ? `, 그중 저장된 제약 ${batch.meta.saved_constraints.length}개` : ""})</summary>
             <ul>
               {batch.meta.constraints.map((c, i) => (
                 <li key={i}>
-                  {c.type === "param" ? c.path : c.metric}{" "}
-                  {[c.min != null && `최소 ${c.min}`, c.max != null && `최대 ${c.max}`, c.max_drop != null && `감소 ${c.max_drop} 이내`,
-                    c.max_rise != null && `증가 ${c.max_rise} 이내`].filter(Boolean).join(", ")}
+                  {constraintText(c)}
                   <span className="muted"> — {c.source}{c.note ? `: ${c.note}` : ""}</span>
                 </li>
               ))}
@@ -212,6 +213,25 @@ export default function ImprovementPanel({
         <span title={tip("history")}>반영 {approved.length}회 · 반려 {history.length - approved.length}건</span>
         {lastCycle && <> · 마지막 개선 한 바퀴 {fmtUsd(lastCycle.llm_cost_usd)}{cycleSeconds != null && ` · ${fmtSeconds(cycleSeconds)}`}</>}
       </p>
+      {saved.length > 0 && (
+        <details className="small">
+          <summary title="LangGraph agents 탭에서 의견을 제약으로 정리하고 사람이 확정한 것입니다. 켜진 제약은 다음 개선 제안 요청과 agents 탭 실행에 자동으로 들어갑니다">
+            저장된 제약 (현장 의견에서 확정) · 켜짐 {saved.filter((c) => c.active).length}개 / {saved.length}개
+          </summary>
+          <ul>
+            {saved.map((c) => (
+              <li key={c.id} className={c.active ? undefined : "muted"}>
+                {constraintText(c.body)}
+                <span className="muted"> — {c.opinion || c.body.note || "의견 없음"} ({c.origin}, 규칙 v{c.params_version ?? "?"})</span>{" "}
+                <button className="small" disabled={!!busy}
+                  onClick={() => guard(c.active ? "제약 끄는 중" : "제약 켜는 중", async () => void (await api.toggleConstraint(c.id, !c.active)))}>
+                  {c.active ? "끄기" : "켜기"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       {memory && memory.item_ids.length > 0 && (
         <details className="small">
           <summary title="사람이 내린 판단은 다음 회차 AI 입력으로 돌아갑니다. 반려 사유는 개선 제안에, 발견 판정은 문제 찾기에">
@@ -350,6 +370,14 @@ export default function ImprovementPanel({
       )}
     </section>
   );
+}
+
+// 제약 한 줄: 대상 · 한도 · 구간 (M15 후속)
+export function constraintText(c: Constraint): string {
+  const bounds = [c.min != null && `최소 ${c.min}`, c.max != null && `최대 ${c.max}`, c.max_drop != null && `감소 ${c.max_drop} 이내`,
+    c.max_rise != null && `증가 ${c.max_rise} 이내`].filter(Boolean).join(", ");
+  const when = c.when ? ` · 구간 ${Object.entries(c.when).map(([k, v]) => `${k}=${v.join("/")}`).join(", ")}` : "";
+  return `${c.type === "param" ? c.path : c.metric} ${bounds}${when}`;
 }
 
 const fmtDelta = (d: number, f: MetricSpec["format"]) =>

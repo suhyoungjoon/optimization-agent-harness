@@ -329,6 +329,18 @@ export interface Constraint {
   id?: string;                        // 저장된 제약의 id (M15 후속)
 }
 
+export interface SavedConstraint {
+  id: string;
+  domain: string;
+  body: Constraint;
+  opinion: string | null;
+  origin: string | null;
+  params_version: number | null;
+  active: boolean;
+  created_at: number;
+  updated_at: number;
+}
+
 export interface Proposal {
   id: string;
   batch_id: string;
@@ -346,7 +358,8 @@ export interface ProposalBatch {
   report_id: string;
   status: "running" | "done" | "error";
   error?: string | null;
-  meta: { usage: Usage & { seconds?: number }; trials: number; params_version?: number; constraints?: Constraint[]; memory?: Memory | null } | null;
+  meta: { usage: Usage & { seconds?: number }; trials: number; params_version?: number; constraints?: Constraint[]; memory?: Memory | null;
+    saved_constraints?: string[] } | null;
   proposals: Proposal[];
   ranking?: Ranking | null;
 }
@@ -536,6 +549,8 @@ export interface AgentsLoop {
   constraints: Constraint[];
   stop_reason: string | null;
   decisions: LoopDecision[];
+  saved_loaded?: { id: string }[];
+  saved_skipped?: { id: string; error: string }[];
   report: {
     rounds: LoopRound[]; stop_reason: string; decisions: LoopDecision[]; constraints: Constraint[];
     remaining: { id: string; title: string }[]; cost_usd: number | null; seconds: number; lines: string[];

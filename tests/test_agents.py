@@ -243,6 +243,19 @@ def test_rehearsal_story_opinion_constraint_round_two_report(client, tmp_path):
     out = lines(snap, "report")
     assert out[0].startswith("1회차: 배정 성공률") and any(line.startswith("종료 이유: 개선 없음") for line in out)
 
+    # 확정한 제약은 저장되고, 새 실행이 불러와 처음부터 지킨다 (M15 후속)
+    saved = client.get("/constraints?domain=dispatch").json()
+    assert [c["body"] for c in saved] == [fixed] and saved[0]["opinion"] == "관할 밖 4km 초과 출동 불가"
+    nxt = run_until(client, start(client), lambda s: any(st["node"] == "proposal_agent" for st in s["steps"]))
+    assert any(line.startswith("저장된 제약 1개 불러옴") for line in lines(nxt, "prepare"))
+    assert nxt["loop"]["constraints"] == [fixed] and len(nxt["loop"]["saved_loaded"]) == 1
+    first = lines(nxt, "proposal_agent")
+    assert "입력에 넣은 것: 제약 1개" in first[1] and first[2].endswith("(제약 반영)")   # 첫 제안부터 제약을 지킨다
+    client.post(f"/constraints/{saved[0]['id']}/deactivate")
+    off = start(client)
+    off = step(client, off["id"])
+    assert off["loop"]["constraints"] == [] and client.get("/constraints?domain=dispatch").json() == []
+
     # 정리한 현장 의견은 색인에 남아 다음 실행의 검색 대상이 된다
     from core.retrieval import Index
     index = Index(next((tmp_path / "work").glob("demo-*")) / "retrieval.sqlite")
