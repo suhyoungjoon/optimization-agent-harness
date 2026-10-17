@@ -36,6 +36,7 @@ def simulate_params(pack_factory, instance, base_params: dict, candidate_params:
         "items": len(after),
         "before": base_pack.metrics(instance, before),
         "after": cand_pack.metrics(instance, after),
+        "violations_before": len(base_pack.validate(instance, before)),
         "violations_after": len(cand_pack.validate(instance, after)),
         "slices": {k: {"before": v, "after": _slice_rates(after, dims, {k: slices[k]})[k]}
                    for k, v in _slice_rates(before, dims, slices or {}).items()},

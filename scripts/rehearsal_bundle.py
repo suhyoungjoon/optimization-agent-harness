@@ -7,12 +7,17 @@ LLM 대신 가짜 LLM(tests/fake_llm.py)을 쓴다. 수치는 AI 성능과 무�
 - AI agent: 규칙 엔진의 결정을 그대로 제출하되, 세 건 중 한 건은 첫 제출을 가능시간 밖(05:00)으로 틀리게 낸다.
   검증 루프가 없는 L0에는 위반이 남고, L3·L5에서는 재시도로 교정된다. 범위는 1일차 앞 10건(화면의 "시범").
 - 분석 agent: P1·P2·P4 구간을 집계 도구로 짚고, 정답표에 없는 발견 하나를 더 낸다 (P3은 놓침, 사람 판정 대상 1건).
-- 개선 agent: 경계 지역 구간 조건(적용 가능), 허용 범위 밖 변경(검증 실패), 명세 수정(AI 전후 실행) 세 건을 제안한다.
+- 개선 agent: 경계 지역 구간 조건 5km(적용 가능, 최소 변경 추천 4km), 허용 범위 밖 변경(검증 실패),
+  명세 수정(AI 전후 실행) 세 건을 제안한다. 입력에 제약이 있으면 제약을 지키는 경계 지역 4km 한 건만 낸다.
+- 의견 정리 agent (M15-B): 의견 한 줄에서 "N km"를 읽어 지금 제안이 바꾸는 경로의 max 제약으로 낸다.
+  "경계"가 들어 있으면 구간 조건 when {area_zone: [boundary]}을 붙인다.
+  숫자가 없으면 한도 없는 제약을 내서 형식 검사에 걸린다 (사람에게 다시 묻는 흐름).
 실행에는 개발 의존성이 필요하다 (pip install -e ".[dev]").
 """
 
 import argparse
 import json
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -26,7 +31,9 @@ from tests.fake_llm import FakeLLM, submit, tool_use
 
 LEVELS = ("L0", "L3", "L5")
 SCOPE_SIZE = 10
-BOUNDARY_RULE = {"when": {"area_zone": ["boundary"]}, "set": {"matching.area_extension_km[2]": 4}}
+BOUNDARY_RULE = {"when": {"area_zone": ["boundary"]}, "set": {"matching.area_extension_km[2]": 5}}
+BOUNDARY_RULE_4KM = {"when": {"area_zone": ["boundary"]}, "set": {"matching.area_extension_km[2]": 4}}
+CONSTRAINTS_HEADER = "# 지켜야 할 제약"
 ANALYST_QUERIES = [
     ("aggregate", {"group_by": ["branch", "hour"], "filters": {"branch": ["B"], "hour": ["09", "10"]}}),
     ("aggregate", {"group_by": ["branch", "difficulty"], "filters": {"branch": ["C"], "difficulty": ["pole"]}}),
@@ -65,11 +72,29 @@ def _analyst(n, messages):
     ]})
 
 
-def _proposer(n):
+def _first_user_text(messages) -> str:
+    content = messages[0]["content"] if messages else ""
+    return content if isinstance(content, str) else ""
+
+
+def _proposer(n, messages, names=()):
+    if CONSTRAINTS_HEADER in _first_user_text(messages):   # 사람이 정한 제약(의견 정리 포함)을 지키는 안 한 건
+        search = "search_knowledge" in names                # 검색 도구가 있으면 규정을 먼저 찾아 인용한다 (M15-C)
+        if search and n == 0:
+            return tool_use("search_knowledge", {"query": "관할 밖 출동 거리 상한",
+                                                 "params": ["matching.area_extension_km[2]"], "kinds": ["regulation"]})
+        if n == (1 if search else 0):
+            return tool_use("simulate_params", {"override_rules": [BOUNDARY_RULE_4KM]})
+        return tool_use("submit_proposals", {"proposals": [
+            {"title": "경계 지역만 3단계 지역 범위 +1km (제약 반영)", "kind": "params", "target_findings": ["F3"],
+             "rationale": "현장 제약(관할 밖 출동 거리 한도)을 지키면서 경계 지역 실패를 줄인다"
+                          + (" (규정 DIST-01: 관할 밖 4km 이하, DIST-03: 경계 지역 먼저)" if search else ""),
+             "expected_effect": "경계 지역 할당 증가, 제약 위반 없음", "override_rules": [BOUNDARY_RULE_4KM],
+             **({"cited_docs": ["DIST-01", "DIST-03"]} if search else {})}]})
     if n == 0:
         return tool_use("simulate_params", {"override_rules": [BOUNDARY_RULE]})
     return tool_use("submit_proposals", {"proposals": [
-        {"title": "경계 지역만 3단계 지역 범위 +1km", "kind": "params", "target_findings": ["F3"],
+        {"title": "경계 지역만 3단계 지역 범위 +2km", "kind": "params", "target_findings": ["F3"],
          "rationale": "경계 지역 실패는 대부분 OUT_OF_AREA. 전역 완화 대신 경계 구간에만 적용한다",
          "expected_effect": "경계 지역 할당 증가, 다른 구간 영향 최소", "override_rules": [BOUNDARY_RULE]},
         {"title": "전역 3단계 지역 범위 대폭 완화", "kind": "params", "target_findings": ["F3"],
@@ -82,6 +107,22 @@ def _proposer(n):
     ]})
 
 
+def _opinion(messages):
+    """의견 한 줄 → 제약. "N km"가 있으면 지금 제안이 바꾸는 경로의 max, 없으면 한도 없는 제약 (형식 검사에 걸림)."""
+    text = _first_user_text(messages)
+    opinion = text.split("\n")[1] if "\n" in text else text
+    path = re.search(r"[a-z_]+\.[a-z_]+\[\d+\]", text)
+    km = re.search(r"(\d+(?:\.\d+)?)\s*km", opinion)
+    c = {"type": "param", "path": path.group(0) if path else "matching.area_extension_km[2]", "source": "현장 의견",
+         "note": opinion}
+    if km:
+        c["max"] = float(km.group(1)) if "." in km.group(1) else int(km.group(1))
+    if "경계" in opinion:          # 구간이 붙은 의견 (M15 후속): "경계 지역은 …"
+        c["when"] = {"area_zone": ["boundary"]}
+    return tool_use("submit_constraints", {"constraints": [c], "summary": "의견의 거리 한도를 제약으로" if km
+                                           else "의견에 숫자 한도가 없음"})
+
+
 def build_policy(pack, instance):
     rule = {d.item_id: d for d in pack.solve(instance, pack.params)}
     order = pack.items(instance)
@@ -91,7 +132,16 @@ def build_policy(pack, instance):
         if "submit_report" in names:
             return _analyst(n, messages)
         if "submit_proposals" in names:
-            return _proposer(n)
+            return _proposer(n, messages, names)
+        if "choose_next_step" in names:     # Supervisor (M15-D): 고정 규칙의 판정을 그대로 고른다
+            ask = json.loads(_first_user_text(messages))
+            return tool_use("choose_next_step", {"next": ask["rule_recommendation"],
+                                                 "reason": "리허설: 고정 규칙과 같은 판단 (" + ask["rule_reason"] + ")"})
+        if "submit_constraints" in names:
+            if "search_knowledge" in names and n == 0:     # 의견과 관련된 규정을 먼저 찾는다 (M15-C)
+                return tool_use("search_knowledge", {"query": _first_user_text(messages).split("\n")[1],
+                                                     "kinds": ["regulation"]})
+            return _opinion(messages)
         d = rule[item]
         if d.status != "success":
             return submit(item, reason=d.reason_code)

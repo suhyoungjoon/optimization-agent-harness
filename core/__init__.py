@@ -22,13 +22,18 @@ from core.improvement.proposer import finding_slices, propose
 from core.improvement.simulate import simulate_params
 from core.improvement.sweep import load_sweep_config, sensitivity, sweep_params
 from core.improvement.history import change_card, change_record
+from core.improvement.loop import allowed_steps, load_loop_config, loop_report, termination
+from core.improvement.ranking import load_ranking_config, metric_specs, minimal_change, rank_proposals
 from core.interfaces import DecisionRecord, DomainPack, ToolContext, TraceRecord, Violation
 from core.llm.azure_openai import AzureOpenAIClient
 from core.llm.client import AnthropicClient, LLMClient, LLMResponse, ResponseCache, Usage, load_config, make_client
+from core.llm.embeddings import AzureEmbedder, Embedder, load_embedding_config, make_embedder
 from core.llm.tool_loop import LoopResult, run_tool_loop, usage_dict
 from core.params import (KINDS, apply_overrides, check_params, get_path, kind_errors, param_kind, params_view,
                          parse_path, path_errors, set_path)
-from core.registry import list_domains, list_faults, load_faults, load_pack, load_params, load_perspectives
+from core.registry import knowledge_dir, list_domains, list_faults, load_faults, load_pack, load_params, load_perspectives
+from core.retrieval import (Chunk, Index, citation_errors, load_knowledge, open_index, parse_markdown, prepare,
+                            retrieval_meta, search_tool)
 from core.storage.store import Store, dataset_id, to_jsonable
 
 __all__ = [
@@ -38,12 +43,14 @@ __all__ = [
     "KINDS", "apply_overrides", "check_params", "get_path", "kind_errors", "param_kind", "params_view", "parse_path",
     "path_errors", "set_path",
     # 도메인 팩 로딩 (core.registry)
-    "list_domains", "list_faults", "load_faults", "load_pack", "load_params", "load_perspectives",
+    "knowledge_dir", "list_domains", "list_faults", "load_faults", "load_pack", "load_params", "load_perspectives",
     # 하네스 (core.harness)
     "CORE_REASON_CODES", "AbortRun", "HarnessRunner", "Level", "RunOutput", "Tracer", "get_level", "load_levels",
     # LLM (core.llm)
     "AnthropicClient", "AzureOpenAIClient", "LLMClient", "LLMResponse", "LoopResult", "ResponseCache", "Usage",
     "load_config", "make_client",
+    # 임베딩 (M15-C)
+    "AzureEmbedder", "Embedder", "load_embedding_config", "make_embedder",
     "run_tool_loop", "usage_dict",
     # 실행·비교·채점 (core.evaluation)
     "apply_labels", "compare", "consistency", "create_ai_run", "matches", "run_ai_agent", "run_rule_agent", "score",
@@ -57,6 +64,12 @@ __all__ = [
     "spec_errors", "spec_sections", "write_params", "write_spec",
     # 파라미터 가시화 (M13): 탐색·민감도, 변경 이력 카드
     "change_card", "change_record", "load_sweep_config", "sensitivity", "sweep_params",
+    # 개선안 제시 기준·개선 루프 (M15-A·B·D)
+    "load_ranking_config", "metric_specs", "minimal_change", "rank_proposals",
+    "allowed_steps", "load_loop_config", "loop_report", "termination",
+    # 문서 검색 (M15-C, core.retrieval)
+    "Chunk", "Index", "citation_errors", "load_knowledge", "open_index", "parse_markdown", "prepare", "retrieval_meta",
+    "search_tool",
     # 저장소 (core.storage)
     "Store", "dataset_id", "to_jsonable",
 ]

@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { DomainAdapter } from "../domains/types";
-import type { AgentEvent, AgentsGraph, AgentsRun, DomainInfo, HarnessInfo } from "../types";
+import type { AgentEvent, AgentsGraph, AgentsLoop, AgentsRun, Constraint, DomainInfo, HarnessInfo } from "../types";
+import type { MetricSpec } from "../domains/types";
+import { fmtMetric, fmtUsd } from "./MetricsPanel";
+import { constraintText } from "./ImprovementPanel";
 import { TERMS, tip } from "../terms";
 import GraphCanvas, { type NodeView } from "./GraphCanvas";
 import { usePoll } from "./usePoll";
-import { StepBar } from "./WorkflowPanel";
+import { StepBar, type StepAction } from "./WorkflowPanel";
 
 // LangGraph agents (M10, 가로 그래프 M11): 배정·분석·개선 제안 에이전트의 내부까지 LangGraph 하위 그래프로 만든 별도 탭.
 // 위 = 상위 그래프(에이전트 단위로 멈춤), 아래 = 고른 에이전트의 내부 그래프. 둘 다 왼쪽→오른쪽 그래프로 그리고,
@@ -16,6 +19,8 @@ const AGENT_NAMES: Record<string, string> = {
   dispatch_agent: "배정 에이전트",
   analysis_agent: "분석 에이전트",
   proposal_agent: "개선 제안 에이전트",
+  opinion_agent: "의견 정리 에이전트",
+  check_end: "종료 판정 Supervisor",
   simulate: "미리 돌려보기 (배정 에이전트 재실행)",
 };
 
@@ -37,6 +42,7 @@ export default function AgentsPanel({
   const [form, setForm] = useState({
     seed, faults: faults.length ? faults : domain.faults.map((f) => f.id), items: 10, level,
     llm: "fake" as "fake" | "claude", pace: 0.2, perspectives: false,
+    end_check: "fixed" as "fixed" | "supervisor", use_saved_constraints: true,
   });
   const [graph, setGraph] = useState<AgentsGraph | null>(null);
   const [flowId, setFlowId] = useState<string | null>(null);
@@ -52,10 +58,12 @@ export default function AgentsPanel({
   const runLevel = inFlight && run ? run.inputs.level ?? form.level : form.level;
   // 관점별 분석이면 분석 에이전트 그림이 "관점 노드들(병렬) → 합치기"로 바뀐다 (M12-b)
   const runPerspectives = inFlight && run ? !!run.inputs.perspectives : form.perspectives;
+  // 종료 판정: 고정 규칙 또는 Supervisor 에이전트 (M15-D). 실행 중에는 그 실행의 방식
+  const runEndCheck = inFlight && run ? run.end_check ?? "fixed" : form.end_check;
 
   useEffect(() => {
-    api.agentsGraph(runLevel, domain.name, runPerspectives).then(setGraph).catch((e) => setError(String(e)));
-  }, [runLevel, runPerspectives, domain.name]);
+    api.agentsGraph(runLevel, domain.name, runPerspectives, runEndCheck).then(setGraph).catch((e) => setError(String(e)));
+  }, [runLevel, runPerspectives, runEndCheck, domain.name]);
 
   const polled = usePoll<AgentsRun>(flowId ? () => api.agentsGet(flowId, lastI.current) : null,
     (r) => r.status !== "running", [flowId, tick], 300);
@@ -86,9 +94,9 @@ export default function AgentsPanel({
     setFlowId(r.id);
     setTick((t) => t + 1);
   });
-  const step = (action: "next" | "approve" | "reject") => guard(async () => {
+  const step = (action: StepAction, constraints?: Constraint[]) => guard(async () => {
     if (!flowId) return;
-    setRun(await api.agentsStep(flowId, action, note));
+    setRun(await api.agentsStep(flowId, action, note, constraints));
     setNote("");
     setTick((t) => t + 1);
   });
@@ -169,6 +177,19 @@ export default function AgentsPanel({
             onChange={(e) => { setForm({ ...form, perspectives: e.target.checked }); setPicked("analysis_agent"); }} />{" "}
           관점별 분석
         </label>
+        <label title="이전 실행에서 사람이 확정해 저장한 제약을 처음부터 씁니다 (개선 제안 탭의 저장된 제약에서 끄고 켭니다)">
+          <input type="checkbox" checked={form.use_saved_constraints} disabled={inFlight}
+            onChange={(e) => setForm({ ...form, use_saved_constraints: e.target.checked })} />{" "}
+          저장된 제약 불러오기
+        </label>
+        <label title="회차가 끝났을 때 다음 단계를 누가 고를지. Supervisor는 허용된 단계(다음 회차·다시 제안·결과 보고) 중에서만 고르고, 최대 회차는 코드가 막습니다">
+          종료 판정{" "}
+          <select value={form.end_check} disabled={inFlight}
+            onChange={(e) => { setForm({ ...form, end_check: e.target.value as "fixed" | "supervisor" }); setPicked("check_end"); }}>
+            <option value="fixed">고정 규칙</option>
+            <option value="supervisor">Supervisor 에이전트</option>
+          </select>
+        </label>
         <label title="내부 단계 사이 간격. 가짜 AI는 너무 빨라 눈으로 따라가기 어렵다">
           속도{" "}
           <select value={form.pace} onChange={(e) => setForm({ ...form, pace: Number(e.target.value) })}>
@@ -188,20 +209,28 @@ export default function AgentsPanel({
         {run && <span className="muted small">AI: {run.llm === "fake" ? "가짜 AI (수치는 AI 성능과 무관)" : "Claude API"}</span>}
       </div>
 
+      {run?.waiting === "approval" && run.approval?.kind === "confirm_constraints" ? (
+        <ConfirmConstraints key={run.steps.length} ask={run.approval} onConfirm={(cs) => step("confirm", cs)}
+          onRewrite={() => step("reject")} />
+      ) : (
       <StepBar run={run} nextLabel={run?.next[0] ? topLabel(run.next[0]) : null}
         currentLabel={run?.current ? topLabel(run.current) : null} note={note} setNote={setNote} onStep={step}
+        approval={run?.approval ?? null}
         idleText="입력을 고르고 [에이전트 준비]를 누르면 첫 단계 앞에서 멈춥니다. 에이전트 하나가 끝날 때마다 멈춥니다."
         doneText="그래프의 노드를 누르면 그 단계의 결과와 에이전트 내부를 다시 볼 수 있습니다." />
+      )}
 
       {graph && (
         <div className="panel gc-panel">
           <h2>상위 그래프 <span className="muted small">(StateGraph · 노드를 누르면 아래에 내부·결과)</span></h2>
           <GraphCanvas ariaLabel="상위 그래프" nodes={graph.top.nodes} edges={graph.top.edges} views={topViews}
             activeEdges={topActive} onNodeClick={(id) => !id.startsWith("__") && setPicked(picked === id ? null : id)}
-            height={230} nodeWidth={160} nodeHeight={74} minFitZoom={0.82} follow={towards ?? lastStep ?? "__start__"} />
+            height={320} nodeWidth={160} nodeHeight={74} minFitZoom={0.82} follow={towards ?? lastStep ?? "__start__"} />
           <Legend />
         </div>
       )}
+
+      {run?.loop && <LoopPanel loop={run.loop} specs={adapter.metrics} />}
 
       <AgentInside graph={graph} agent={shown} run={run} events={events} live={liveAgent === shown} />
 
@@ -323,6 +352,163 @@ function EventLog({ agent, events, live, graph }: { agent: string; events: Agent
           </li>
         ))}
       </ol>
+    </div>
+  );
+}
+
+const ACTION_LABEL = { approve: "승인", reject: "반려", opinion: "의견" } as const;
+
+// 개선 루프 (M15-B): 지금 회차, 회차별 핵심 지표 전→후, 쓴 제약, 끝나면 결과 보고
+function LoopPanel({ loop, specs }: { loop: AgentsLoop; specs: MetricSpec[] }) {
+  const primary = specs.filter((s) => s.primary);
+  const rounds = loop.report?.rounds ?? loop.rounds;
+  const cons = loop.report?.constraints ?? loop.constraints;
+  if (!loop.round && !rounds.length) return null;
+  return (
+    <div className="panel loop-panel">
+      <h2>
+        개선 루프{" "}
+        <span className="muted small">
+          {loop.report ? `끝 · ${loop.report.stop_reason}` : `${loop.round ?? 1}회차 진행 중`}
+          {!loop.report && loop.decisions.length > 0 && ` · 이번 회차 결정 ${loop.decisions.map((d) => ACTION_LABEL[d.action]).join("·")}`}
+        </span>
+      </h2>
+      {rounds.length > 0 && (
+        <div className="table-scroll">
+          <table className="compare-table-inner">
+            <thead>
+              <tr>
+                <th>회차</th>
+                {primary.map((s) => <th key={s.key} className="num">{s.label} 전 → 후</th>)}
+                <th>승인·반려·의견</th><th className="num">AI 비용</th><th className="num">시간</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rounds.map((r) => (
+                <tr key={r.round}>
+                  <td>{r.round}회차{r.params_version_after !== r.params_version_before && <span className="muted small"> (규칙 v{r.params_version_before}→v{r.params_version_after})</span>}</td>
+                  {primary.map((s) => (
+                    <td key={s.key} className="num">{fmtMetric(r.before[s.key], s.format)} → <strong>{fmtMetric(r.after[s.key], s.format)}</strong></td>
+                  ))}
+                  <td className="small">
+                    {r.decisions.map((d, i) => (
+                      <div key={i}><span className={d.action === "approve" ? "good-text" : d.action === "opinion" ? "warning-text" : "muted"}>{ACTION_LABEL[d.action]}</span> {d.title}{d.note && <span className="muted"> — {d.note}</span>}</div>
+                    ))}
+                    {!r.decisions.length && <span className="muted">결정 없음</span>}
+                  </td>
+                  <td className="num">{fmtUsd(r.cost_usd)}</td>
+                  <td className="num">{r.seconds.toFixed(1)}초</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {cons.length > 0 && (
+        <p className="small">쓴 제약: {cons.map((c, i) => (
+          <span key={i} className="chip">{constraintText(c)} <span className="muted">({c.source})</span></span>
+        ))}
+          {!!loop.saved_loaded?.length && <span className="muted"> · 그중 저장된 제약에서 불러온 것 {loop.saved_loaded.length}개</span>}
+          {!!loop.saved_skipped?.length && <span className="warning-text"> · 지금 규칙과 맞지 않아 뺀 저장 제약 {loop.saved_skipped.length}개</span>}
+        </p>
+      )}
+      {loop.report && (
+        <div className="small">
+          <strong>결과 보고</strong>
+          <ul>
+            {loop.report.lines.map((l) => <li key={l}>{l}</li>)}
+            <li>종료 이유: {loop.report.stop_reason}</li>
+            <li>남은 문제: {loop.report.remaining.length ? loop.report.remaining.map((f) => `${f.id} ${f.title}`).join(", ") : "없음"}</li>
+            <li>AI 비용 합 {fmtUsd(loop.report.cost_usd)} · 시간 합 {loop.report.seconds.toFixed(1)}초</li>
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const BOUND_KEYS = { param: ["min", "max"], metric: ["min", "max", "max_drop", "max_rise"] } as const;
+const BOUND_LABEL: Record<string, string> = { min: "최소", max: "최대", max_drop: "감소 한도", max_rise: "증가 한도" };
+
+function whenText(w?: Record<string, string[]>) {
+  return w ? Object.entries(w).map(([k, v]) => `${k}=${v.join(",")}`).join("; ") : "";
+}
+
+function parseWhen(text: string): Record<string, string[]> | undefined | null {
+  const t = text.trim();
+  if (!t) return undefined;
+  const out: Record<string, string[]> = {};
+  for (const part of t.split(";").map((x) => x.trim()).filter(Boolean)) {
+    const m = /^([\w]+)\s*=\s*(.+)$/.exec(part);
+    if (!m) return null;
+    out[m[1]] = m[2].split(",").map((x) => x.trim()).filter(Boolean);
+  }
+  return out;
+}
+
+// 제약 확인 (M15 후속): 의견 정리 에이전트가 만든 제약을 사람이 확정 · 고쳐서 확정 · 다시 적기
+function ConfirmConstraints({ ask, onConfirm, onRewrite }: {
+  ask: NonNullable<AgentsRun["approval"]>;
+  onConfirm: (cs: Constraint[]) => void;
+  onRewrite: () => void;
+}) {
+  const [rows, setRows] = useState(() => (ask.constraints ?? []).map((c) => ({
+    c, keep: true, when: whenText(c.when),
+    bounds: Object.fromEntries(BOUND_KEYS[c.type].map((k) => [k, c[k] != null ? String(c[k]) : ""])) as Record<string, string>,
+  })));
+  const [err, setErr] = useState<string | null>(null);
+  const confirm = () => {
+    const out: Constraint[] = [];
+    for (const r of rows.filter((x) => x.keep)) {
+      const { min: _a, max: _b, max_drop: _c, max_rise: _d, when: _w, ...base } = r.c;   // eslint-disable-line @typescript-eslint/no-unused-vars
+      const next: Constraint = { ...base };
+      for (const [k, v] of Object.entries(r.bounds)) {
+        if (v.trim() === "") continue;
+        const n = Number(v);
+        (next as unknown as Record<string, unknown>)[k] = Number.isFinite(n) ? n : v;   // 숫자가 아니면 그대로 보내 서버가 형식 오류로 돌려준다
+      }
+      if (r.c.type === "param") {
+        const w = parseWhen(r.when);
+        if (w === null) { setErr(`구간 형식: "차원=값1,값2; 차원=값" (${r.when})`); return; }
+        if (w) next.when = w;
+      }
+      out.push(next);
+    }
+    setErr(null);
+    onConfirm(out);
+  };
+  return (
+    <div className="verdict wf-bar wf-review confirm-constraints" role="status">
+      <span><strong>제약 확인</strong>{ask.round ? ` · ${ask.round}회차` : ""} · 의견 “{ask.opinion}” → 제약 {ask.constraints?.length ?? 0}개</span>
+      <span className="muted small">AI가 정리한 제약입니다. 맞으면 확정, 숫자·구간을 고쳐서 확정, 뜻이 다르면 다시 적기. 확정한 제약만 다음 제안에 쓰입니다.</span>
+      {ask.error && <span className="warning-text small">⚠ 고친 제약이 형식에 맞지 않습니다: {ask.error}</span>}
+      {err && <span className="warning-text small">⚠ {err}</span>}
+      <table className="compare-table-inner small">
+        <thead><tr><th>쓰기</th><th>대상</th><th>한도</th><th>구간 (파라미터만)</th></tr></thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}>
+              <td><input type="checkbox" checked={r.keep} aria-label="이 제약 쓰기"
+                onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, keep: e.target.checked } : x)))} /></td>
+              <td><code>{r.c.type === "param" ? r.c.path : r.c.metric}</code></td>
+              <td>
+                {BOUND_KEYS[r.c.type].map((k) => (
+                  <label key={k} className="bound">{BOUND_LABEL[k]}{" "}
+                    <input value={r.bounds[k]} size={6} aria-label={BOUND_LABEL[k]}
+                      onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, bounds: { ...x.bounds, [k]: e.target.value } } : x)))} />
+                  </label>
+                ))}
+              </td>
+              <td>{r.c.type === "param"
+                ? <input value={r.when} placeholder="예: area_zone=boundary" aria-label="구간"
+                    onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, when: e.target.value } : x)))} />
+                : <span className="muted">–</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button className="primary" onClick={confirm}>확정</button>
+      <button onClick={onRewrite} title="정리된 제약을 버리고 사람 검토로 돌아가 의견을 다시 적습니다">다시 적기</button>
     </div>
   );
 }

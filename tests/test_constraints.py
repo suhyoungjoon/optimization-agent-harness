@@ -86,3 +86,31 @@ def test_metric_violations():
 def test_constraints_are_public():
     import core
     assert core.constraint_errors is constraint_errors and core.constraint_violations is constraint_violations
+
+
+# --- 구간 조건 when (M15 후속) ------------------------------------------------------------------
+
+DIMS = load_pack("dispatch").dimensions()
+BOUNDARY_AREA = {**AREA, "when": {"area_zone": ["boundary"]}}
+
+
+def rule(zone, km):
+    return {"override_rules": [{"when": {"area_zone": [zone]}, "set": {"matching.area_extension_km[2]": km}}]}
+
+
+def test_when_is_checked_against_declared_dimensions(params):
+    assert constraint_errors([BOUNDARY_AREA], params, METRICS, DIMS) == []
+    assert "선언되지 않은 차원" in constraint_errors([{**AREA, "when": {"nope": ["x"]}}], params, METRICS, DIMS)[0]
+    assert "선언되지 않은 값" in constraint_errors([{**AREA, "when": {"area_zone": ["x"]}}], params, METRICS, DIMS)[0]
+    assert "형식" in constraint_errors([{**AREA, "when": {}}], params, METRICS, DIMS)[0]
+    assert "문자열 목록" in constraint_errors([{**AREA, "when": {"area_zone": "boundary"}}], params, METRICS, DIMS)[0]
+    assert "파라미터 제약에만" in constraint_errors([{**ON_TIME, "when": {"area_zone": ["core"]}}], params, METRICS, DIMS)[0]
+
+
+def test_slice_constraint_only_sees_values_in_effect_for_that_slice(params):
+    assert constraint_violations([BOUNDARY_AREA], apply_params(params, rule("core", 5))) == []      # 다른 구간
+    hit = constraint_violations([BOUNDARY_AREA], apply_params(params, rule("boundary", 5)))
+    assert len(hit) == 1 and "구간 area_zone=boundary" in hit[0]["message"]
+    glob = apply_params(params, {"params_changes": [{"path": "matching.area_extension_km[2]", "value": 5}]})
+    assert "(전역)" in constraint_violations([BOUNDARY_AREA], glob)[0]["message"]                 # 전역 값은 모든 구간에
+    assert len(constraint_violations([AREA], apply_params(params, rule("core", 5)))) == 1          # when 없으면 모든 규칙

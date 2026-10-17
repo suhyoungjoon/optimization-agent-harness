@@ -62,7 +62,7 @@ export default function WorkflowPanel({
       setError(e instanceof Error ? e.message : String(e));
     }
   };
-  const step = async (action: "next" | "approve" | "reject") => {
+  const step = async (action: StepAction) => {
     if (!flowId) return;
     setError(null);
     try {
@@ -202,6 +202,8 @@ g.add_edge("review_agent", "simulate")`}</pre>
   );
 }
 
+export type StepAction = "next" | "approve" | "reject" | "opinion" | "confirm";
+
 export function StepBar({
   run,
   nextLabel,
@@ -211,15 +213,19 @@ export function StepBar({
   onStep,
   idleText = "입력을 고르고 [워크플로우 준비]를 누르면 첫 단계 앞에서 멈춥니다.",
   doneText = "결과는 각 단계의 [탭에서 보기]로 자세히 봅니다.",
+  approval,
 }: {
   run: Pick<WorkflowRun, "status" | "steps" | "waiting" | "error" | "current"> | null;   // M9·M10 공통
   nextLabel: string | null;
   currentLabel: string | null;
   note: string;
   setNote: (s: string) => void;
-  onStep: (action: "next" | "approve" | "reject") => void;
+  onStep: (action: StepAction) => void;
   idleText?: string;
   doneText?: string;
+  // agents 탭 (M15-B): 회차·순위·최소 변경 추천과 의견 입력. 없으면 승인·반려만
+  approval?: { title: string; round?: number; rank?: number | null; reasons?: string[]; opinion_error?: string;
+    minimal_change?: { path: string; current: number; recommended: number; proposed: number } | null } | null;
 }) {
   if (!run) {
     return <div className="verdict wf-bar"><span className="muted">{idleText}</span></div>;
@@ -232,6 +238,26 @@ export function StepBar({
   }
   if (run.waiting === "approval") {
     const sim = [...run.steps].reverse().find((s) => s.node === "simulate");
+    if (approval) {
+      const mc = approval.minimal_change;
+      return (
+        <div className="verdict wf-bar wf-review" role="status">
+          <span>
+            <strong>사람 검토</strong>{approval.round ? ` · ${approval.round}회차` : ""}
+            {approval.rank ? ` · ${approval.rank}순위` : ""} · {approval.title}
+          </span>
+          {!!approval.reasons?.length && <span className="muted small">순위 이유: {approval.reasons.join(" · ")}</span>}
+          {mc && <span className="better small">최소 변경 추천: <code>{mc.path}</code> {mc.current} → <strong>{mc.recommended}</strong> (제안값 {mc.proposed}일 때와 핵심 지표 같음)</span>}
+          {approval.opinion_error && <span className="warning-text small">⚠ 의견을 제약으로 정리하지 못했습니다: {approval.opinion_error}. 한도(숫자)를 넣어 다시 적어 주세요.</span>}
+          <input className="note" value={note} onChange={(e) => setNote(e.target.value)}
+            placeholder="메모 또는 의견 한 줄 (예: 관할 밖 4km 초과 출동 불가)" aria-label="메모 또는 의견" />
+          <button className="primary" onClick={() => onStep("approve")}>승인</button>
+          <button onClick={() => onStep("reject")}>반려</button>
+          <button onClick={() => onStep("opinion")} disabled={!note.trim()}
+            title="한 줄 의견을 의견 정리 에이전트가 제약 형식으로 바꾸고, 그 제약으로 다시 제안받습니다">의견 보내기</button>
+        </div>
+      );
+    }
     return (
       <div className="verdict wf-bar" role="status">
         <span><strong>사람 승인</strong> · {sim?.lines[0]}</span>

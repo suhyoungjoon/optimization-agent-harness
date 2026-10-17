@@ -63,3 +63,21 @@ def test_to_jsonable_handles_tuples_and_dataclasses():
     from core.interfaces import Violation
     assert to_jsonable({"a": (1, 2), "v": Violation("x", "r", "m")}) == \
         {"a": [1, 2], "v": {"item_id": "x", "rule": "r", "message": "m"}}
+
+
+def test_saved_constraints_dedupe_toggle_and_filter(tmp_path):
+    """저장된 제약 (M15 후속): 같은 한도는 하나, 끄고 켜기, 도메인별."""
+    from core.storage.store import Store
+
+    store = Store(tmp_path / "c.db")
+    c = {"type": "param", "path": "m.k[2]", "max": 4, "when": {"z": ["b"]}, "source": "현장 의견", "note": "원문"}
+    a = store.save_constraint("d1", c, "경계는 4km까지", "agents", 1)
+    b = store.save_constraint("d1", {**c, "note": "다른 말"}, "다시", "agents", 2)    # 한도가 같으면 같은 행
+    assert a["id"] == b["id"] and b["opinion"] == "다시" and b["params_version"] == 2
+    store.save_constraint("d1", {**c, "max": 3}, "", "api")
+    store.save_constraint("d2", c, "", "api")
+    assert [x["body"]["max"] for x in store.list_constraints("d1")] == [4, 3]
+    store.set_constraint_active(a["id"], False)
+    assert [x["body"]["max"] for x in store.list_constraints("d1")] == [3]
+    assert len(store.list_constraints("d1", active_only=False)) == 2
+    assert store.save_constraint("d1", c)["active"] is True                         # 다시 확정하면 켜진다

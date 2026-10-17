@@ -63,3 +63,13 @@ azure:
   # 단가 (USD / 100만 토큰). 모르면 비워 둔다: 비용은 "미확인"으로 표시하고 토큰 수만 기록한다
   pricing_per_mtok: {}
   cache_multipliers: {write: 1.0, read: 0.5}       # 입력 단가 대비. 단가를 채울 때 모델별 캐시 할인율도 확인한다
+
+# 임베딩 (M15-C, 검색 도구의 벡터 검색). Anthropic에는 임베딩이 없어 제공사를 따로 정한다.
+#   provider: auto(LLM 제공사가 azure_openai면 azure_openai, 아니면 none) | azure_openai | none
+#   none이면 검색은 키워드(BM25)만 쓴다. 환경변수 EMBEDDING_PROVIDER, EMBEDDING_MODEL이 우선
+#   azure_openai는 위 azure 섹션의 endpoint·api_version·키를 그대로 쓴다. deployment가 비어 있으면 모델 이름
+embedding:
+  provider: auto
+  model: text-embedding-3-small
+  deployment: null
+  batch_size: 64

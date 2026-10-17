@@ -328,3 +328,86 @@ def test_stored_non_policy_proposal_is_rechecked_on_simulate_and_forced_approve(
     forced = client.post(f"/proposals/{ok['id']}/approve", json={"force": True, "note": "강제"})
     assert forced.status_code == 400 and "추정값" in forced.json()["detail"]
     assert params_path.read_text(encoding="utf-8") == before                    # 규칙 파일은 그대로
+
+
+def test_batch_ranking_and_minimal_change(client):
+    """제시 기준 (M15-A): 묶음 조회에 순위가 붙고, 숫자 하나 바꾸는 안은 시뮬레이션 결과에 최소 변경 추천이 붙는다."""
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    report = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    batch = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id']}).json()['id']}")
+    ok, too_far, spec = batch["proposals"]
+    r = batch["ranking"]
+    assert r["entries"][too_far["id"]]["tier"] == "reference" and r["entries"][ok["id"]]["tier"] == "pending"
+    sim = client.post(f"/proposals/{ok['id']}/simulate", json={}).json()["simulation"]
+    assert sim["violations_before"] == 0 and sim["minimal_change"] is None     # 3km → 4km: 더 작은 값 없음
+    r = client.get(f"/proposals/batches/{batch['id']}").json()["ranking"]
+    assert r["entries"][ok["id"]]["tier"] == "main" and r["entries"][ok["id"]]["rank"] == 1
+    assert r["order"][0] == ok["id"] and r["config"]["max_proposals"] == 3
+
+
+def test_proposals_search_regulations_and_citations_are_checked(tmp_path, files):
+    """M15-C: 개선 에이전트가 search_knowledge로 규정을 찾아 인용한다. 받지 않은 조각 인용은 적용 불가.
+    묶음 메타데이터에 쓴 조각 id·해시와 검색 방식이 남는다. 승인·반려한 안은 다음 분석의 사례 검색 대상이 된다."""
+    def policy(item, n, messages, tools):
+        names = {t["name"] for t in tools}
+        if "submit_report" in names:
+            if "search_knowledge" in names and n == 0:      # 두 번째 분석: 과거 사례 검색이 붙어 있다
+                return tool_use("search_knowledge", {"query": "경계 지역 출동 거리", "kinds": ["case"]})
+            if "search_knowledge" in names:                 # 검색 왕복을 빼고 기존 가짜 분석가에게
+                return analyst_or_proposer(item, n - 1, [messages[0]] + messages[3:], tools)
+            return analyst_or_proposer(item, n, messages, tools)
+        assert "search_knowledge" in names
+        if n == 0:
+            return tool_use("search_knowledge", {"query": "관할 밖 출동 거리 상한", "params": ["matching.area_extension_km[2]"]})
+        return tool_use("submit_proposals", {"proposals": [
+            {"title": "경계 4km", "kind": "params", "rationale": "DIST-01 한도 안", "target_findings": ["F1"],
+             "override_rules": [BOUNDARY_RULE], "cited_docs": ["DIST-01"]},
+            {"title": "근거 지어냄", "kind": "params", "rationale": "x", "target_findings": ["F1"],
+             "override_rules": [BOUNDARY_RULE], "cited_docs": ["DIST-99"]}]})
+
+    client = TestClient(create_app(tmp_path / "h.db", serve_web=False, llm_factory=lambda: FakeLLM(policy)))
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    report = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    assert "retrieval" not in report["body"]                          # 사례가 없으면 분석에는 검색을 붙이지 않는다
+    batch = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id']}).json()['id']}")
+    ok, made_up = batch["proposals"]
+    assert ok["status"] == "proposed" and made_up["status"] == "invalid"
+    assert any("DIST-99" in e for e in made_up["errors"])
+    meta = batch["meta"]["retrieval"]
+    assert meta["mode"] == "keyword" and meta["embedding_model"] is None and meta["cited"] == ["DIST-01", "DIST-99"]
+    assert "DIST-01" in {c["id"] for c in meta["chunks"]} and all(c["hash"] for c in meta["chunks"])
+
+    client.post(f"/proposals/{ok['id']}/simulate", json={})
+    client.post(f"/proposals/{ok['id']}/reject", json={"note": "현장 협의 필요"})
+    report2 = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    assert report2["status"] == "done", report2.get("error")
+    used = report2["body"]["retrieval"]["chunks"]
+    assert [c["id"] for c in used] == [f"case-{ok['id'][-8:]}"]
+
+    off = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id'], 'use_knowledge': False}).json()['id']}")
+    assert off["status"] == "error" and "AssertionError" in off["error"]   # use_knowledge=false면 검색 도구가 없다
+
+
+def test_saved_constraints_join_proposal_requests(client, tmp_path):
+    """저장된 제약 (M15 후속): 켜진 제약은 개선안 요청의 제약에 더해지고, 쓴 id가 묶음에 남는다. 끄면 빠진다."""
+    from core.storage.store import Store
+
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": ["P4"]}).json()
+    run = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    report = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': run['run_id']}).json()['id']}")
+    saved_c = {**AREA_LIMIT, "max": 3, "when": {"area_zone": ["boundary"]}}
+    db = Store(tmp_path / "h.db")                                   # 앱과 같은 DB 파일 (agents 탭이 확정하면 여기에 쌓인다)
+    row = db.save_constraint("dispatch", saved_c, "경계는 3km", "test", 1)
+    batch = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id']}).json()['id']}")
+    assert batch["meta"]["constraints"] == [saved_c] and batch["meta"]["saved_constraints"] == [row["id"]]
+    sim = client.post(f"/proposals/{batch['proposals'][0]['id']}/simulate", json={}).json()["simulation"]
+    assert "구간 area_zone=boundary" in sim["constraint_violations"][0]["message"]       # 경계 4km > 3km
+    # 요청에 같은 한도가 있으면 중복하지 않는다
+    batch = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id'], 'constraints': [saved_c]}).json()['id']}")
+    assert batch["meta"]["constraints"] == [saved_c] and "saved_constraints" not in batch["meta"]
+    client.post(f"/constraints/{row['id']}/deactivate")
+    batch = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': report['id']}).json()['id']}")
+    assert "constraints" not in (batch["meta"] or {})
+    assert client.get("/constraints?domain=dispatch&all=true").json()[0]["active"] is False

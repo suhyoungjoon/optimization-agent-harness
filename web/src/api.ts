@@ -1,6 +1,6 @@
 import type {
   CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DomainDefinition, DecisionRecord, DomainInfo, FindingLabel, HarnessInfo, Memory, HistoryRow, Proposal, ProposalBatch, Report, Run,
-  SpecEstimate, TraceRecord, WorkflowGraph, WorkflowRun, AgentsGraph, AgentsRun, SweepAxis, SweepResult, Sensitivity, ChangeCard,
+  SpecEstimate, TraceRecord, WorkflowGraph, WorkflowRun, AgentsGraph, AgentsRun, SweepAxis, SweepResult, Sensitivity, ChangeCard, SavedConstraint,
 } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -24,18 +24,20 @@ export interface RunOptions {
 }
 
 export const api = {
-  agentsGraph: (level: string, domain?: string, perspectives = false) =>
-    request<AgentsGraph>(`/agents/graph?level=${level}` + (perspectives && domain ? `&domain=${domain}&perspectives=true` : "")),
+  agentsGraph: (level: string, domain?: string, perspectives = false, endCheck?: "fixed" | "supervisor") =>
+    request<AgentsGraph>(`/agents/graph?level=${level}` + (perspectives && domain ? `&domain=${domain}&perspectives=true` : "")
+      + (endCheck ? `&end_check=${endCheck}` : "")),
   agentsStart: (body: { domain: string; seed: number; faults: string[]; items: number; level: string; metrics: unknown[];
-    llm: "fake" | "claude"; pace: number; perspectives?: boolean }) => request<AgentsRun>("/agents/runs", { method: "POST", body: JSON.stringify(body) }),
+    llm: "fake" | "claude"; pace: number; perspectives?: boolean; end_check?: "fixed" | "supervisor";
+    use_saved_constraints?: boolean }) => request<AgentsRun>("/agents/runs", { method: "POST", body: JSON.stringify(body) }),
   agentsGet: (id: string, after = -1) => request<AgentsRun>(`/agents/runs/${id}?after=${after}`),
-  agentsStep: (id: string, action: "next" | "approve" | "reject", note = "") =>
-    request<AgentsRun>(`/agents/runs/${id}/step`, { method: "POST", body: JSON.stringify({ action, note }) }),
+  agentsStep: (id: string, action: "next" | "approve" | "reject" | "opinion" | "confirm", note = "", constraints?: unknown[]) =>
+    request<AgentsRun>(`/agents/runs/${id}/step`, { method: "POST", body: JSON.stringify({ action, note, constraints }) }),
   workflowGraph: () => request<WorkflowGraph>("/workflow/graph"),
   workflowStart: (body: { domain: string; seed: number; faults: string[]; items: number; level: string; metrics: unknown[] }) =>
     request<WorkflowRun>("/workflow/runs", { method: "POST", body: JSON.stringify(body) }),
   workflowGet: (id: string) => request<WorkflowRun>(`/workflow/runs/${id}`),
-  workflowStep: (id: string, action: "next" | "approve" | "reject", note = "") =>
+  workflowStep: (id: string, action: "next" | "approve" | "reject" | "opinion" | "confirm", note = "") =>
     request<WorkflowRun>(`/workflow/runs/${id}/step`, { method: "POST", body: JSON.stringify({ action, note }) }),
   domains: () => request<DomainInfo[]>("/domains"),
   harness: () => request<HarnessInfo>("/harness/levels"),
@@ -96,6 +98,11 @@ export const api = {
   sensitivity: (datasetId: string) => request<Sensitivity>(`/params/sensitivity?dataset_id=${encodeURIComponent(datasetId)}`),
   paramsHistory: (domain: string) => request<ChangeCard[]>(`/params/history?domain=${encodeURIComponent(domain)}`),
   memory: (domain: string) => request<Memory>(`/memory?domain=${encodeURIComponent(domain)}`),
+  // 저장된 제약 (M15 후속): 사람이 확정한 제약. 켜진 것은 다음 개선안 요청·agents 탭 실행이 불러온다
+  savedConstraints: (domain: string, all = false) =>
+    request<SavedConstraint[]>(`/constraints?domain=${encodeURIComponent(domain)}${all ? "&all=true" : ""}`),
+  toggleConstraint: (id: string, on: boolean) =>
+    request<SavedConstraint>(`/constraints/${id}/${on ? "activate" : "deactivate"}`, { method: "POST" }),
 
   // 진행 상황 SSE. 닫는 함수를 돌려준다.
   stream: (runId: string, onEvent: (e: { status: string; done?: number; total?: number }) => void) => {

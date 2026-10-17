@@ -1,6 +1,7 @@
 """실행 결과 저장 (SQLite). 데이터셋은 (도메인, seed, 결함)만 저장하고 인스턴스는 재생성한다."""
 
 import dataclasses
+import hashlib
 import json
 import sqlite3
 import threading
@@ -83,6 +84,17 @@ CREATE TABLE IF NOT EXISTS proposals (
     errors TEXT NOT NULL,
     simulation TEXT,
     decision TEXT,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS saved_constraints (  -- 사람이 확정한 제약 (M15 후속). 다음 실행·개선안 요청이 불러온다
+    id TEXT PRIMARY KEY,           -- 한도 내용(종류·대상·한도·구간)의 해시: 같은 한도는 하나
+    domain TEXT NOT NULL,
+    body TEXT NOT NULL,            -- 제약 (core.improvement.constraints 형식)
+    opinion TEXT,                  -- 의견 원문
+    origin TEXT,                   -- 어디서 확정했는가 (agents 탭 실행 등)
+    params_version INTEGER,
+    active INTEGER NOT NULL DEFAULT 1,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
@@ -322,6 +334,52 @@ class Store:
                 "SELECT id FROM proposals WHERE status IN ('approved', 'rejected') ORDER BY updated_at")]
         return [self.get_proposal(i) for i in ids]
 
+
+    # --- 저장된 제약 (M15 후속) ---
+    @staticmethod
+    def constraint_id(domain: str, constraint: dict) -> str:
+        key = {k: constraint.get(k) for k in ("type", "path", "metric", "min", "max", "max_drop", "max_rise", "when")
+               if constraint.get(k) is not None}
+        digest = hashlib.sha256(json.dumps([domain, key], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        return f"con-{digest[:10]}"
+
+    def save_constraint(self, domain: str, constraint: dict, opinion: str = "", origin: str = "",
+                        params_version: int | None = None) -> dict:
+        """같은 한도가 있으면 다시 켜고 의견·출처를 새로 쓴다 (하나만 남긴다)."""
+        cid, now = self.constraint_id(domain, constraint), time.time()
+        with self.lock:
+            exists = self.conn.execute("SELECT id FROM saved_constraints WHERE id = ?", (cid,)).fetchone()
+            if exists:
+                self.conn.execute("UPDATE saved_constraints SET body = ?, opinion = ?, origin = ?, params_version = ?,"
+                                  " active = 1, updated_at = ? WHERE id = ?",
+                                  (json.dumps(constraint, ensure_ascii=False), opinion, origin, params_version, now, cid))
+            else:
+                self.conn.execute("INSERT INTO saved_constraints VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                                  (cid, domain, json.dumps(constraint, ensure_ascii=False), opinion, origin,
+                                   params_version, now, now))
+            self.conn.commit()
+        return self.get_constraint(cid)
+
+    def get_constraint(self, cid: str) -> dict | None:
+        with self.lock:
+            row = self.conn.execute("SELECT * FROM saved_constraints WHERE id = ?", (cid,)).fetchone()
+        if row is None:
+            return None
+        return {**dict(row), "body": json.loads(row["body"]), "active": bool(row["active"])}
+
+    def list_constraints(self, domain: str, active_only: bool = True) -> list[dict]:
+        with self.lock:
+            ids = [r["id"] for r in self.conn.execute(
+                "SELECT id FROM saved_constraints WHERE domain = ?" + (" AND active = 1" if active_only else "")
+                + " ORDER BY created_at, id", (domain,))]
+        return [self.get_constraint(i) for i in ids]
+
+    def set_constraint_active(self, cid: str, active: bool) -> dict | None:
+        with self.lock:
+            self.conn.execute("UPDATE saved_constraints SET active = ?, updated_at = ? WHERE id = ?",
+                              (int(active), time.time(), cid))
+            self.conn.commit()
+        return self.get_constraint(cid)
 
     # --- 장기 기억(M12-c)용 조회: 사람이 내린 판단 ---
     def rejected_proposals(self, domain: str) -> list[dict]:

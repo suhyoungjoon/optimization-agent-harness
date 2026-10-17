@@ -300,6 +300,18 @@ export interface Simulation {
   run_ids?: Record<string, string>;
   error?: string;
   constraint_violations?: { index: number; type: "param" | "metric"; message: string }[];
+  // 최소 변경 추천 (M15-A): 같은 핵심 지표를 내는 가장 작은 변경. 숫자 하나 바꾸는 안만
+  minimal_change?: { path: string; current: number; proposed: number; recommended: number; same_primary: boolean;
+    metrics: Record<string, number>; violations_after: number } | null;
+}
+
+// 개선안 제시 기준 (M15-A): main 본안(순위) · cut 개수 초과 · reference 참고 · hidden 지배당함 · pending 아직
+export type RankTier = "main" | "cut" | "reference" | "hidden" | "pending";
+export interface Ranking {
+  order: string[];
+  entries: Record<string, { tier: RankTier; rank: number | null; gain: number | null; loss: number | null; worse: string[]; reasons: string[] }>;
+  cut: string[];
+  config: { max_proposals: number; per_finding: number; min_effect: number };
 }
 
 // 사람이 정한 한도 (M12-a). 입력 화면은 이 레포에 없고 API로 받는다
@@ -311,8 +323,22 @@ export interface Constraint {
   max?: number;
   max_drop?: number;
   max_rise?: number;
+  when?: Record<string, string[]>;   // 구간 조건 (파라미터 제약만, M15 후속)
   source: string;
   note?: string;
+  id?: string;                        // 저장된 제약의 id (M15 후속)
+}
+
+export interface SavedConstraint {
+  id: string;
+  domain: string;
+  body: Constraint;
+  opinion: string | null;
+  origin: string | null;
+  params_version: number | null;
+  active: boolean;
+  created_at: number;
+  updated_at: number;
 }
 
 export interface Proposal {
@@ -332,8 +358,10 @@ export interface ProposalBatch {
   report_id: string;
   status: "running" | "done" | "error";
   error?: string | null;
-  meta: { usage: Usage & { seconds?: number }; trials: number; params_version?: number; constraints?: Constraint[]; memory?: Memory | null } | null;
+  meta: { usage: Usage & { seconds?: number }; trials: number; params_version?: number; constraints?: Constraint[]; memory?: Memory | null;
+    saved_constraints?: string[] } | null;
   proposals: Proposal[];
+  ranking?: Ranking | null;
 }
 
 export interface SpecEstimate {
@@ -473,6 +501,7 @@ export interface AgentsGraph {
   demo?: boolean;
   level?: string;
   perspectives?: boolean;
+  end_check?: "fixed" | "supervisor";
   top: { nodes: (WorkflowNode & { agent?: boolean })[]; edges: WorkflowEdge[] };
   agents: Record<string, { nodes: WorkflowNode[]; edges: WorkflowEdge[] }>;
 }
@@ -487,10 +516,44 @@ export interface AgentEvent {
 
 export interface AgentsRun extends Omit<WorkflowRun, "ids" | "inputs" | "approval"> {
   llm: "fake" | "claude";
-  approval: { proposal: number; title: string; question: string } | null;
+  approval: {
+    proposal: number; title: string; question: string; round?: number; rank?: number | null; reasons?: string[];
+    opinion_error?: string; minimal_change?: { path: string; current: number; recommended: number; proposed: number } | null;
+    kind?: "confirm_constraints"; opinion?: string; constraints?: Constraint[]; error?: string;   // 제약 확인 (M15 후속)
+  } | null;
   events: AgentEvent[];
   counts: Record<string, Record<string, number>>;
   last_event: AgentEvent | null;
-  proposals: { title: string; kind: string; status: string; errors: string[] }[];
+  proposals: { title: string; kind: string; status: string; errors: string[]; rank?: { tier: string; rank: number | null; reasons: string[] } | null }[];
   inputs: { domain?: string; seed?: number; faults?: string[]; items?: number; level?: string; perspectives?: boolean };
+  loop?: AgentsLoop;
+  end_check?: "fixed" | "supervisor" | null;
+}
+
+// 개선 루프 (M15-B): 회차 기록과 결과 보고
+export interface LoopDecision { action: "approve" | "reject" | "opinion"; title: string; note: string; round?: number }
+export interface LoopRound {
+  round: number;
+  before: Record<string, number>;
+  after: Record<string, number>;
+  approved: string[];
+  decisions: LoopDecision[];
+  cost_usd: number | null;
+  seconds: number;
+  params_version_before?: number;
+  params_version_after?: number;
+}
+export interface AgentsLoop {
+  round: number | null;
+  rounds: LoopRound[];
+  constraints: Constraint[];
+  stop_reason: string | null;
+  decisions: LoopDecision[];
+  saved_loaded?: { id: string }[];
+  saved_skipped?: { id: string; error: string }[];
+  report: {
+    rounds: LoopRound[]; stop_reason: string; decisions: LoopDecision[]; constraints: Constraint[];
+    remaining: { id: string; title: string }[]; cost_usd: number | null; seconds: number; lines: string[];
+    total: Record<string, { before: number | null; after: number | null }>;
+  } | null;
 }

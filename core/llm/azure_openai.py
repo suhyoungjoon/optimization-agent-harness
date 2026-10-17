@@ -146,6 +146,21 @@ def reasoning_effort(effort: str | None, options: dict) -> str | None:
     return supported[-1] if effort in DEEPEST_EFFORTS else None
 
 
+def azure_setting(azure: dict, name: str) -> str:
+    """endpoint·api_version: 환경변수(설정의 *_env)가 있으면 그 값, 없으면 설정 값."""
+    env_name = azure.get(f"{name}_env")
+    return (os.environ.get(env_name) if env_name else None) or azure[name]
+
+
+def azure_api_key(azure: dict) -> str:
+    """키는 환경변수(.env)에서만 읽는다 (설정 파일·로그에 남기지 않는다)."""
+    names = azure.get("api_key_envs") or DEFAULT_KEY_ENVS
+    key = next((os.environ[n] for n in names if os.environ.get(n)), None)
+    if not key:
+        raise RuntimeError(f"Azure OpenAI 키가 없음: .env 또는 환경변수 {' / '.join(names)}")
+    return key
+
+
 class AzureOpenAIClient:
     """Azure OpenAI 호환 게이트웨이 호출. AnthropicClient와 같은 create()와 LLMResponse를 쓴다."""
 
@@ -168,16 +183,10 @@ class AzureOpenAIClient:
         self.api = api
 
     def _setting(self, name: str) -> str:
-        """endpoint·api_version: 환경변수(설정의 *_env)가 있으면 그 값, 없으면 설정 값."""
-        env_name = self.azure.get(f"{name}_env")
-        return (os.environ.get(env_name) if env_name else None) or self.azure[name]
+        return azure_setting(self.azure, name)
 
     def _api_key(self) -> str:
-        names = self.azure.get("api_key_envs") or DEFAULT_KEY_ENVS
-        key = next((os.environ[n] for n in names if os.environ.get(n)), None)
-        if not key:
-            raise RuntimeError(f"Azure OpenAI 키가 없음: .env 또는 환경변수 {' / '.join(names)}")
-        return key
+        return azure_api_key(self.azure)
 
     def request(self, *, system: list[dict], messages: list[dict], tools: list[dict]) -> dict:
         """보낼 요청 (키는 들어가지 않는다. 캐시 키도 이 값으로 만든다)."""

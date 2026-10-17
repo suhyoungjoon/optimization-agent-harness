@@ -24,7 +24,7 @@
 ```
 core/            공통 코어 (interfaces, harness, llm, evaluation, analysis, improvement, storage)
 domains/dispatch 출동 스케줄링 도메인 팩 (generator, rule_engine, tools, metrics, *.yaml, domain-spec.md)
-configs/         harness_levels.yaml
+configs/         harness_levels.yaml, llm.yaml, sweep.yaml, proposals.yaml, workflow.yaml
 api/             FastAPI
 web/             React + Vite 프런트엔드
 scripts/         데이터 생성, 일괄 실행 CLI
@@ -75,6 +75,7 @@ node scripts/record_demo.mjs --stills   # 시연 장면 녹화 (시연 모드 �
 ```
 AI agent 실행에는 API 키가 필요하다: 환경변수 또는 `.env`의 `OAH_ANTHROPIC_API_KEY`(우선) 또는 `ANTHROPIC_API_KEY`. 모델·effort·캐시는 `configs/llm.yaml`(배정은 기본값, 분석·개선안은 `roles`의 역할별 모델), 최종 측정 때는 `LLM_CACHE=0`으로 입력 해시 캐시를 끈다. 실험할 때만 모델을 바꾸려면 `LLM_MODEL`, `LLM_THINKING`(adaptive | off), `LLM_EFFORT`(low~max | none)로 덮어쓴다 (쓴 모델은 사용량 기록 `usage.model`에 남는다).
 제공사는 `configs/llm.yaml`의 `provider`(anthropic | azure_openai)로 고르고 `LLM_PROVIDER`로 덮어쓴다. Azure OpenAI는 `pip install -e ".[azure]"`, 키는 `.env`의 `MY_PROJECT_AZURE_API_KEY`, 모델·deployment 대응·모델별 옵션은 `llm.yaml`의 `azure` 섹션 (`core/llm/azure_openai.py`가 Anthropic 형식 ↔ OpenAI 형식 변환, 에이전트 코드는 그대로).
+개선안 제시 기준은 `configs/proposals.yaml`, LangGraph agents 탭의 회차 순환·종료 판정(`fixed | supervisor`)은 `configs/workflow.yaml`, 핵심 지표·방향·목표는 도메인 `dimensions.yaml`의 `metrics`. 문서 검색 임베딩은 `configs/llm.yaml`의 `embedding`(`EMBEDDING_PROVIDER` auto | azure_openai | none, 없으면 키워드 검색만), 색인은 `runs/retrieval.sqlite`, 가상 규정은 `domains/dispatch/knowledge/`.
 (명령어가 바뀌면 이 섹션을 갱신한다.)
 
 ## 작업 방식
