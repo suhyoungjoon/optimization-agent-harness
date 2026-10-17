@@ -39,6 +39,7 @@ def test_order_by_constraint_then_gain_then_loss():
     first = out["entries"]["same_gain_less_loss"]
     assert first["rank"] == 1 and first["tier"] == "main"
     assert any("+9.0" in r for r in first["reasons"])                    # 핵심 지표 개선폭이 이유에 보인다
+    assert not any("제약" in r for r in first["reasons"])                 # 제약이 없던 묶음이면 제약 이야기를 하지 않는다
     assert any("제약" in r for r in out["entries"]["breaks_constraint"]["reasons"])
 
 

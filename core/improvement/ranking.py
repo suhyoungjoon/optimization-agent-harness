@@ -110,8 +110,10 @@ def rank_proposals(proposals: list[dict], specs: list[dict], config: dict | None
             entry.update(tier="reference", reasons=[f"최소 효과 미만: {', '.join(gains)}"])
         else:
             constrained = bool(sim.get("constraint_violations"))
-            reasons = [("사람 제약 위반: " + "; ".join(c.get("message", "") for c in sim["constraint_violations"]))
-                       if constrained else "사람 제약 지킴", "핵심 지표 " + ", ".join(gains)]
+            reasons = ["핵심 지표 " + ", ".join(gains)]
+            if "constraint_violations" in sim:   # 사람이 정한 제약이 있을 때만 (없으면 키가 없다)
+                reasons.insert(0, ("사람 제약 위반: " + "; ".join(c.get("message", "") for c in sim["constraint_violations"]))
+                               if constrained else "사람 제약 지킴")
             reasons.append("나빠진 지표 " + ", ".join(sc["worse"]) if sc["worse"] else "나빠진 지표 없음")
             entry["reasons"] = reasons
             cands.append({"id": pid, "sim": sim, "constrained": constrained, **sc,
