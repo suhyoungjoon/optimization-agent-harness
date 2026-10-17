@@ -1,6 +1,7 @@
 import type {
   CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DomainDefinition, DecisionRecord, DomainInfo, FindingLabel, HarnessInfo, Memory, HistoryRow, Proposal, ProposalBatch, Report, Run,
   SpecEstimate, TraceRecord, WorkflowGraph, WorkflowRun, AgentsGraph, AgentsRun, SweepAxis, SweepResult, Sensitivity, ChangeCard, SavedConstraint,
+  AgentTabInfo, AgentTabSources, AgentTabHistoryRow, AgentTabTimeline, TabAgent,
 } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -24,6 +25,17 @@ export interface RunOptions {
 }
 
 export const api = {
+  // 에이전트 탭 (M16)
+  agentTabInfo: () => request<AgentTabInfo>("/agent-tab/info"),
+  agentTabSources: () => request<AgentTabSources>("/agent-tab/sources"),
+  agentTabHistory: (agent: TabAgent) => request<AgentTabHistoryRow[]>(`/agent-tab/history?agent=${agent}`),
+  agentTabTimeline: (agent: TabAgent, id: string, after = -1) =>
+    request<AgentTabTimeline>(`/agent-tab/timeline/${agent}/${id}?after=${after}`),
+  agentTabOpinion: (proposalId: string, opinion: string) =>
+    request<{ id: string }>("/agent-tab/opinion", { method: "POST", body: JSON.stringify({ proposal_id: proposalId, opinion }) }),
+  proposeWith: (reportId: string, useSavedConstraints: boolean) =>
+    request<{ id: string }>("/proposals", { method: "POST",
+      body: JSON.stringify({ report_id: reportId, use_saved_constraints: useSavedConstraints }) }),
   agentsGraph: (level: string, domain?: string, perspectives = false, endCheck?: "fixed" | "supervisor") =>
     request<AgentsGraph>(`/agents/graph?level=${level}` + (perspectives && domain ? `&domain=${domain}&perspectives=true` : "")
       + (endCheck ? `&end_check=${endCheck}` : "")),
