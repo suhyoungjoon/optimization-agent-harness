@@ -25,6 +25,7 @@ from core.harness.levels import load_levels
 from core.harness.runner import CORE_REASON_CODES
 from core.improvement.changes import spec_sections
 from core.llm.client import LLMClient, load_config, make_client
+from core.llm.events import LiveLog
 from core.registry import list_domains, list_faults, load_faults, load_pack, load_params, set_domain_files_root
 from core.storage.store import Store, to_jsonable
 
@@ -32,6 +33,7 @@ from workflow.agents.api import register as register_agents
 from workflow.api import register as register_workflow
 
 from . import improvement
+from .agent_tab import register as register_agent_tab
 from .replay import REPLAY_SECONDS, DemoBundle, ReplayClock
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -112,6 +114,7 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
             make_llm = lambda role=None: llm_factory()  # noqa: E731
     executor = ThreadPoolExecutor(max_workers=llm_config.get("concurrency", 4))
     progress = Progress()
+    live = LiveLog()      # 실행 중 타임라인 (M16 에이전트 탭)
     replay = ReplayClock(replay_seconds)
     app = FastAPI(title="optimization-agent-harness")
 
@@ -248,7 +251,8 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
         try:
             run_ai_agent(store, pack, dataset, req.level, llm, llm_config, scope=req.scope, repeat=repeat,
                          group_id=group_id, run_id=run_id,
-                         progress=lambda done, total: progress.set(run_id, done=done, total=total))
+                         progress=lambda done, total: progress.set(run_id, done=done, total=total),
+                         on_event=live.sink(f"dispatch:{run_id}"))
             progress.set(run_id, state="done")
         except Exception as exc:  # run 레코드에는 run_ai_agent가 오류를 남긴다
             progress.set(run_id, state="error", error=repr(exc))
@@ -298,8 +302,10 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
             raise HTTPException(400, "runs 파라미터가 비어 있음")
         return compare(store, run_ids)
 
-    improvement.register(app, improvement.Context(store, executor, make_llm, llm_config, replay=bool(demo),
-                                                  retrieval_path=store.path.parent / "retrieval.sqlite"))
+    improvement_ctx = improvement.Context(store, executor, make_llm, llm_config, replay=bool(demo),
+                                          retrieval_path=store.path.parent / "retrieval.sqlite", live=live)
+    improvement.register(app, improvement_ctx)
+    register_agent_tab(app, improvement_ctx, demo=bool(demo))   # M16: 에이전트별 단독 실행과 타임라인
     register_workflow(app)   # LangGraph가 없으면 /workflow/graph가 이유만 돌려준다
     register_agents(app, demo=bool(demo),   # M10: 모든 에이전트를 LangGraph로 (시연 모드는 가짜 AI)
                     retrieval_path=store.path.parent / "retrieval.sqlite",   # M15-C: 규정·현장 의견 검색

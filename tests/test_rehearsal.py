@@ -56,7 +56,7 @@ def test_rehearsal_bundle_covers_every_scene(tmp_path):
 def test_vite_dev_proxy_covers_api_routes(tmp_path):
     """개발 서버(npm run dev)가 모든 API 경로를 백엔드로 넘겨야 화면이 동작한다."""
     config = (ROOT / "web" / "vite.config.ts").read_text(encoding="utf-8")
-    proxied = set(re.findall(r'"(/[a-z_]+)"', re.search(r"API_PREFIXES = \[(.*?)\]", config).group(1)))
+    proxied = set(re.findall(r'"(/[a-z_-]+)"', re.search(r"API_PREFIXES = \[(.*?)\]", config).group(1)))
     routes = {f"/{r.path.split('/')[1]}" for r in create_app(tmp_path / "routes.db", serve_web=False).routes
               if getattr(r, "methods", None) and r.path.split("/")[1] not in ("", "docs", "openapi.json", "redoc")}
     assert routes <= proxied, f"vite.config.ts 프록시에 없는 API 경로: {sorted(routes - proxied)}"
