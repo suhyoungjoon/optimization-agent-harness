@@ -12,6 +12,8 @@ export interface TermDef {
 const t = (label: string, tech: string): TermDef => ({ label, tech });
 
 export const TERMS = {
+  outcome: t("실적 (가상 고객 반응)", "계획 vs 실적 (M17): 계획(규칙 엔진 배정)에 현실 모델의 고객 반응·이월을 붙여 만든 실적. 참고용, AI에게 보이지 않음"),
+  promiseKept: t("약속 준수", "promise_kept: 원래 희망 날짜에, 희망 시각 ±60분 안에 완료된 지시서 (실적). 계획의 '정시 배정'과 다르다"),
   // 탭
   tabDomain: t("규칙·데이터", "도메인 탭"),
   tabCompare: t("비교", "비교 탭"),

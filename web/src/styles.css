@@ -546,3 +546,10 @@ input.approver { width: 9em; }
 .agent-timeline .tl-item { font-weight: 600; padding-top: 6px; }
 .agent-timeline .tl-ok .tl-kind { color: var(--good, #1a7f37); }
 .agent-timeline .tl-bad .tl-kind { color: var(--critical, #cf222e); }
+
+/* 계획 vs 실적 (M17) */
+.outcome-box { border: 1px dashed var(--border); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+.outcome-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; }
+.outcome-table { border-collapse: collapse; width: 100%; max-width: 560px; }
+.outcome-table th, .outcome-table td { padding: 2px 8px; border-bottom: 1px solid var(--border); text-align: left; }
+.outcome-table td.num, .outcome-table th.num { text-align: right; }

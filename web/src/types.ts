@@ -618,3 +618,25 @@ export interface AgentTabTimeline {
   constraints?: unknown[];
   problems?: string[];
 }
+
+// --- 계획 vs 실적 (M17) ---
+export interface OutcomePart {
+  plan: { assigned: number; on_time: number; violations: number; avg_travel_min: number };
+  outcome: {
+    orders: number; promise_kept: number; promise_kept_rate: number; complaint_rate: number; cancel_rate: number;
+    unserved_rate: number; avg_carry_days: number; changed: number; moved_day: number;
+    changed_same_day_resolve: number; changed_carryover: number; changed_reschedule: number;
+  };
+}
+
+export interface ProposalOutcome {
+  proposal_id: string;
+  params_version: number;
+  profile: string;
+  seeds: number[];
+  promise_window_min: number;
+  current: OutcomePart;
+  proposal: OutcomePart;
+  seconds: number;
+  note: string;
+}
