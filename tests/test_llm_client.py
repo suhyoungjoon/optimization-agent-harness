@@ -179,7 +179,9 @@ def test_load_dotenv(tmp_path, monkeypatch):
 
 
 def test_env_path_reads_api_key_from_given_file(tmp_path, monkeypatch):
-    """설치해서 쓰는 다른 레포는 자기 .env 경로를 넘긴다 (기본값은 패키지 위치의 .env)."""
+    """설치해서 쓰는 다른 레포는 자기 .env 경로를 넘긴다 (기본값은 패키지 위치의 .env).
+    실제 클라이언트를 만들므로 anthropic(선택 설치)이 있을 때만 돈다."""
+    pytest.importorskip("anthropic")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     env = tmp_path / ".env"
     env.write_text("ANTHROPIC_API_KEY=key-from-other-repo\n", encoding="utf-8")
@@ -190,6 +192,14 @@ def test_env_path_reads_api_key_from_given_file(tmp_path, monkeypatch):
         assert client.api is not None                   # 클라이언트 생성만 하고 API는 호출하지 않는다
     finally:
         os.environ.pop("ANTHROPIC_API_KEY", None)       # load_dotenv가 넣은 값이 다른 테스트로 새지 않게
+
+
+def test_missing_anthropic_package_gives_install_hint(monkeypatch):
+    """anthropic은 선택 설치다 (기본 제공사 azure_openai). 없을 때 실제 클라이언트를 만들면 설치 안내를 낸다."""
+    import sys
+    monkeypatch.setitem(sys.modules, "anthropic", None)          # import anthropic → ImportError
+    with pytest.raises(RuntimeError, match=r'\.\[anthropic\]'):
+        AnthropicClient(config={**load_config(), "cache": False})
 
 
 def test_api_key_prefers_oah_env(monkeypatch):
