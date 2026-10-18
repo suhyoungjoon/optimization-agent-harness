@@ -93,20 +93,27 @@ python -m api.main --demo demo/rehearsal      # http://127.0.0.1:8000
 
 ### AI agent 실행
 
-`.env.example`을 `.env`로 복사하고 `ANTHROPIC_API_KEY`를 채운다(`.env`는 커밋하지 않는다).
-모델·생각(thinking)·effort·동시 실행 수·응답 캐시는 `configs/llm.yaml`에 있다. 기본 모델은 비용을 아끼려고 `claude-haiku-4-5`이고, Haiku 4.5는 adaptive thinking과 effort를 지원하지 않아 `thinking: "off"`, `effort: null`로 둔다(Sonnet·Opus 5 계열로 바꾸면 `thinking: adaptive`와 effort를 같이 켠다). 같은 입력은 캐시에서 재사용하므로 반복 개발 비용이 줄어든다. 최종 측정 때는 `LLM_CACHE=0`으로 끈다.
-
-#### Azure OpenAI로 실행 (M14)
-
-허용 모델이 OpenAI 계열뿐인 Azure OpenAI 호환 게이트웨이를 쓸 때다. 에이전트는 그대로이고, `core/llm/azure_openai.py`가 Anthropic 형식 ↔ OpenAI 형식을 바꾼다.
+**기본 제공사는 회사 Azure OpenAI 호환 게이트웨이(`azure_openai`)다** (2026-10-18). `.env.example`을 `.env`로 복사하고 `MY_PROJECT_AZURE_API_KEY`를 채운다(`.env`는 커밋하지 않는다). 에이전트는 Anthropic 형식 메시지를 만들고, `core/llm/azure_openai.py`가 OpenAI 형식으로 바꾼다.
 
 ```bash
-pip install -e ".[dev,workflow,azure]"           # azure: openai 패키지
-# .env에 MY_PROJECT_AZURE_API_KEY를 채운다 (endpoint·api-version은 configs/llm.yaml, 환경변수로 덮을 수 있음)
-LLM_PROVIDER=azure_openai python -m api.main
+pip install -e ".[dev,workflow]"     # openai 패키지는 기본 의존성
+# .env에 MY_PROJECT_AZURE_API_KEY (endpoint·api-version은 configs/llm.yaml, 환경변수로 덮을 수 있음)
+python -m api.main
 ```
 
-모델·역할별 모델·deployment 이름 대응표·모델별 옵션(`reasoning_effort` 지원 값)은 `configs/llm.yaml`의 `azure` 섹션에 있다. 단가를 비워 둔 모델은 비용이 "미확인"으로 나오고 토큰 수는 그대로 기록된다. 실행 기록의 사용량(`usage`)에 `provider`와 `deployment`가 남는다.
+- 모델·역할별 모델(배정 gpt-4.1-mini, 분석 gpt-5, 개선안 gpt-5.4)·deployment 대응표·모델별 옵션(`reasoning_effort` 지원 값)은 `configs/llm.yaml`의 `azure` 섹션에 있다.
+- 단가는 **OpenAI 공개 정가 추정치**다(회사 단가 아님, gpt-5.4는 gpt-5와 같다고 가정). 화면의 금액 뒤에 "(추정)"이 붙고, 표에 없는 모델은 비용이 "미확인"으로 나온다. 실행 기록의 사용량(`usage`)에 `provider`, `deployment`, `cost_estimated`가 남는다.
+- 같은 입력은 캐시에서 재사용하므로 반복 개발 비용이 줄어든다. 최종 측정 때는 `LLM_CACHE=0`으로 끈다.
+
+#### Claude(Anthropic)로 실행
+
+```bash
+pip install -e ".[dev,workflow,anthropic]"       # anthropic은 선택 설치
+# .env에 ANTHROPIC_API_KEY (또는 OAH_ANTHROPIC_API_KEY)와 LLM_PROVIDER=anthropic
+python -m api.main
+```
+
+Claude 설정은 `configs/llm.yaml` 최상위 값이다(배정 `claude-haiku-4-5`, 분석·개선안은 `roles`). Haiku 4.5는 adaptive thinking과 effort를 지원하지 않아 `thinking: "off"`, `effort: null`로 둔다.
 
 개선 루프 기준은 설정 파일에 있다 (M15): 개선안 제시 기준(본안 최대 개수, 발견당 개수, 최소 효과)은 `configs/proposals.yaml`, LangGraph agents 탭의 회차 순환(최대 회차, 다시 제안 횟수, 종료 판정 `fixed | supervisor`)은 `configs/workflow.yaml`, 핵심 지표·방향·목표는 도메인 `dimensions.yaml`의 `metrics`. 문서 검색(가상 규정·과거 사례·현장 의견)은 임베딩이 있으면 벡터 + 키워드, 없으면 키워드만 쓴다. 임베딩은 `configs/llm.yaml`의 `embedding`(기본 auto: Azure 제공사면 `text-embedding-3-small`)이고 `EMBEDDING_PROVIDER`(auto | azure_openai | none), `EMBEDDING_MODEL`로 덮어쓴다. 색인은 `runs/retrieval.sqlite` ([docs/knowledge-retrieval.md](docs/knowledge-retrieval.md)).
 
