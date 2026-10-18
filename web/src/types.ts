@@ -80,6 +80,7 @@ export interface Usage {
   cost_usd: number | null;
   provider?: string;
   deployment?: string;
+  cost_estimated?: boolean;   // 단가가 추정치 (configs/llm.yaml pricing_estimated)
 }
 
 export interface RunProgress {
@@ -149,6 +150,7 @@ export interface CompareSummary {
   seconds_per_item: number | null;
   cost_per_item_usd: number | null;
   cost_unknown?: boolean;
+  cost_estimated?: boolean;
   consistency: number | null;
 }
 
@@ -607,7 +609,7 @@ export interface AgentTabTimeline {
   output: string | null;
   usage: { provider?: string | null; model?: string | null; deployment?: string | null; calls?: number | null;
     input_tokens?: number | null; cache_read_tokens?: number | null; output_tokens?: number | null;
-    cost_usd?: number | null; seconds?: number | null };
+    cost_usd?: number | null; seconds?: number | null; cost_estimated?: boolean };
   graph: string;
   level?: string;
   note?: string | null;
