@@ -242,6 +242,23 @@ def run_tool_loop(llm, *, system: str, user: str, tools: list[dict], submit_tool
 
 새 레포의 워크플로우 agent(분석·개선안 도출)는 `run_tool_loop`을 그대로 쓰면 된다.
 
+### 2.11.1 계획 vs 실적 (M17) — `domains/dispatch/outcome/` (dispatch 전용, 코어 밖)
+
+```python
+# 실적 시뮬레이터 (dispatch-field-loop 52372da N2에서 옮김). 현실 모델은 AI에게 보이지 않는 정답표
+simulate_outcomes(instance, decisions, params, world, seed, solve=None) -> list[OutcomeRecord]
+# OutcomeRecord: order_id, work_type, building_type, dims, original_day, final_day, carry_days, desired_min,
+#   start_min, time_diff_min, result(completed|complained|cancelled|unserved), cancel_reason, attempts[{day, plan_status,
+#   reason_code, worker_id, start_min, response}], worker_id, planned_status, planned_day, planned_worker_id,
+#   planned_start_min, change_reason(same_day_resolve|carryover|reschedule|None)
+outcome_summary(records, promise_window_min) -> dict   # 약속 준수·불만·취소·미처리·이월 + changed·changed_<이유>·moved_day
+plan_summary(pack, instance, decisions) -> dict        # assigned, on_time, violations, avg_travel_min
+load_world(profile_path("normal")), load_settings()    # settings.yaml: promise_window_min 60, seeds [1..5], profile normal
+DispatchPack.outcome(instance, profile=None, seeds=None) -> {plan, outcome(seed 평균), profile, seeds, promise_window_min}
+```
+
+API `POST /proposals/{id}/outcome` (본문 `{profile?}`): 규칙 설정값 개선안만, "현재"와 "이 안"의 `{plan, outcome}`과 `delta`. DB에 저장하지 않고 "현재" 기준값만 메모리 캐시. 팩에 `outcome`이 없으면 404. 실적은 참고용이며 AI 입력·순위·검사에 넣지 않는다(`tests/test_outcome_api.py`). 재현 전제는 seed 42 · P1~P4 · params v1 (`tests/test_outcome_reproduction.py`).
+
 ### 2.12 그 밖의 재사용 가능 모듈
 
 | 모듈 | 공개 이름 | 역할 |

@@ -906,6 +906,14 @@ M15-B의 의견 → 제약은 최소 기능이었다: AI가 정리한 제약을 
 
 재현 전제: `params.yaml`이 v1이어야 한다(승인으로 v2가 되면 기준이 바뀐다). 데이터 seed 42 · P1~P4.
 
+| 구현 결과 (2026-10-19) | 내용 |
+|---|---|
+| 2. 시뮬레이터 이전 | `domains/dispatch/outcome/`(config·response·carryover·records·metrics·summary, 현실 모델 3개, `settings.yaml`). import 경로만 바꿨고 여러 안 비교·추천 함수(`compare`·`recommendation`)는 옮기지 않음. 테스트 `test_outcome.py`(원본 4개 파일), `test_outcome_reproduction.py`(N2 '보통' 4개 안, 소수점 6자리) |
+| 3. 레코드 보강 | `OutcomeRecord`에 `worker_id`, `planned_status`·`planned_day`·`planned_worker_id`·`planned_start_min`, `change_reason`. 시도마다 `worker_id`. 요약에 `changed`·`changed_<이유>`·`moved_day`. 첫 시도 차이를 작업자까지 보면 437건(현재, seed 1), 상태·시각만 보면 검토 문서의 244건 — 둘 다 테스트로 고정 |
+| 4. 실적 API | `DispatchPack.outcome()`(선택 기능, 계약 밖), `POST /proposals/{id}/outcome`(params만, DB 저장 없음, "현재" 메모리 캐시, 시연 모드도 계산). AI 숨김 테스트: 개선안·미리 돌려보기 결과·순위 불변, 이후 분석·개선안의 AI 입력 전체에 실적 용어 없음, 검색 문서에 현실 모델 없음 |
+| 5. 화면 | 개선 탭 카드 "실적 (가상 고객 반응)": 현재·이 안·차이, 계획과 달라진 이유 3가지, 현실 모델 선택, 참고용·계획 숫자의 한계 안내. 용어 `outcome`·`promiseKept` |
+| 6. 문서 | `ui-guide.md`(실적 표, 용어표), `handoff.md` 2.11.1, 실험 보고서 6.15절(N2 재현 + 실제 Azure 개선안 7건), README |
+
 완료 기준: N2 '보통' 재현표가 테스트로 고정된다. 개선 탭에서 규칙 설정값 개선안의 계획 대 실적이 현재 대비로 보이고, 계획 대비 달라진 이유 3가지가 보인다. 실적이 AI 입력·순위·검사 어디에도 들어가지 않는다(테스트). 기존 테스트와 `npm run build`가 통과한다.
 
 # 부록. 구현 명세
