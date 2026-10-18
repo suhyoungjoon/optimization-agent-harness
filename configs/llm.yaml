@@ -1,7 +1,8 @@
 # LLM 설정. 모델 교체는 이 파일만 바꾼다 (코드는 core/llm/ 안에서만 호출).
 # 실험할 때만 바꾸려면 환경변수 LLM_MODEL, LLM_THINKING, LLM_EFFORT로 덮어쓴다 (파일은 그대로).
-# 제공사: anthropic(기본, 아래 값) | azure_openai(맨 아래 azure 섹션의 값이 위 값을 덮는다). 환경변수 LLM_PROVIDER가 우선
-provider: anthropic
+# 제공사: azure_openai(기본, 회사 게이트웨이. 맨 아래 azure 섹션의 값이 아래 값을 덮는다) | anthropic(아래 값).
+# 환경변수 LLM_PROVIDER(또는 .env)가 우선. anthropic은 선택 설치: pip install -e ".[anthropic]" (2026-10-18 회사 환경 기본값)
+provider: azure_openai
 model: claude-haiku-4-5      # 비용 절약용 (실제 API 실험, 2026-10). 이전: claude-sonnet-5
 # 생각(thinking)과 깊이(effort)는 모델마다 지원이 다르다. 모델을 바꿀 때 두 줄도 같이 맞춘다.
 #   Sonnet 5 / Opus 5 계열: thinking: adaptive, effort: low | medium | high | xhigh | max
@@ -60,9 +61,20 @@ azure:
     gpt-5: {reasoning_effort: [minimal, low, medium, high]}
     gpt-5-mini: {reasoning_effort: [minimal, low, medium, high]}
     gpt-5.4: {reasoning_effort: [low, medium, high, xhigh]}
-  # 단가 (USD / 100만 토큰). 모르면 비워 둔다: 비용은 "미확인"으로 표시하고 토큰 수만 기록한다
-  pricing_per_mtok: {}
-  cache_multipliers: {write: 1.0, read: 0.5}       # 입력 단가 대비. 단가를 채울 때 모델별 캐시 할인율도 확인한다
+  # 단가 (USD / 100만 토큰). **추정치**: OpenAI 공개 정가 기준 (2026-10-18 정리, 회사 게이트웨이 단가 아님).
+  # pricing_estimated가 참이면 사용량 기록에 cost_estimated가 붙고 화면은 금액 뒤에 "(추정)"을 붙인다.
+  # cache_read: 캐시 읽기 단가 (모델마다 할인율이 달라 따로 적는다). 없으면 cache_multipliers.read × input
+  # 표에 없는 모델(gpt-5.6-luna, gpt-6-luna, gpt-6.1-sol 등)은 비용이 "미확인"으로 남고 토큰 수만 기록한다
+  pricing_estimated: true
+  pricing_per_mtok:
+    gpt-4.1-mini: {input: 0.40, output: 1.60, cache_read: 0.10}
+    gpt-4.1: {input: 2.00, output: 8.00, cache_read: 0.50}
+    gpt-4o-mini: {input: 0.15, output: 0.60, cache_read: 0.075}
+    gpt-4o: {input: 2.50, output: 10.00, cache_read: 1.25}
+    gpt-5-mini: {input: 0.25, output: 2.00, cache_read: 0.025}
+    gpt-5: {input: 1.25, output: 10.00, cache_read: 0.125}
+    gpt-5.4: {input: 1.25, output: 10.00, cache_read: 0.125}   # 단가 미확인: gpt-5와 같다고 가정
+  cache_multipliers: {write: 1.0, read: 0.5}       # cache_read가 없는 모델에만 쓴다 (OpenAI는 캐시 쓰기 요금이 없다)
 
 # 임베딩 (M15-C, 검색 도구의 벡터 검색). Anthropic에는 임베딩이 없어 제공사를 따로 정한다.
 #   provider: auto(LLM 제공사가 azure_openai면 azure_openai, 아니면 none) | azure_openai | none

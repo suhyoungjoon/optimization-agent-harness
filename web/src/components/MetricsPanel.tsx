@@ -10,7 +10,7 @@ export const fmtMetric = (v: number | null | undefined, f: MetricSpec["format"])
 export const fmtUsd = (v: number | null | undefined) =>
   v === undefined || v === null ? "–" : v === 0 ? "$0" : v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`;
 
-type CostUsage = { cost_usd?: number | null; input_tokens?: number; output_tokens?: number } | null | undefined;
+type CostUsage = { cost_usd?: number | null; input_tokens?: number; output_tokens?: number; cost_estimated?: boolean } | null | undefined;
 
 /** 토큰은 썼는데 단가를 몰라 비용을 못 낸 사용량 (예: 단가를 비워 둔 Azure 모델) */
 export const costUnknown = (u: CostUsage) =>
@@ -18,7 +18,7 @@ export const costUnknown = (u: CostUsage) =>
 
 /** 비용 표시. 단가 미확인이면 "미확인" (value: 건당 비용처럼 사용량에서 계산한 값) */
 export const fmtCost = (u: CostUsage, value: number | null | undefined = u?.cost_usd) =>
-  costUnknown(u) ? "미확인" : fmtUsd(value);
+  costUnknown(u) ? "미확인" : fmtUsd(value) + (u?.cost_estimated && value != null ? " (추정)" : "");
 
 export const fmtSeconds = (v: number | null | undefined) =>
   v === undefined || v === null ? "–" : v < 1 ? `${(v * 1000).toFixed(v < 0.01 ? 2 : 0)}ms` : `${v.toFixed(1)}초`;

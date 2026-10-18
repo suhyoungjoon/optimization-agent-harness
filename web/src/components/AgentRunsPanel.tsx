@@ -264,7 +264,7 @@ function Summary({ t }: { t: AgentTabTimeline }) {
         {" · "}호출 {fmtNum(u.calls)} · 토큰 입력 {fmtNum(u.input_tokens)}
         {u.cache_read_tokens ? ` + 캐시 ${fmtNum(u.cache_read_tokens)}` : ""} / 출력 {fmtNum(u.output_tokens)}
         {" · "}{u.seconds != null ? `${u.seconds.toFixed(1)}초` : "–"}
-        {u.cost_usd != null ? ` · $${u.cost_usd.toFixed(4)}` : running ? "" : " · 비용 미확인"}
+        {u.cost_usd != null ? ` · $${u.cost_usd.toFixed(4)}${u.cost_estimated ? " (추정)" : ""}` : running ? "" : " · 비용 미확인"}
         {" · "}<span className="muted">{t.id}</span>
       </div>
       {t.note && <p className="muted small">{t.note}</p>}

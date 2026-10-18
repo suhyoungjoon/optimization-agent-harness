@@ -24,6 +24,7 @@ def _row(run: dict) -> dict:
         "cost_usd": cost, "cost_per_item_usd": cost / items if cost is not None and items else None,
         # 토큰은 썼는데 단가를 몰라 비용을 못 낸 실행 (예: 단가를 비워 둔 Azure 모델). 화면은 "미확인"으로 보인다
         "cost_unknown": cost is None and bool((usage.get("input_tokens") or 0) + (usage.get("output_tokens") or 0)),
+        "cost_estimated": bool(usage.get("cost_estimated")),     # 단가가 추정치 (화면은 "(추정)")
         "llm_calls": usage.get("calls"),
     }
 
@@ -62,6 +63,7 @@ def compare(store: Store, run_ids: list[str]) -> dict:
             "seconds_per_item": mean([m["seconds_per_item"] for m in members if m["seconds_per_item"] is not None]),
             "cost_per_item_usd": mean([m["cost_per_item_usd"] for m in members if m["cost_per_item_usd"] is not None]),
             "cost_unknown": any(m["cost_unknown"] for m in members),
+            "cost_estimated": any(m["cost_estimated"] for m in members),
             "consistency": consistency(store, [m["run_id"] for m in members]),
         })
     order = lambda s: (s["agent"] != "rule", s["level"] or "")  # noqa: E731
