@@ -167,14 +167,14 @@ class AzureOpenAIClient:
     def __init__(self, config: dict | None = None, cache: ResponseCache | None = None, api: Any = None,
                  env_path: str | Path | None = None):
         """env_path: 키를 읽을 .env 경로. 없으면 패키지 위치의 .env."""
-        self.config = config or load_config()
+        self.config = config or load_config(env_path=env_path)
         self.azure = self.config.get("azure") or {}
         self.model = self.config["model"]
         self.deployment = deployment_for(self.model, self.config)
         self.options = (self.azure.get("models") or {}).get(self.model) or {}
         self.cache = cache if cache is not None else (ResponseCache() if self.config.get("cache") else None)
         if api is None:
-            load_dotenv(Path(env_path)) if env_path is not None else load_dotenv()
+            load_dotenv(env_path)
             key = self._api_key()
             from openai import AzureOpenAI  # 실제 호출 때만 필요 (pip install -e ".[azure]")
 
