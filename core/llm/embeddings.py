@@ -19,9 +19,10 @@ class Embedder(Protocol):
     def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
-def load_embedding_config(path: Path = CONFIG_PATH) -> dict:
-    """embedding 섹션 + 정해진 제공사(provider: azure_openai | none). LLM 설정의 azure 섹션도 같이 담는다."""
-    llm = load_config(path)
+def load_embedding_config(path: Path = CONFIG_PATH, env_path: str | Path | None = None) -> dict:
+    """embedding 섹션 + 정해진 제공사(provider: azure_openai | none). LLM 설정의 azure 섹션도 같이 담는다.
+    env_path: 먼저 읽을 .env (load_config가 읽는다). .env의 EMBEDDING_PROVIDER·LLM_PROVIDER도 첫 호출부터 반영된다."""
+    llm = load_config(path, env_path=env_path)
     cfg = {"provider": "auto", "model": "text-embedding-3-small", "deployment": None, "batch_size": 64,
            **(llm.get("embedding") or {})}
     cfg["provider"] = os.environ.get("EMBEDDING_PROVIDER") or cfg["provider"]
@@ -44,7 +45,7 @@ class AzureEmbedder:
         if api is None:
             from core.llm.azure_openai import azure_api_key, azure_setting
 
-            load_dotenv(Path(env_path)) if env_path is not None else load_dotenv()
+            load_dotenv(env_path)
             from openai import AzureOpenAI  # pip install -e ".[azure]"
 
             azure = config["azure"]
@@ -65,7 +66,7 @@ class AzureEmbedder:
 
 def make_embedder(config: dict | None = None, **kwargs: Any) -> Embedder | None:
     """설정의 제공사에 맞는 임베딩 클라이언트. none이면 None (키워드 검색만)."""
-    config = config or load_embedding_config()
+    config = config or load_embedding_config(env_path=kwargs.get("env_path"))
     if config["provider"] == "azure_openai":
         return AzureEmbedder(config, **kwargs)
     return None

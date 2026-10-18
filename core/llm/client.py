@@ -18,13 +18,15 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 CONFIG_PATH = ROOT / "configs" / "llm.yaml"
+ENV_PATH = ROOT / ".env"                 # 기본 .env (패키지 위치). 테스트는 없는 경로로 바꾼다
 DEFAULT_CACHE_PATH = ROOT / "runs" / "llm_cache.sqlite"
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 API_KEY_ENVS = ("OAH_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY")   # 앞의 것이 우선
 
 
-def load_dotenv(path: Path = ROOT / ".env") -> None:
-    """.env의 KEY=VALUE를 환경변수로 읽는다 (이미 설정된 값은 덮어쓰지 않는다)."""
+def load_dotenv(path: str | Path | None = None) -> None:
+    """.env의 KEY=VALUE를 환경변수로 읽는다 (이미 설정된 값은 덮어쓰지 않는다). path가 없으면 ENV_PATH."""
+    path = Path(path) if path is not None else ENV_PATH
     if not path.is_file():
         return
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -47,10 +49,12 @@ PROVIDER_SECTIONS = {"anthropic": None, "azure_openai": "azure"}
 PROVIDER_KEYS = (*ROLE_KEYS, "roles", "pricing_per_mtok", "cache_multipliers")
 
 
-def load_config(path: Path = CONFIG_PATH, role: str | None = None) -> dict:
+def load_config(path: Path = CONFIG_PATH, role: str | None = None, env_path: str | Path | None = None) -> dict:
     """role: 역할별 설정(roles.<role>)을 기본값 위에 덮는다 (예: analysis, proposals). 없으면 기본값.
     제공사(provider, 환경변수 LLM_PROVIDER가 우선)가 anthropic이 아니면 그 섹션 값이 먼저 최상위 값을 덮는다.
-    실험용 환경변수(LLM_MODEL 등)는 역할보다 우선한다."""
+    실험용 환경변수(LLM_MODEL 등)는 역할보다 우선한다.
+    env_path: 먼저 읽을 .env (없으면 ENV_PATH). 제공사를 고르기 전에 읽어야 .env의 LLM_PROVIDER가 첫 호출부터 맞는다."""
+    load_dotenv(env_path)
     config = yaml.safe_load(path.read_text(encoding="utf-8"))
     provider = os.environ.get("LLM_PROVIDER") or config.get("provider") or "anthropic"
     if provider not in PROVIDER_SECTIONS:
@@ -141,7 +145,7 @@ def deployment_for(model: str, config: dict) -> str:
 
 def make_client(config: dict | None = None, **kwargs: Any) -> "LLMClient":
     """설정의 provider에 맞는 클라이언트. kwargs는 클라이언트 생성자로 넘긴다 (cache, api, env_path)."""
-    config = config or load_config()
+    config = config or load_config(env_path=kwargs.get("env_path"))
     if config.get("provider", "anthropic") == "azure_openai":
         from core.llm.azure_openai import AzureOpenAIClient
 
@@ -181,13 +185,13 @@ class AnthropicClient:
     def __init__(self, config: dict | None = None, cache: ResponseCache | None = None, api: Any = None,
                  env_path: str | Path | None = None):
         """env_path: API 키를 읽을 .env 경로. 없으면 패키지 위치의 .env (설치해서 쓰는 다른 레포는 경로를 넘긴다)."""
-        self.config = config or load_config()
+        self.config = config or load_config(env_path=env_path)
         self.model = self.config["model"]
         self.cache = cache if cache is not None else (ResponseCache() if self.config.get("cache") else None)
         if api is None:
             import anthropic  # 실제 호출 때만 필요
 
-            load_dotenv(Path(env_path)) if env_path is not None else load_dotenv()
+            load_dotenv(env_path)
             api = anthropic.Anthropic(api_key=api_key_from_env())
         self.api = api
 

@@ -124,6 +124,37 @@ def test_provider_from_file_and_env_overrides(tmp_path, monkeypatch):
         load_config(path)
 
 
+def test_provider_from_dotenv_before_first_client(tmp_path, monkeypatch):
+    """.env에만 있는 LLM_PROVIDER도 첫 load_config·make_client부터 반영된다 (전에는 클라이언트 생성자에서야 .env를 읽어
+    첫 호출은 Anthropic, 그다음부터 Azure로 바뀌었다). 이미 있는 환경변수가 .env보다 우선한다."""
+    import os
+    from core.llm.embeddings import load_embedding_config
+    env = tmp_path / ".env"
+    env.write_text("LLM_PROVIDER=azure_openai\n", encoding="utf-8")
+    monkeypatch.delenv("EMBEDDING_PROVIDER")               # auto: LLM 제공사를 따른다
+    try:
+        assert "LLM_PROVIDER" not in os.environ
+        assert load_config(env_path=env)["provider"] == "azure_openai"
+        assert isinstance(make_client(env_path=env, api=object()), AzureOpenAIClient)
+        assert load_embedding_config(env_path=env)["provider"] == "azure_openai"
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        assert load_config(env_path=env)["provider"] == "anthropic"
+    finally:
+        os.environ.pop("LLM_PROVIDER", None)               # load_dotenv가 넣은 값이 다른 테스트로 새지 않게
+
+
+def test_default_dotenv_path_is_read(tmp_path, monkeypatch):
+    """env_path가 없으면 ENV_PATH(패키지 위치의 .env)를 읽는다. 테스트에서는 conftest가 임시 경로로 바꿔 둔다."""
+    import os
+    env = tmp_path / "default.env"
+    env.write_text("LLM_PROVIDER=azure_openai\n", encoding="utf-8")
+    monkeypatch.setattr("core.llm.client.ENV_PATH", env)
+    try:
+        assert load_config()["provider"] == "azure_openai"
+    finally:
+        os.environ.pop("LLM_PROVIDER", None)
+
+
 def test_missing_key_names_env_vars_without_value(azure_config, monkeypatch, tmp_path):
     for name in FILE["azure"]["api_key_envs"]:
         monkeypatch.delenv(name, raising=False)
