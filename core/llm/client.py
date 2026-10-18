@@ -46,7 +46,7 @@ ROLE_KEYS = ("model", "thinking", "effort", "max_tokens")
 # 제공사 → 설정 섹션. anthropic은 최상위 값을 그대로 쓴다
 PROVIDER_SECTIONS = {"anthropic": None, "azure_openai": "azure"}
 # 제공사 섹션이 최상위 값을 덮는 키 (역할별 모델과 단가는 제공사마다 다르다)
-PROVIDER_KEYS = (*ROLE_KEYS, "roles", "pricing_per_mtok", "cache_multipliers")
+PROVIDER_KEYS = (*ROLE_KEYS, "roles", "pricing_per_mtok", "cache_multipliers", "pricing_estimated")
 
 
 def load_config(path: Path = CONFIG_PATH, role: str | None = None, env_path: str | Path | None = None) -> dict:
@@ -122,9 +122,10 @@ class Usage:
             return None
         mult = config.get("cache_multipliers", {"write": 1.25, "read": 0.1})
         t = self.tokens
+        cache_read = price.get("cache_read", price["input"] * mult["read"])   # 모델별 캐시 읽기 단가가 있으면 그것
         cost = (t["input_tokens"] * price["input"]
                 + t["cache_creation_input_tokens"] * price["input"] * mult["write"]
-                + t["cache_read_input_tokens"] * price["input"] * mult["read"]
+                + t["cache_read_input_tokens"] * cache_read
                 + t["output_tokens"] * price["output"])
         return cost / 1_000_000
 
@@ -133,6 +134,8 @@ class Usage:
         provider = config.get("provider", "anthropic")
         out = {"model": model, "provider": provider, "calls": self.calls, "cached_calls": self.cached_calls,
                **self.tokens, "cost_usd": self.cost_usd(model, config)}
+        if out["cost_usd"] is not None and config.get("pricing_estimated"):
+            out["cost_estimated"] = True       # 단가가 추정치 (화면은 "(추정)")
         if provider == "azure_openai":
             out["deployment"] = deployment_for(model, config)
         return out
@@ -189,7 +192,10 @@ class AnthropicClient:
         self.model = self.config["model"]
         self.cache = cache if cache is not None else (ResponseCache() if self.config.get("cache") else None)
         if api is None:
-            import anthropic  # 실제 호출 때만 필요
+            try:
+                import anthropic  # 실제 호출 때만 필요 (선택 설치)
+            except ImportError as exc:
+                raise RuntimeError('anthropic 패키지가 없음: pip install -e ".[anthropic]" (기본 제공사는 azure_openai)') from exc
 
             load_dotenv(env_path)
             api = anthropic.Anthropic(api_key=api_key_from_env())

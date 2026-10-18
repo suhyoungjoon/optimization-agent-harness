@@ -5,8 +5,9 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def anthropic_provider(monkeypatch):
-    """이 파일은 Anthropic 클라이언트와 기본 설정을 본다 (LLM_PROVIDER로 제공사를 바꾼 채 실행해도 같게)."""
-    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    """이 파일은 Anthropic 클라이언트와 그 설정을 본다. 기본 제공사가 azure_openai라 anthropic을 고정한다
+    (LLM_PROVIDER로 제공사를 바꾼 채 실행해도 같게)."""
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
 
 from core.llm.client import AnthropicClient, LLMResponse, ResponseCache, Usage, load_config
 

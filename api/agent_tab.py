@@ -55,7 +55,8 @@ def _usage_summary(usage: dict | None, seconds=None) -> dict:
     return {"provider": u.get("provider"), "model": u.get("model"), "deployment": u.get("deployment"),
             "calls": u.get("llm_calls", u.get("calls")), "input_tokens": u.get("input_tokens"),
             "cache_read_tokens": u.get("cache_read_input_tokens"), "output_tokens": u.get("output_tokens"),
-            "cost_usd": u.get("cost_usd"), "seconds": u.get("seconds", seconds)}
+            "cost_usd": u.get("cost_usd"), "cost_estimated": bool(u.get("cost_estimated")),
+            "seconds": u.get("seconds", seconds)}
 
 
 def register(app: FastAPI, ctx: Context, demo: bool = False) -> None:

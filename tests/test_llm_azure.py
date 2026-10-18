@@ -10,7 +10,7 @@ from core.harness.levels import get_level
 from core.harness.runner import HarnessRunner
 from core.llm.azure_openai import (ERROR_PREFIX, RAW_ARGS_KEY, AzureOpenAIClient, from_openai_response,
                                    reasoning_effort, to_openai_messages, to_openai_tools)
-from core.llm.client import CONFIG_PATH, AnthropicClient, ResponseCache, Usage, load_config, make_client
+from core.llm.client import CONFIG_PATH, AnthropicClient, LLMResponse, ResponseCache, Usage, load_config, make_client
 from core.llm.tool_loop import run_tool_loop
 from domains.dispatch.pack import get_pack
 from tests.fake_llm import tool_use
@@ -90,10 +90,14 @@ class PolicyOpenAI:
 
 # --- 설정 ---------------------------------------------------------------------
 
-def test_default_provider_is_anthropic_and_unchanged():
+def test_default_provider_is_azure_and_anthropic_selectable(monkeypatch):
+    assert FILE["provider"] == "azure_openai"                              # 회사 환경 기본값 (2026-10-18)
     config = load_config()
-    assert config["provider"] == "anthropic"
-    assert config["model"] == FILE["model"]
+    assert config["provider"] == "azure_openai" and config["model"] == FILE["azure"]["model"]
+    assert isinstance(make_client({**config, "cache": False}, api=object()), AzureOpenAIClient)
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    config = load_config()
+    assert config["provider"] == "anthropic" and config["model"] == FILE["model"]
     assert load_config(role="analysis")["model"] == FILE["roles"]["analysis"]["model"]
     assert isinstance(make_client({**config, "cache": False}, api=object()), AnthropicClient)
 
@@ -211,13 +215,28 @@ def test_deployment_table_and_usage_record(azure_config):
     usage.add(resp)
     record = usage.to_dict(client.model, config)
     assert record["provider"] == "azure_openai" and record["deployment"] == "dep-mini-01"
-    assert record["model"] == "gpt-4.1-mini" and record["cost_usd"] is None   # 단가 미확인
+    # gpt-4.1-mini 추정 단가: 입력 0.40, 캐시 읽기 0.10, 출력 1.60 (USD/백만)
+    assert record["model"] == "gpt-4.1-mini" and record["cost_usd"] == pytest.approx((400 * 0.40 + 600 * 0.10 + 50 * 1.60) / 1e6)
+    assert record["cost_estimated"] is True
     assert record["input_tokens"] == 400 and record["cache_read_input_tokens"] == 600
 
 
-def test_anthropic_usage_record_has_provider_without_deployment():
+def test_anthropic_usage_record_has_provider_without_deployment(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
     record = Usage().to_dict("claude-haiku-4-5", load_config())
     assert record["provider"] == "anthropic" and "deployment" not in record and record["cost_usd"] == 0
+    assert "cost_estimated" not in record                                    # Anthropic 단가는 확인된 값
+
+
+def test_estimated_prices_with_model_cache_rate(azure_config):
+    usage = Usage()
+    tokens = {"input_tokens": 1_000_000, "output_tokens": 100_000, "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 2_000_000}
+    usage.add(LLMResponse([], "end_turn", tokens, "gpt-5"))
+    record = usage.to_dict("gpt-5", azure_config)
+    # gpt-5: 입력 1.25, 출력 10, 캐시 읽기 0.125 (모델별 cache_read)
+    assert record["cost_usd"] == pytest.approx(1.25 + 1.0 + 2.0 * 0.125) and record["cost_estimated"] is True
+    assert Usage().to_dict("gpt-6.1-sol", azure_config)["cost_usd"] is None   # 표에 없는 모델은 미확인
 
 
 def test_tool_roundtrip_multiple_calls_error_result_and_thinking():
