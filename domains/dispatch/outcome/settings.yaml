@@ -1,0 +1,5 @@
+# 실적 비교의 판정 기준 (M17). 세상 설정(profiles/)이 아니라 우리가 정한 평가 기준이다.
+# 옮겨 온 곳: dispatch-field-loop 52372da settings/flow.yaml의 outcome 묶음 (추천 규칙 값은 M17 범위 밖이라 뺐다)
+promise_window_min: 60        # 약속 준수: 원래 희망 날짜에, 희망 시각 ±이 값 안에 완료
+seeds: [1, 2, 3, 4, 5]        # 평균을 내는 실적 seed (전후 비교는 같은 seed = 공통 난수)
+profile: normal               # 기본 현실 모델 (lenient 관대 | normal 보통 | sensitive 민감)
