@@ -5,6 +5,7 @@
 """
 
 from .metrics import compute
+from .records import CHANGE_REASONS
 
 
 def plan_summary(pack, instance, decisions) -> dict:
@@ -28,4 +29,14 @@ def outcome_summary(records, promise_window_min: int) -> dict:
             "completed_no_complaint_rate": sum(r.result == "completed" for r in records) / n,
             "promise_kept": round(m["promise_kept_rate"] * n),
             "complaint_rate_install": by_wt["install"],
-            "complaint_rate_repair": by_wt["repair"]}
+            "complaint_rate_repair": by_wt["repair"],
+            **change_counts(records)}
+
+
+def change_counts(records) -> dict:
+    """계획 대비 달라진 건수와 이유별 건수 (M17). 평균을 낼 수 있게 평평한 키로 돌려준다.
+    changed = 처음 달라진 이유가 있는 건, moved_day = 최종 날짜가 원래 날짜와 다른 건."""
+    out = {"changed": sum(r.change_reason is not None for r in records),
+           "moved_day": sum(r.final_day != r.original_day for r in records)}
+    out.update({f"changed_{k}": sum(r.change_reason == k for r in records) for k in CHANGE_REASONS})
+    return out

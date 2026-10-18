@@ -23,6 +23,36 @@ def _default_solve(params: dict) -> Solve:
     return get_pack(params).solve
 
 
+def _planned(dec, day: int) -> dict:
+    """처음 계획(원래 날의 결정)의 값 (M17). 배정 실패 계획은 날짜·작업자·시각이 없다."""
+    ok = dec.status == "success"
+    return {"planned_status": dec.status, "planned_day": day if ok else None,
+            "planned_worker_id": dec.decision.get("worker_id") if ok else None,
+            "planned_start_min": hhmm_to_min(dec.decision["start_time"]) if ok else None}
+
+
+def change_reason(planned, attempts: list[dict]) -> str | None:
+    """계획 대비 처음 달라진 이유 (M17, records.CHANGE_REASONS).
+
+    - same_day_resolve: 원래 날 첫 시도가 계획과 다르다. 이월 건이 있는 날은 그날 전체를 다시 배정하므로 생긴다
+    - carryover: 계획 자체가 배정 실패라 다음 날로 넘어갔다
+    - reschedule: 계획대로 갔지만 고객이 일정을 다시 요청해 다음 날로 넘어갔다
+    - None: 계획대로 진행됐다 (결과가 불만·취소여도 계획은 그대로였다)
+    """
+    first = attempts[0]
+    ok = planned.status == "success"
+    same = (first["plan_status"] == planned.status
+            and (not ok or (first["worker_id"] == planned.decision.get("worker_id")
+                            and first["start_min"] == hhmm_to_min(planned.decision["start_time"]))))
+    if not same:
+        return "same_day_resolve"
+    if not ok:
+        return "carryover"
+    if first["response"] == "reschedule":
+        return "reschedule"
+    return None
+
+
 def solve_by_day(instance, params: dict, solve: Solve) -> list:
     """날짜마다 따로 배정한다. 엔진은 날짜별로 일정을 새로 잡으므로 전체 solve와 결과가 같다."""
     records = []
@@ -58,8 +88,9 @@ def simulate_outcomes(instance, decisions: list, params: dict, world: dict, seed
         for order, carry in todays:
             dec = decided[order.id]
             start = hhmm_to_min(dec.decision["start_time"]) if dec.status == "success" else None
+            worker = (dec.decision or {}).get("worker_id") if dec.status == "success" else None
             attempt = {"day": day, "plan_status": dec.status, "reason_code": dec.reason_code,
-                       "start_min": start, "response": None}
+                       "worker_id": worker, "start_min": start, "response": None}
             attempts[order.id].append(attempt)
 
             def settle(result, *, final_day=day, carry_days=carry, cancel_reason=None, done=False):
@@ -68,7 +99,9 @@ def simulate_outcomes(instance, decisions: list, params: dict, world: dict, seed
                     dims=dict(dec.dims), original_day=order.day, final_day=final_day, carry_days=carry_days,
                     desired_min=order.desired, start_min=start if done else None,
                     time_diff_min=start - order.desired if done else None,
-                    result=result, cancel_reason=cancel_reason, attempts=attempts[order.id])
+                    result=result, cancel_reason=cancel_reason, attempts=attempts[order.id],
+                    worker_id=worker if done else None, **_planned(plan[order.id], order.day),
+                    change_reason=change_reason(plan[order.id], attempts[order.id]))
 
             if start is not None:
                 probs = response_probs(world, order.work_type, order.building_type, start - order.desired, carry)

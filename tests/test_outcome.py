@@ -10,8 +10,10 @@ from dataclasses import replace
 import pytest
 
 from core.registry import load_pack, load_params
-from domains.dispatch.outcome import (OUTCOMES, PROFILES, OutcomeRecord, band_index, compute, draw, load_world,
-                                      profile_path, response_probs, simulate_outcomes, solve_by_day, world_errors)
+from domains.dispatch.models import hhmm_to_min
+from domains.dispatch.outcome import (CHANGE_REASONS, OUTCOMES, PROFILES, OutcomeRecord, band_index, change_counts,
+                                      compute, draw, load_world, profile_path, response_probs, simulate_outcomes,
+                                      solve_by_day, world_errors)
 from domains.dispatch.rule_engine import solve
 
 WORLD = load_world(profile_path("normal"))
@@ -219,3 +221,38 @@ def test_compute_rates():
 
 def test_compute_empty():
     assert compute([], promise_window_min=30)["orders"] == 0
+
+
+# --- M17: 계획값과 달라진 이유 ---
+
+def test_planned_values_and_worker(scenario):
+    instance, params, decisions = scenario
+    records = simulate_outcomes(instance, decisions, params, WORLD, seed=1)
+    plan = {d.item_id: d for d in decisions}
+    for r in records:
+        d = plan[r.order_id]
+        assert r.planned_status == d.status
+        if d.status == "success":
+            assert (r.planned_day, r.planned_worker_id, r.planned_start_min) == (
+                r.original_day, d.decision["worker_id"], hhmm_to_min(d.decision["start_time"]))
+        else:
+            assert r.planned_day is r.planned_worker_id is r.planned_start_min is None
+        assert (r.worker_id is not None) == (r.result in ("completed", "complained"))
+        assert all("worker_id" in a for a in r.attempts)
+        assert r.change_reason in (None, *CHANGE_REASONS)
+        if r.change_reason is None:                            # 계획대로면 첫 시도가 계획과 같다
+            assert r.attempts[0]["worker_id"] == r.planned_worker_id
+            assert r.attempts[0]["start_min"] == r.planned_start_min
+
+
+def test_change_reasons_seed1_current(scenario):
+    """현재 v1, seed 1. 같은 날 재배정은 작업자만 바뀐 건도 센다(437).
+    작업자를 보지 않고 상태·시작 시각만 비교하면 m17-review.md 1-2 표의 244건과 같다 (원본 레코드에 작업자가 없었다)."""
+    instance, params, decisions = scenario
+    records = simulate_outcomes(instance, decisions, params, WORLD, seed=1)
+    counts = change_counts(records)
+    assert counts == {"changed": 916, "moved_day": 529, "changed_same_day_resolve": 437, "changed_carryover": 453,
+                      "changed_reschedule": 26}
+    status_or_time = sum(1 for r in records if r.attempts[0]["plan_status"] != r.planned_status
+                         or (r.planned_status == "success" and r.attempts[0]["start_min"] != r.planned_start_min))
+    assert status_or_time == 244 and counts["moved_day"] == 529             # m17-review.md 1-2 표 (현재 v1)

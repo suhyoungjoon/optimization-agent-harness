@@ -11,9 +11,9 @@ import yaml
 from .carryover import simulate_outcomes, solve_by_day
 from .config import BUILDING_TYPES, OUTCOMES, WORK_TYPES, load_world, world_errors
 from .metrics import compute
-from .records import RESULTS, OutcomeRecord
+from .records import CHANGE_REASON_KO, CHANGE_REASONS, RESULTS, OutcomeRecord
 from .response import band_index, draw, response_probs, uniform
-from .summary import outcome_summary, plan_summary
+from .summary import change_counts, outcome_summary, plan_summary
 
 HERE = Path(__file__).resolve().parent
 PROFILES = ("lenient", "normal", "sensitive")
@@ -30,7 +30,8 @@ def load_settings(path: str | Path = HERE / "settings.yaml") -> dict:
 
 
 __all__ = [
-    "BUILDING_TYPES", "OUTCOMES", "PROFILES", "RESULTS", "WORK_TYPES", "OutcomeRecord", "band_index", "compute",
+    "BUILDING_TYPES", "CHANGE_REASONS", "CHANGE_REASON_KO", "OUTCOMES", "PROFILES", "RESULTS", "WORK_TYPES",
+    "OutcomeRecord", "band_index", "change_counts", "compute",
     "draw", "load_settings", "load_world", "outcome_summary", "plan_summary", "profile_path", "response_probs",
     "simulate_outcomes", "solve_by_day", "uniform", "world_errors",
 ]
