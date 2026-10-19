@@ -1,7 +1,7 @@
 import type {
   CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DomainDefinition, DecisionRecord, DomainInfo, FindingLabel, HarnessInfo, Memory, HistoryRow, Proposal, ProposalBatch, Report, Run,
   SpecEstimate, TraceRecord, WorkflowGraph, WorkflowRun, AgentsGraph, AgentsRun, SweepAxis, SweepResult, Sensitivity, ChangeCard, SavedConstraint,
-  AgentTabInfo, AgentTabSources, AgentTabHistoryRow, AgentTabTimeline, TabAgent,
+  AgentTabInfo, AgentTabSources, AgentTabHistoryRow, AgentTabTimeline, TabAgent, ProposalOutcome,
 } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -96,6 +96,8 @@ export const api = {
     request<{ id: string }>("/proposals", { method: "POST", body: JSON.stringify({ report_id: reportId }) }),
   batch: (id: string) => request<ProposalBatch>(`/proposals/batches/${id}`),
   proposal: (id: string) => request<Proposal>(`/proposals/${id}`),
+  proposalOutcome: (id: string, profile?: string) =>
+    request<ProposalOutcome>(`/proposals/${id}/outcome`, { method: "POST", body: JSON.stringify(profile ? { profile } : {}) }),
   simulate: (id: string, body: { confirm?: boolean; level?: string; scope?: string[] } = {}) =>
     request<Proposal | { needs_confirmation: true; estimate: SpecEstimate } | { id: string; status: string }>(
       `/proposals/${id}/simulate`, { method: "POST", body: JSON.stringify(body) }),

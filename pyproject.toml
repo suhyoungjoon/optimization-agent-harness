@@ -37,6 +37,7 @@ include = ["core*", "domains*", "api*", "workflow*", "scripts*", "configs"]   # 
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.md", "*.geojson"]
+"domains.dispatch.outcome" = ["profiles/*.yaml"]   # 실적 현실 모델 (M17, 하위 폴더라 따로 적는다)
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

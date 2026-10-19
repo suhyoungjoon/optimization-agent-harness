@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../api";
 import type { DomainAdapter, MetricSpec, Scope } from "../domains/types";
-import type { Constraint, HarnessInfo, HistoryRow, Memory, Proposal, ProposalBatch, Ranking, RankTier, SavedConstraint, SpecEstimate } from "../types";
+import type { Constraint, HarnessInfo, HistoryRow, Memory, Proposal, ProposalBatch, ProposalOutcome, Ranking, RankTier, SavedConstraint, SpecEstimate } from "../types";
 import { fmtCost, fmtMetric, fmtSeconds, fmtUsd } from "./MetricsPanel";
 import { usePoll } from "./usePoll";
 import { TERMS, tip } from "../terms";
@@ -437,6 +437,102 @@ function Gist({ proposal: p, specs }: { proposal: Proposal; specs: MetricSpec[] 
   );
 }
 
+// --- 계획 vs 실적 (M17): 미리 돌려보기가 끝난 규칙 설정값 안. 참고용 (AI에게 보이지 않고 승인 조건·순위에 쓰지 않음) ---
+const PROFILE_LABEL: Record<string, string> = { normal: "보통", lenient: "관대", sensitive: "민감" };
+const REASON_LABEL: [keyof ProposalOutcome["current"]["outcome"], string, string][] = [
+  ["changed_same_day_resolve", "같은 날 재배정", "이월 건이 들어온 날은 그날 지시서 전체를 규칙 엔진으로 다시 배정해, 원래 날 첫 시도부터 계획과 달라진다"],
+  ["changed_carryover", "이월", "계획 자체가 배정 실패라 다음 날로 넘어갔다"],
+  ["changed_reschedule", "재요청", "계획대로 갔지만 고객이 일정을 다시 요청해 다음 날로 넘어갔다"],
+];
+
+function OutcomeBox({ proposal: p }: { proposal: Proposal }) {
+  const [profile, setProfile] = useState("normal");
+  const [data, setData] = useState<ProposalOutcome | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [hidden, setHidden] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const stamp = JSON.stringify(p.simulation?.after ?? null);
+  useEffect(() => {
+    let stop = false;
+    setLoading(true);
+    setError(null);
+    api.proposalOutcome(p.id, profile)
+      .then((d) => { if (!stop) setData(d); })
+      .catch((e) => {
+        if (stop) return;
+        const msg = String((e as Error).message ?? e);
+        if (msg.includes("실적 기능이 없음")) setHidden(true);   // 실적 기능이 없는 도메인은 표를 숨긴다
+        else setError(msg);
+      })
+      .finally(() => { if (!stop) setLoading(false); });
+    return () => { stop = true; };
+  }, [p.id, profile, stamp]);
+  if (hidden) return null;
+
+  const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+  const num = (v: number) => (Number.isInteger(v) ? v.toLocaleString() : v.toFixed(1));
+  // [이름, 현재, 이 안, 좋아지는 방향(+1 = 클수록 좋음), 형식, 설명]
+  const rows: [string, number, number, 1 | -1, (v: number) => string, string][] = data ? [
+    ["계획 · 배정", data.current.plan.assigned, data.proposal.plan.assigned, 1, num, "규칙 엔진이 배정한 지시서 (1일차부터의 계획)"],
+    ["계획 · 정시 배정", data.current.plan.on_time, data.proposal.plan.on_time, 1, num, "희망 시각에 정확히 시작하도록 배정한 지시서 (계획)"],
+    ["실적 · " + TERMS.promiseKept.label, data.current.outcome.promise_kept, data.proposal.outcome.promise_kept, 1, num,
+      `원래 희망 날짜에, 희망 시각 ±${data.promise_window_min}분 안에 완료 (실적)`],
+    ["실적 · 불만율", data.current.outcome.complaint_rate, data.proposal.outcome.complaint_rate, -1, pct, "완료는 됐지만 불만"],
+    ["실적 · 취소율", data.current.outcome.cancel_rate, data.proposal.outcome.cancel_rate, -1, pct, "고객 취소 + 이틀 넘게 밀려 취소"],
+    ["실적 · 미처리율", data.current.outcome.unserved_rate, data.proposal.outcome.unserved_rate, -1, pct, "마지막 날까지 처리되지 못함"],
+    ["실적 · 평균 이월", data.current.outcome.avg_carry_days, data.proposal.outcome.avg_carry_days, -1, (v) => `${v.toFixed(2)}일`, "다음 날로 넘어간 횟수의 평균"],
+  ] : [];
+
+  return (
+    <div className="outcome-box" aria-label={TERMS.outcome.label}>
+      <div className="outcome-head">
+        <strong title={tip("outcome")}>{TERMS.outcome.label}</strong>{" "}
+        <span className="chip muted" title="승인 조건·순위·검사에 쓰지 않습니다. AI에게도 보여주지 않습니다">참고용</span>{" "}
+        <label className="small">현실 모델{" "}
+          <select value={profile} onChange={(e) => setProfile(e.target.value)} aria-label="현실 모델">
+            {Object.entries(PROFILE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </label>
+        {loading && <span className="muted small"> 계산 중… (2~3초)</span>}
+      </div>
+      {error && <p className="critical-text small">✕ 실적 계산 실패: {error}</p>}
+      {data && (
+        <>
+          <table className="outcome-table small">
+            <thead><tr><th /><th className="num">현재</th><th className="num">이 안</th><th className="num">차이</th></tr></thead>
+            <tbody>
+              {rows.map(([name, cur, mine, better, fmt, help]) => {
+                const d = mine - cur;
+                const cls = Math.abs(d) < 1e-9 ? "" : d * better > 0 ? "good-text" : "critical-text";
+                const dTxt = fmt === pct ? `${d >= 0 ? "+" : ""}${(d * 100).toFixed(1)}%p`
+                  : `${d >= 0 ? "+" : ""}${fmt === num ? num(Math.round(d * 10) / 10) : d.toFixed(2)}`;
+                return (
+                  <tr key={name} title={help}>
+                    <td>{name}</td><td className="num">{fmt(cur)}</td><td className="num">{fmt(mine)}</td>
+                    <td className={`num ${cls}`}>{dTxt}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p className="small">
+            계획과 달라진 지시서 (이 안): <strong>{num(data.proposal.outcome.changed)}건</strong>
+            {" — "}
+            {REASON_LABEL.map(([k, label, help], i) => (
+              <span key={k} title={help}>{i ? " · " : ""}{label} {num(data.proposal.outcome[k] as number)}</span>
+            ))}
+            <span className="muted"> (현재 {num(data.current.outcome.changed)}건)</span>
+          </p>
+          <p className="muted small">
+            현실 모델 {PROFILE_LABEL[data.profile] ?? data.profile} · 실적 seed {data.seeds.join(",")} 평균 · 전체 {data.proposal.outcome.orders.toLocaleString()}건 ·
+            {" "}계획 숫자는 1일차부터의 계획이다. 이월 건이 섞인 날은 그날 전체를 다시 배정하므로 실제로 실행된 계획과 다르다 (같은 날 재배정).
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ProposalCard({
   proposal: p,
   rank,
@@ -512,6 +608,8 @@ function ProposalCard({
           {sim.constraint_violations.map((v, i) => <li key={i}>⚠ {v.message}</li>)}
         </ul>
       )}
+
+      {p.kind === "params" && sim && !sim.error && sim.before && <OutcomeBox proposal={p} />}
 
       {estimate && (
         <div className="confirm">

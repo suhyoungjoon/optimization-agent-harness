@@ -1,0 +1,28 @@
+# 세상 설정 (민감). AI에게 보여 주지 않는 정답표다. 프롬프트·도구 결과에 이 파일 원문을 넣지 않는다.
+profile: sensitive
+
+response:
+  bands_min: [0, 30, 60, 90]
+  tolerance_shift_min: {house: 0, apartment: 15}
+  by_work_type:
+    install:
+      - {accept: 0.95, complain: 0.03, reschedule: 0.02, cancel: 0.00}
+      - {accept: 0.90, complain: 0.05, reschedule: 0.04, cancel: 0.01}
+      - {accept: 0.80, complain: 0.10, reschedule: 0.08, cancel: 0.02}
+      - {accept: 0.50, complain: 0.25, reschedule: 0.17, cancel: 0.08}
+      - {accept: 0.30, complain: 0.35, reschedule: 0.20, cancel: 0.15}
+    repair:
+      - {accept: 0.93, complain: 0.04, reschedule: 0.03, cancel: 0.00}
+      - {accept: 0.78, complain: 0.13, reschedule: 0.07, cancel: 0.02}
+      - {accept: 0.25, complain: 0.52, reschedule: 0.13, cancel: 0.10}
+      - {accept: 0.12, complain: 0.58, reschedule: 0.15, cancel: 0.15}
+      - {accept: 0.05, complain: 0.60, reschedule: 0.15, cancel: 0.20}
+
+carryover:
+  max_carry_days: 2
+  per_day: {complain: 0.12, cancel: 0.06}
+
+truth:
+  P5:
+    name: 장애 고객 지연 민감
+    answer: {dims: {work_type: repair}, outcome_metric: complaint_rate, direction: high, delay_over_min: 30}

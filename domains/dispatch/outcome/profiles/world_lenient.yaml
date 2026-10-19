@@ -1,0 +1,28 @@
+# 세상 설정 (관대). AI에게 보여 주지 않는 정답표다. 프롬프트·도구 결과에 이 파일 원문을 넣지 않는다.
+profile: lenient
+
+response:
+  bands_min: [0, 30, 60, 90]
+  tolerance_shift_min: {house: 0, apartment: 5}
+  by_work_type:
+    install:
+      - {accept: 0.98, complain: 0.01, reschedule: 0.01, cancel: 0.00}
+      - {accept: 0.96, complain: 0.02, reschedule: 0.02, cancel: 0.00}
+      - {accept: 0.92, complain: 0.04, reschedule: 0.04, cancel: 0.00}
+      - {accept: 0.78, complain: 0.11, reschedule: 0.09, cancel: 0.02}
+      - {accept: 0.60, complain: 0.20, reschedule: 0.15, cancel: 0.05}
+    repair:                        # P5는 약하게라도 남긴다
+      - {accept: 0.97, complain: 0.02, reschedule: 0.01, cancel: 0.00}
+      - {accept: 0.90, complain: 0.06, reschedule: 0.04, cancel: 0.00}
+      - {accept: 0.60, complain: 0.28, reschedule: 0.09, cancel: 0.03}
+      - {accept: 0.45, complain: 0.37, reschedule: 0.12, cancel: 0.06}
+      - {accept: 0.30, complain: 0.45, reschedule: 0.15, cancel: 0.10}
+
+carryover:
+  max_carry_days: 2
+  per_day: {complain: 0.05, cancel: 0.02}
+
+truth:
+  P5:
+    name: 장애 고객 지연 민감
+    answer: {dims: {work_type: repair}, outcome_metric: complaint_rate, direction: high, delay_over_min: 30}

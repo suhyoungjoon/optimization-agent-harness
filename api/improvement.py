@@ -77,6 +77,10 @@ class SimulateRequest(BaseModel):
     cached: bool = False              # spec 개선안: 저장된 시뮬레이션 결과를 재생
 
 
+class OutcomeRequest(BaseModel):
+    profile: str | None = None        # 현실 모델 (lenient | normal | sensitive). 없으면 도메인 설정 기본값
+
+
 class DecisionRequest(BaseModel):
     note: str = ""
     force: bool = False               # 시뮬레이션 없이 승인 (사유를 note에 남긴다)
@@ -413,6 +417,44 @@ def register(app: FastAPI, ctx: Context) -> None:
         return proposal_or_404(proposal_id)
 
     # --- 시뮬레이션 ---
+    # --- 계획 vs 실적 (M17): 참고용. DB에 저장하지 않고, AI 입력·순위·검사에 쓰지 않는다 ---
+    outcome_cache: dict[str, dict] = {}          # "현재" 기준값 (데이터셋·범위·params 버전·현실 모델·seed)
+    outcome_lock = threading.Lock()
+
+    @app.post("/proposals/{proposal_id}/outcome")
+    def proposal_outcome(proposal_id: str, req: OutcomeRequest):
+        p = proposal_or_404(proposal_id)
+        if p["kind"] != "params":
+            raise HTTPException(400, "실적 비교는 규칙 설정값 개선안만 (업무 규칙 문서 개선안은 AI 배정 실행이라 대상이 아님)")
+        report = store.get_report(p["report_id"])
+        run, dataset, pack, instance, _truth, _decisions = _run_context(store, report["run_id"])
+        if not hasattr(pack, "outcome"):
+            raise HTTPException(404, f"이 도메인({pack.name})에는 실적 기능이 없음")
+        params = load_params(pack)
+        if errors := params_errors(params, p["body"], pack.dimensions()):
+            raise HTTPException(400, "지금 규칙 기준으로 적용할 수 없음: " + "; ".join(errors))
+        try:
+            key = json.dumps([dataset["id"], run.get("scope"), params.get("version"), req.profile], sort_keys=True)
+            with outcome_lock:
+                current = outcome_cache.get(key)
+            if current is None:
+                current = pack.outcome(instance, profile=req.profile)
+                with outcome_lock:
+                    outcome_cache[key] = current
+            started = time.monotonic()
+            candidate = load_pack(pack.name, apply_params(params, p["body"])).outcome(instance, profile=req.profile)
+        except ValueError as exc:      # 알 수 없는 현실 모델 등
+            raise HTTPException(400, str(exc))
+        delta = {part: {k: candidate[part][k] - current[part][k] for k in candidate[part]
+                        if isinstance(candidate[part][k], (int, float)) and k in current[part]}
+                 for part in ("plan", "outcome")}
+        return {"proposal_id": proposal_id, "params_version": params.get("version"), "profile": candidate["profile"],
+                "seeds": candidate["seeds"], "promise_window_min": candidate["promise_window_min"],
+                "current": {"plan": current["plan"], "outcome": current["outcome"]},
+                "proposal": {"plan": candidate["plan"], "outcome": candidate["outcome"]}, "delta": delta,
+                "seconds": round(time.monotonic() - started, 2),
+                "note": "참고용: 가상 고객 반응으로 만든 실적. AI에게 보여 주지 않고 승인 조건·순위·검사에 쓰지 않는다"}
+
     @app.post("/proposals/{proposal_id}/simulate")
     def simulate(proposal_id: str, req: SimulateRequest):
         p = proposal_or_404(proposal_id)

@@ -110,6 +110,25 @@ class DispatchPack:
     def analysis_tools(self, instance: Instance, decisions: list[DecisionRecord]) -> list[dict]:
         return build_analysis_tools(instance, decisions, self.params)
 
+    # --- 선택 기능 (M17): 계획에 가상 고객 반응을 붙인 실적. DomainPack 계약 밖이며, API는 있을 때만 쓴다 ---
+    def outcome(self, instance: Instance, profile: str | None = None, seeds: list[int] | None = None) -> dict:
+        """이 팩의 params로 배정(계획)하고, 현실 모델로 실적을 seed마다 만들어 평균낸다.
+        현실 모델은 AI에게 보이지 않는 정답표다: 결과를 AI 입력·순위·검사에 넣지 않는다 (plan.md M17 결정 31)."""
+        from statistics import mean
+
+        from .outcome import load_settings, load_world, outcome_summary, plan_summary, profile_path, simulate_outcomes
+
+        settings = load_settings()
+        profile = profile or settings["profile"]
+        seeds = list(seeds or settings["seeds"])
+        world = load_world(profile_path(profile))
+        decisions = self.solve(instance, self.params)
+        runs = [outcome_summary(simulate_outcomes(instance, decisions, self.params, world, s, self.solve),
+                                settings["promise_window_min"]) for s in seeds]
+        return {"plan": plan_summary(self, instance, decisions),
+                "outcome": {k: mean(r[k] for r in runs) for k in runs[0]},
+                "profile": profile, "seeds": seeds, "promise_window_min": settings["promise_window_min"]}
+
 
 def get_pack(params: dict | None = None) -> DispatchPack:
     return DispatchPack(params)
