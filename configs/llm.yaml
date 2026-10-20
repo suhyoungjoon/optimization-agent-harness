@@ -15,6 +15,7 @@ max_tokens: 16000
 roles:
   analysis: {model: claude-haiku-5-5, thinking: adaptive, effort: medium}
   proposals: {model: claude-opus-5-5, thinking: adaptive, effort: medium}
+  supervisor: {model: claude-opus-5-5, thinking: adaptive, effort: medium}   # M18 (anthropic일 때)
 max_llm_calls_per_item: 12     # 한 항목에서 도구 호출 루프가 끝나지 않을 때 끊는 상한
 concurrency: 4                 # 동시에 실행할 run 수 (레벨·반복)
 cache: true                    # 입력 해시 캐시. 최종 측정 때는 끈다 (환경변수 LLM_CACHE=0이 우선)
@@ -48,6 +49,7 @@ azure:
   roles:                                           # 분석·개선안을 한 단계 올림 (2026-10-16). 이전: 분석 gpt-5-mini, 개선안 gpt-5
     analysis: {model: gpt-5, effort: medium}
     proposals: {model: gpt-5.4, effort: medium}    # gpt-6.1-sol은 Chat Completions에서 도구를 못 써 보류 (아래)
+    supervisor: {model: gpt-5.4, effort: medium}   # M18 분석·개선 Supervisor (2026-10-20 결정 35)
   # 모델 이름 → deployment 이름. 비어 있으면 모델 이름을 그대로 deployment로 쓴다.
   # 2026-10-16 실제 호출: gpt-4.1, gpt-4.1-mini, gpt-5, gpt-5-mini, gpt-5.4, gpt-5.6-luna, gpt-6-luna, gpt-6.1-sol 모두 모델 이름 = deployment 이름
   deployments: {}

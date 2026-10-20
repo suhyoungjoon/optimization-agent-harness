@@ -1,6 +1,6 @@
 """에이전트 공통 실행 제어 (M18-a): 반복 감지, 실행 예산, 표준 실패 상태.
 
-모든 도구 루프(core/llm/tool_loop.py, workflow/agents/tool_agent.py)와 배정 러너가 같이 쓴다.
+모든 도구 루프(core/llm/tool_loop.py, workflow/agents/tool_agent.py)와 하네스 러너(core/harness/runner.py)가 같이 쓴다.
 코어 설정이고 도메인 용어가 없다. 예산 기본값은 configs/workflow.yaml의 budget.
 """
 

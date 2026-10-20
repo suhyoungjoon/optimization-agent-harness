@@ -110,6 +110,8 @@ def perspective_view(system: str, tools: list[dict], perspective: dict | None) -
     """관점 하나에 맞춘 시스템 프롬프트와 도구 (관점의 질문을 뒤에 붙이고 관점의 도구만 남긴다). 관점이 없으면 그대로."""
     if not perspective:
         return system, tools
+    if not perspective.get("tools"):   # 도구 목록이 없는 관점(Supervisor가 직접 쓴 질문, M18)은 도구를 다 준다
+        return f"{system}\n\n관점: {perspective['name']}\n{perspective['question'].strip()}", tools
     allowed = set(perspective["tools"])
     return (f"{system}\n\n관점: {perspective['name']}\n{perspective['question'].strip()}",
             [t for t in tools if t["name"] in allowed])

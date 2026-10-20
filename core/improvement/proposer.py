@@ -7,8 +7,8 @@
 import json
 
 from core.llm.client import LLMClient
-from core.llm.events import check_event
 from core.llm.control import Budget
+from core.llm.events import check_event
 from core.llm.tool_loop import run_tool_loop, usage_dict
 from core.params import params_view
 from core.retrieval.tool import citation_errors, search_tool
