@@ -38,6 +38,29 @@ function nodeOf(e: TimelineEvent, sub = false): string | null {
 }
 
 
+// 도구·검사는 0.1초 안에 끝나 화면이 상태를 읽는 사이(0.7초)에 지나간다. 새로 들어온 줄에 도구·검사가 있으면
+// 그 노드를 잠깐(FLASH_MS) 실행 중으로 보여 준다. 화면 표시만이고 실행 속도는 그대로다
+const FLASH_MS = 1200;
+function useFlash(t: AgentTabTimeline | null): string | null {
+  const [flash, setFlash] = useState<string | null>(null);
+  const seen = useRef<{ id: string | null; n: number }>({ id: null, n: 0 });
+  useEffect(() => {
+    if (!t) return;
+    const prev = seen.current.id === t.id ? seen.current.n : t.events.length;   // 다른 실행으로 바뀌면 처음부터
+    seen.current = { id: t.id, n: t.events.length };
+    if (!t.live || t.events.length <= prev) return;
+    const fresh = t.events.slice(prev);
+    const viaTools = t.agent === "supervisor";
+    const hit = [...fresh].reverse().find((e) => e.type === "tool" || e.type === "check" || (viaTools && e.item));
+    const node = hit ? nodeOf(hit, viaTools) : null;
+    if (!node) return;
+    setFlash(node);
+    const timer = setTimeout(() => setFlash(null), FLASH_MS);
+    return () => clearTimeout(timer);
+  }, [t?.id, t?.events.length, t?.live]); // eslint-disable-line react-hooks/exhaustive-deps
+  return t?.live ? flash : null;
+}
+
 // 실행 중 지금 일하는 노드. 타임라인 줄은 일이 끝난 뒤에 생기므로(AI 판단 줄은 AI 응답이 와야 생긴다),
 // 마지막 줄의 다음 차례를 본다: 도구 결과·반려·재요청·다음 항목 뒤에는 AI가 생각하는 중이다
 function workingNode(t: AgentTabTimeline): string | null {
@@ -108,6 +131,7 @@ export default function AgentRunsPanel({
   );
   const terms = useMemo(() => makeTerms(adapter, domain.dimensions), [adapter, domain.dimensions]);
   const shown = timeline && current && timeline.id === current.id ? timeline : null;
+  const flash = useFlash(shown);
   useEffect(() => {
     if (!shown || shown.live || shown.status === "running") return;
     refreshSources();
@@ -286,8 +310,8 @@ export default function AgentRunsPanel({
           {current && !shown && <div className="panel muted">불러오는 중…</div>}
           {shown && <Summary t={shown} onOpenReport={onOpenReport} onOpenBatch={onOpenBatch} />}
           {shown && shown.agent === "supervisor" && !shown.live && <SupervisorResult t={shown} adapter={adapter} />}
-          {shown && graph && <InnerGraph graph={graph} t={shown} terms={terms} />}
-          {shown && <Timeline t={shown} terms={terms} />}
+          {shown && graph && <InnerGraph graph={graph} t={shown} terms={terms} flash={flash} />}
+          {shown && <Timeline t={shown} terms={terms} flash={flash} />}
         </div>
       </div>
     </section>
@@ -344,7 +368,7 @@ function Summary({ t, onOpenReport, onOpenBatch }: {
 }
 
 // 일반 보기: 노드·연결 이름을 쉬운 말로, 노드 종류·id는 숨김. "기술 정보 보기"를 켜면 LangGraph 탭과 같은 원래 표시
-function InnerGraph({ graph, t, terms }: { graph: AgentsGraph; t: AgentTabTimeline; terms: Terms }) {
+function InnerGraph({ graph, t, terms, flash }: { graph: AgentsGraph; t: AgentTabTimeline; terms: Terms; flash: string | null }) {
   const [tech, setTech] = useState(false);
   const sub = graph.agents[t.graph];
   const views = useMemo(() => {
@@ -357,7 +381,7 @@ function InnerGraph({ graph, t, terms }: { graph: AgentsGraph; t: AgentTabTimeli
       counts[n] = (counts[n] ?? 0) + 1;
       last[n] = e;
     }
-    const lastNode = workingNode(t);
+    const lastNode = flash ?? workingNode(t);
     const out: Record<string, NodeView> = {};
     for (const n of sub?.nodes ?? []) {
       const e = last[n.id];
@@ -368,7 +392,7 @@ function InnerGraph({ graph, t, terms }: { graph: AgentsGraph; t: AgentTabTimeli
       };
     }
     return out;
-  }, [sub, t.events, t.live, tech, terms]);
+  }, [sub, t.events, t.live, tech, terms, flash]);
   const plain = useMemo(() => sub && !tech ? {
     nodes: sub.nodes.map((n) => {
       const p = PLAIN_NODES[n.id];
@@ -395,7 +419,7 @@ function InnerGraph({ graph, t, terms }: { graph: AgentsGraph; t: AgentTabTimeli
   );
 }
 
-function Timeline({ t, terms }: { t: AgentTabTimeline; terms: Terms }) {
+function Timeline({ t, terms, flash }: { t: AgentTabTimeline; terms: Terms; flash: string | null }) {
   const ref = useRef<HTMLOListElement>(null);
   useEffect(() => {
     const el = ref.current;
@@ -418,7 +442,7 @@ function Timeline({ t, terms }: { t: AgentTabTimeline; terms: Terms }) {
       <ol className="agent-timeline" ref={ref}>
         {t.events.map((e) => <TimelineRow key={e.seq} e={e} terms={terms} showItem={t.agent !== "dispatch"} itemLabels={t.item_labels}
           nested={t.agent === "supervisor" && !!e.item} />)}
-        {working === "ai" && t.events.length > 0 && (
+        {working === "ai" && !flash && t.events.length > 0 && (
           <li className="tl-thinking muted"><span className="tl-turn" /><span className="tl-kind">AI 판단</span>
             AI가 생각하는 중…{waited != null ? ` ${waited}초` : ""}</li>
         )}
