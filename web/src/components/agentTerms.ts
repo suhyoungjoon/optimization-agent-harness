@@ -148,7 +148,7 @@ export function makeTerms(adapter: DomainAdapter, dims?: Dimensions): Terms {
     if (names.length) {
       const counts = new Map<string, number>();   // 같은 도구를 여러 번 부르면 "×3"으로 묶는다
       for (const n of names.map(tool)) counts.set(n, (counts.get(n) ?? 0) + 1);
-      return `다음을 하기로 함: ${[...counts].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).join(" · ")}`;
+      return `${[...counts].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).join(" · ")}`;
     }
     const said = m ? "" : e.text === "글로만 답함" ? "" : e.text;
     return `도구 없이 글로만 답함${said ? `: ${said}` : ""}`;
@@ -165,7 +165,7 @@ export function makeTerms(adapter: DomainAdapter, dims?: Dimensions): Terms {
     return head;
   };
   const brief = (e: TimelineEvent) => {
-    if (e.type === "llm") return aiAsked(e).replace("다음을 하기로 함: ", "");
+    if (e.type === "llm") return aiAsked(e);
     if (e.type === "tool") return `${tool(e.name ?? e.text)}${e.ok === false ? " (오류)" : ""}`;
     if (e.type === "decision") return decision(e);
     if (e.type === "check") {
