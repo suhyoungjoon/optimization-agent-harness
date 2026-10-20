@@ -99,6 +99,7 @@ def diagnose(simulation: dict, dimensions: dict, findings: list[dict], decisions
              target_findings: list[str] | None = None, sweep_points: list[dict] | None = None) -> dict:
     """진단 신호 네 가지를 한 번에. 계산할 재료가 없는 신호는 None (예: 탐색을 안 했으면 탐색 대비 None)."""
     return {
+        "targeted": bool(target_findings),     # 개선안이 겨냥한 발견을 밝혔는지 (아니면 모든 발견 구간)
         "target_changes": target_changes(simulation, target_findings),
         "worsened_metrics": worsened_metrics(simulation, dimensions),
         "missed_slices": None if decisions_after is None else missed_slices(decisions_after, dimensions, findings),

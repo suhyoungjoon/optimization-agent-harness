@@ -107,6 +107,28 @@ def _proposer(n, messages, names=()):
     ]})
 
 
+def _supervisor(n):
+    """리허설 Supervisor: 기본 순서로 한 번씩 부르고 첫 개선안(경계 지역 구간 조건)을 추천한다. 수치는 인용하지 않는다."""
+    if n == 0:
+        return tool_use("run_analysis", {})
+    if n == 1:
+        return tool_use("run_proposals", {"focus": "구간 조건(override_rules)만"})
+    if n == 2:
+        return tool_use("simulate", {"proposal_id": "P1"})
+    return tool_use("submit_judgment", {
+        "summary": "리허설: 경계 지역 실패를 구간 조건으로 줄이는 안을 추천",
+        "recommendations": [{"proposal_id": "P1", "cited_calls": ["c3"], "expected_effect": "경계 지역 배정 증가",
+                             "loses": "다른 구간 영향 거의 없음", "confidence": "중간"}],
+        "not_recommended": [{"proposal_id": "P2", "reason": "허용 범위 밖 (적용 불가)"}],
+        "hypotheses": [{"statement": "경계 지역 실패는 지역 범위 제한 때문", "support": "c1 분석의 경계 지역 실패 집중",
+                        "against": "시간 조건 실패도 섞여 있을 수 있음", "confidence": "중간",
+                        "would_flip": "구간 조건을 넣어도 경계 지역 실패율이 그대로면"}],
+        "attempts": [{"what": "분석 → 개선 요청(구간 조건만) → P1 미리 돌려보기", "why": "원인 확인 후 구간에만 적용",
+                      "learned": "P1이 목표 구간 실패를 줄임 (진단 신호)"}],
+        "questions_for_human": ["경계 지역 출동 거리를 늘려도 되는가 (현장 한도 확인)"],
+        "end_reason": "good_enough"})
+
+
 def _opinion(messages):
     """의견 한 줄 → 제약. "N km"가 있으면 지금 제안이 바꾸는 경로의 max, 없으면 한도 없는 제약 (형식 검사에 걸림)."""
     text = _first_user_text(messages)
@@ -133,6 +155,8 @@ def build_policy(pack, instance):
             return _analyst(n, messages)
         if "submit_proposals" in names:
             return _proposer(n, messages, names)
+        if "submit_judgment" in names:      # 분석·개선 Supervisor (M18): 분석 → 개선 → 미리 돌려보기 → 보고서
+            return _supervisor(n)
         if "choose_next_step" in names:     # Supervisor (M15-D): 고정 규칙의 판정을 그대로 고른다
             ask = json.loads(_first_user_text(messages))
             return tool_use("choose_next_step", {"next": ask["rule_recommendation"],

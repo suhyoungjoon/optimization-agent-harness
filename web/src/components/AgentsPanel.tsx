@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { DomainAdapter } from "../domains/types";
-import type { AgentEvent, AgentsGraph, AgentsLoop, AgentsRun, Constraint, DomainInfo, HarnessInfo } from "../types";
+import type { AgentEvent, AgentsGraph, AgentsLoop, AgentsMode, AgentsRun, Constraint, DomainInfo, HarnessInfo, JudgmentView } from "../types";
 import type { MetricSpec } from "../domains/types";
 import { fmtMetric, fmtUsd } from "./MetricsPanel";
 import { constraintText } from "./ImprovementPanel";
@@ -21,6 +21,7 @@ const AGENT_NAMES: Record<string, string> = {
   proposal_agent: "개선 제안 에이전트",
   opinion_agent: "의견 정리 에이전트",
   check_end: "종료 판정 Supervisor",
+  supervisor_agent: "Supervisor 지휘 에이전트",
   simulate: "미리 돌려보기 (배정 에이전트 재실행)",
 };
 
@@ -45,6 +46,7 @@ export default function AgentsPanel({
     seed, faults: faults.length ? faults : domain.faults.map((f) => f.id), items: 10, level,
     llm: "fake" as "fake" | "claude", pace: 0.2, perspectives: false,
     end_check: "fixed" as "fixed" | "supervisor", use_saved_constraints: true,
+    mode: "fixed" as AgentsMode,      // M18: 분석·개선 구간을 Supervisor가 지휘 (켜고 끄기, 기본 꺼짐)
   });
   // 실제 AI 이름: 서버 설정의 제공사·모델 (값 "claude"는 API 계약상 이름이고 제공사는 서버 설정이 정한다)
   const realAi = `${PROVIDER_LABEL[harness?.llm.provider ?? "anthropic"] ?? harness?.llm.provider} ${harness?.llm.model ?? ""}`.trim();
@@ -64,10 +66,13 @@ export default function AgentsPanel({
   const runPerspectives = inFlight && run ? !!run.inputs.perspectives : form.perspectives;
   // 종료 판정: 고정 규칙 또는 Supervisor 에이전트 (M15-D). 실행 중에는 그 실행의 방식
   const runEndCheck = inFlight && run ? run.end_check ?? "fixed" : form.end_check;
+  // 분석·개선 지휘 (M18): 켜면 상위 그래프의 분석 → 개선 제안 → 미리 돌려보기가 Supervisor 노드 하나로 바뀐다.
+  // 실행 전에도 바꾸면 그래프가 바로 그 모드의 모양으로 다시 그려진다 (Supervisor가 있을 때·없을 때 흐름)
+  const runMode: AgentsMode = inFlight && run ? run.mode ?? "fixed" : form.mode;
 
   useEffect(() => {
-    api.agentsGraph(runLevel, domain.name, runPerspectives, runEndCheck).then(setGraph).catch((e) => setError(String(e)));
-  }, [runLevel, runPerspectives, runEndCheck, domain.name]);
+    api.agentsGraph(runLevel, domain.name, runPerspectives, runEndCheck, runMode).then(setGraph).catch((e) => setError(String(e)));
+  }, [runLevel, runPerspectives, runEndCheck, runMode, domain.name]);
 
   const polled = usePoll<AgentsRun>(flowId ? () => api.agentsGet(flowId, lastI.current) : null,
     (r) => r.status !== "running", [flowId, tick], 300);
@@ -186,6 +191,12 @@ export default function AgentsPanel({
             onChange={(e) => setForm({ ...form, use_saved_constraints: e.target.checked })} />{" "}
           저장된 제약 불러오기
         </label>
+        <label className="ag-mode" title="켜면 분석 → 개선 제안 → 미리 돌려보기 구간을 Supervisor 에이전트가 지휘합니다. 분석·개선 에이전트와 계산 도구를 도구로 부르며 다음 행동을 스스로 정하고, 판단 보고서(추천안·원인 가설·시도 기록·사람에게 묻는 것)를 냅니다. 반영은 그대로 사람 승인. 끄면 지금의 고정 흐름">
+          <input type="checkbox" checked={form.mode === "supervisor"} disabled={inFlight}
+            onChange={(e) => { setForm({ ...form, mode: e.target.checked ? "supervisor" : "fixed" });
+              setPicked(e.target.checked ? "supervisor_agent" : "analysis_agent"); }} />{" "}
+          Supervisor 지휘
+        </label>
         <label title="회차가 끝났을 때 다음 단계를 누가 고를지. Supervisor는 허용된 단계(다음 회차·다시 제안·결과 보고) 중에서만 고르고, 최대 회차는 코드가 막습니다">
           종료 판정{" "}
           <select value={form.end_check} disabled={inFlight}
@@ -226,12 +237,17 @@ export default function AgentsPanel({
 
       {graph && (
         <div className="panel gc-panel">
-          <h2>상위 그래프 <span className="muted small">(StateGraph · 노드를 누르면 아래에 내부·결과)</span></h2>
+          <h2>상위 그래프 <span className="muted small">(StateGraph · {runMode === "supervisor" ? "Supervisor 지휘" : "고정 흐름"} · 노드를 누르면 아래에 내부·결과)</span></h2>
           <GraphCanvas ariaLabel="상위 그래프" nodes={graph.top.nodes} edges={graph.top.edges} views={topViews}
             activeEdges={topActive} onNodeClick={(id) => !id.startsWith("__") && setPicked(picked === id ? null : id)}
             height={320} nodeWidth={160} nodeHeight={74} minFitZoom={0.82} follow={towards ?? lastStep ?? "__start__"} />
           <Legend />
         </div>
+      )}
+
+      {run?.waiting === "approval" && run.approval?.judgment && (
+        <JudgmentCard key={run.steps.length} j={run.approval.judgment} specs={adapter.metrics}
+          dimLabel={(k) => domain.dimensions.dimensions[k]?.label ?? k} valueLabel={(v) => adapter.valueNames?.[v] ?? v} />
       )}
 
       {run?.loop && <LoopPanel loop={run.loop} specs={adapter.metrics} />}
@@ -328,6 +344,8 @@ function AgentInside({ graph, agent, run, events, live }: {
           ? "지시서마다 이 그래프를 한 바퀴 돈다. 레벨을 올리면 조회 도구 → 자동 검사·다시 시도 → 위험 결정 막기 → 과정 저장 노드가 붙는다."
           : agent === "analysis_agent" && graph?.perspectives
           ? "관점별 분석: 관점 노드들이 동시에 돈다(fan-out). 관점 노드 하나가 그 관점의 도구·질문만 가진 분석 에이전트(AI 응답 ⇄ 도구 → 근거 검사)다. 합치기(fan-in)는 같은 구간·사유의 발견을 하나로 묶고 관점마다 다른 해석은 나란히 남긴다."
+          : agent === "supervisor_agent"
+          ? "Supervisor가 다음 행동을 스스로 고른다: 도구 노드에서 분석 에이전트·개선 에이전트를 부르거나(그 진행은 '분석 R1 · …'처럼 보인다), 미리 돌려보기(진단 신호 포함)·파라미터 훑기를 한다. 판단 보고서는 코드가 검사한다(미리 돌려본 적용 가능한 안만 추천, 근거 수치는 인용한 결과에 있어야 함). 호출 상한 전체 40·분석 3·개선 4, 예산 상한."
           : "AI 응답 ⇄ 도구를 오가다 제출하면 검사한다. 분석·개선 제안 에이전트가 같은 틀(build_tool_agent)을 쓴다."}
       </p>
       <GraphCanvas ariaLabel={`${AGENT_NAMES[agent] ?? agent} 내부 그래프`} nodes={sub.nodes} edges={sub.edges}
@@ -513,6 +531,79 @@ function ConfirmConstraints({ ask, onConfirm, onRewrite }: {
       </table>
       <button className="primary" onClick={confirm}>확정</button>
       <button onClick={onRewrite} title="정리된 제약을 버리고 사람 검토로 돌아가 의견을 다시 적습니다">다시 적기</button>
+    </div>
+  );
+}
+
+// Supervisor 판단 보고서 (M18-c): 사람 검토 때 이 추천의 근거와 보고서 전체
+const CONF_CLASS: Record<string, string> = { 높음: "good-text", 중간: "", 낮음: "warning-text" };
+const END_REASON: Record<string, string> = {
+  good_enough: "충분히 좋은 안 확보", no_further_gain: "더 나아질 여지 없음",
+  not_solvable_by_params: "파라미터로 못 푸는 문제", budget: "예산 초과",
+};
+
+function JudgmentCard({ j, specs, dimLabel, valueLabel }: {
+  j: JudgmentView; specs: MetricSpec[]; dimLabel: (k: string) => string; valueLabel: (v: string) => string;
+}) {
+  const r = j.recommendation;
+  const d = j.diagnosis;
+  const spec = (k: string) => specs.find((m) => m.key === k);
+  const metric = (k: string, v: number) => { const f = spec(k)?.format; return f ? fmtMetric(v, f) : v.toFixed(2); };
+  return (
+    <div className="panel judgment-card">
+      <h2>Supervisor 판단 보고서 <span className="muted small">(이 추천 {r.proposal_id} · 반영은 사람이 결정)</span></h2>
+      {j.summary && <p>{j.summary}</p>}
+      <dl className="judgment-rec">
+        <dt>기대 효과</dt><dd>{r.expected_effect}</dd>
+        <dt>잃는 것</dt><dd>{r.loses}</dd>
+        <dt>확신도</dt><dd className={CONF_CLASS[r.confidence] ?? ""}>{r.confidence}</dd>
+        <dt>근거</dt><dd className="muted small">Supervisor 도구 호출 {r.cited_calls.join(", ")}</dd>
+      </dl>
+      {d && (
+        <div className="small">
+          <strong>진단 신호</strong>
+          <ul>
+            {d.target_changes.map((t) => (
+              <li key={t.finding} className={t.improved ? "" : "warning-text"}>
+                {d.targeted ? "겨냥한 구간" : "발견 구간"} {t.finding}: 실패율 {(t.before * 100).toFixed(1)}% → {(t.after * 100).toFixed(1)}%
+                {t.improved ? "" : " (줄지 않음: 원인 가설을 의심)"}
+              </li>
+            ))}
+            {d.worsened_metrics.length
+              ? d.worsened_metrics.map((w) => <li key={w.metric} className="warning-text">나빠진 지표: {spec(w.metric)?.label ?? w.label} {metric(w.metric, w.before)} → {metric(w.metric, w.after)}</li>)
+              : <li>나빠진 지표 없음</li>}
+            {d.missed_slices && d.missed_slices.length > 0 && (
+              <li>분석이 놓친 구간: {d.missed_slices.slice(0, 3).map((m) => `${dimLabel(m.dimension)} ${valueLabel(String(m.value))} (실패 ${m.failed}건)`).join(" · ")}</li>
+            )}
+            {d.dominated_by && d.dominated_by.length > 0 && <li className="warning-text">훑기 결과 중 모든 지표가 더 나은 점 {d.dominated_by.length}개</li>}
+          </ul>
+        </div>
+      )}
+      {j.questions_for_human.length > 0 && (
+        <div className="judgment-ask">
+          <strong>사람에게 묻는 것</strong>
+          <ul>{j.questions_for_human.map((q, i) => <li key={i}>{q}</li>)}</ul>
+        </div>
+      )}
+      <details>
+        <summary>원인 가설 {j.hypotheses.length}개 · 시도 기록 {j.attempts.length}단계 · 추천하지 않은 안 {j.not_recommended.length}건
+          {j.end_reason ? ` · 끝낸 이유: ${END_REASON[j.end_reason] ?? j.end_reason}` : ""}</summary>
+        <h3 className="small">원인 가설</h3>
+        <ul className="small">
+          {j.hypotheses.map((h, i) => (
+            <li key={i}><strong>{h.statement}</strong> <span className={CONF_CLASS[h.confidence] ?? ""}>(확신도 {h.confidence})</span>
+              <br />지지: {h.support} · 반대: {h.against}<br /><span className="muted">뒤집을 증거: {h.would_flip}</span></li>
+          ))}
+        </ul>
+        <h3 className="small">시도 기록</h3>
+        <ol className="small">{j.attempts.map((a, i) => <li key={i}>{a.what} — {a.why} → <em>{a.learned}</em></li>)}</ol>
+        {j.not_recommended.length > 0 && (
+          <>
+            <h3 className="small">추천하지 않은 안</h3>
+            <ul className="small">{j.not_recommended.map((n, i) => <li key={i}>{n.proposal_id}: {n.reason}</li>)}</ul>
+          </>
+        )}
+      </details>
     </div>
   );
 }

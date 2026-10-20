@@ -121,6 +121,15 @@ def _matches(d: DecisionRecord, slice_: dict | None) -> bool:
     return True
 
 
+def _finding_id(fid: str, findings: dict) -> str | None:
+    """발견 id. 개선 에이전트가 리포트 안의 짧은 id(F3)를 쓰면, 그 id를 가진 리포트가 하나뿐일 때 R1-F3으로 맞춘다."""
+    fid = str(fid)
+    if fid in findings:
+        return fid
+    hits = [k for k in findings if k.endswith(f"-{fid}")]
+    return hits[0] if len(hits) == 1 else None
+
+
 def judgment_problems(sub: dict, calls: dict, state: dict) -> list[str]:
     """판단 보고서 검사 (코드가 지키는 것). state: supervise()의 실행 기록 (proposals·simulations)."""
     problems = []
@@ -278,8 +287,9 @@ def supervise(pack: DomainPack, pack_factory: Callable[[dict], DomainPack], inst
         violations = constraint_violations(constraints or [], candidate, result) if constraints else []
         minimal = minimal_change(pack_factory, instance, params, change, result, primary) if primary else None
         after = pack_factory(candidate).solve(instance, candidate)
-        targets = [t for t in (args.get("target_findings") or change.get("target_findings") or [])
-                   if t in state["findings"]]
+        targets = [_finding_id(t, state["findings"]) for t in
+                   (args.get("target_findings") or change.get("target_findings") or [])]
+        targets = [t for t in targets if t]
         diagnosis = diagnose(result, dims, list(state["findings"].values()), after, targets or None,
                              state["sweep_points"] or None)
         state["simulations"][pid] = {"change": change, "result": result, "constraint_violations": violations,

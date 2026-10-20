@@ -179,4 +179,4 @@ def test_dominating_points_respect_direction_and_violations():
 def test_diagnose_marks_missing_inputs_none():
     sim = {"before": {"rate": 0.8}, "after": {"rate": 0.9}, "slices": {}}
     d = diagnose(sim, DIMS, [])
-    assert d == {"target_changes": [], "worsened_metrics": [], "missed_slices": None, "dominated_by": None}
+    assert d == {"targeted": False, "target_changes": [], "worsened_metrics": [], "missed_slices": None, "dominated_by": None}

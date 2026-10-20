@@ -62,7 +62,8 @@ def test_supervisor_runs_existing_agents_as_tools_and_reports(world):
     assert [p["proposal"]["title"] for p in out["proposals"].values()][0].startswith("경계 지역만")
     sim = out["simulations"]["P1"]
     assert sim["result"]["after"]["assignment_rate"] > sim["result"]["before"]["assignment_rate"]
-    assert set(sim["diagnosis"]) == {"target_changes", "worsened_metrics", "missed_slices", "dominated_by"}
+    assert set(sim["diagnosis"]) == {"targeted", "target_changes", "worsened_metrics", "missed_slices", "dominated_by"}
+    assert sim["diagnosis"]["targeted"] and [t["finding"] for t in sim["diagnosis"]["target_changes"]] == ["R1-F3"]   # F3 → R1-F3
     assert sim["diagnosis"]["target_changes"] and isinstance(sim["diagnosis"]["missed_slices"], list)
     assert out["counts"] == {"total": 3, "run_analysis": 1, "run_proposals": 1}
     assert [a["tool"] for a in out["attempts_log"]] == ["run_analysis", "run_proposals", "simulate"]

@@ -565,3 +565,11 @@ input.approver { width: 9em; }
 .outcome-table td.num, .outcome-table th.num { text-align: right; }
 
 .gc-tech-toggle { float: right; font-weight: normal; }
+
+/* Supervisor 판단 보고서 (M18) */
+.judgment-card { border-left: 4px solid var(--series-1); }
+.judgment-rec { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 8px 0; }
+.judgment-rec dt { color: var(--text-secondary); }
+.judgment-rec dd { margin: 0; }
+.judgment-ask { background: var(--surface-2, rgba(42, 120, 214, 0.06)); border-radius: 6px; padding: 6px 10px; margin: 8px 0; }
+.ag-mode { font-weight: 600; }

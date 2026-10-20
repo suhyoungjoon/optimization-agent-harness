@@ -504,6 +504,7 @@ export interface AgentsGraph {
   level?: string;
   perspectives?: boolean;
   end_check?: "fixed" | "supervisor";
+  mode?: AgentsMode;
   top: { nodes: (WorkflowNode & { agent?: boolean })[]; edges: WorkflowEdge[] };
   agents: Record<string, { nodes: WorkflowNode[]; edges: WorkflowEdge[] }>;
 }
@@ -522,6 +523,7 @@ export interface AgentsRun extends Omit<WorkflowRun, "ids" | "inputs" | "approva
     proposal: number; title: string; question: string; round?: number; rank?: number | null; reasons?: string[];
     opinion_error?: string; minimal_change?: { path: string; current: number; recommended: number; proposed: number } | null;
     kind?: "confirm_constraints"; opinion?: string; constraints?: Constraint[]; error?: string;   // 제약 확인 (M15 후속)
+    judgment?: JudgmentView;   // Supervisor 모드 (M18): 이 추천의 근거와 판단 보고서
   } | null;
   events: AgentEvent[];
   counts: Record<string, Record<string, number>>;
@@ -530,6 +532,27 @@ export interface AgentsRun extends Omit<WorkflowRun, "ids" | "inputs" | "approva
   inputs: { domain?: string; seed?: number; faults?: string[]; items?: number; level?: string; perspectives?: boolean };
   loop?: AgentsLoop;
   end_check?: "fixed" | "supervisor" | null;
+  mode?: AgentsMode | null;
+}
+
+// 분석·개선 Supervisor (M18): 켜고 끄기
+export type AgentsMode = "fixed" | "supervisor";
+export type Confidence = "높음" | "중간" | "낮음";
+export interface JudgmentView {
+  recommendation: { proposal_id: string; cited_calls: string[]; expected_effect: string; loses: string; confidence: Confidence };
+  summary?: string;
+  hypotheses: { statement: string; support: string; against: string; confidence: Confidence; would_flip: string }[];
+  attempts: { what: string; why: string; learned: string }[];
+  questions_for_human: string[];
+  not_recommended: { proposal_id: string; reason: string }[];
+  end_reason?: string;
+  diagnosis?: {
+    targeted?: boolean;
+    target_changes: { finding: string; before: number; after: number; delta: number; improved: boolean }[];
+    worsened_metrics: { metric: string; label: string; before: number; after: number; delta: number }[];
+    missed_slices: { dimension: string; value: string; failed: number; share_of_failed: number }[] | null;
+    dominated_by: { values: Record<string, unknown>; metrics: Record<string, number> }[] | null;
+  } | null;
 }
 
 // 개선 루프 (M15-B): 회차 기록과 결과 보고
@@ -553,6 +576,8 @@ export interface AgentsLoop {
   decisions: LoopDecision[];
   saved_loaded?: { id: string }[];
   saved_skipped?: { id: string; error: string }[];
+  judgment?: { failure: { label: string; reason: string } | null; problems: string[];
+    counts: Record<string, number>; budget: { spent_usd: number; max_usd: number | null; seconds: number } } | null;
   report: {
     rounds: LoopRound[]; stop_reason: string; decisions: LoopDecision[]; constraints: Constraint[];
     remaining: { id: string; title: string }[]; cost_usd: number | null; seconds: number; lines: string[];
