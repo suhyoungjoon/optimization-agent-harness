@@ -650,6 +650,7 @@ export interface AgentTabTimeline {
   total_events: number;
   constraints?: unknown[];
   problems?: string[];
+  saved?: string[];                         // 의견 정리: 사람이 확정해 저장한 제약 id
   item_labels?: Record<string, string>;   // 관점별 분석: 관점 id → 이름
   // Supervisor (M18): 판단 보고서와 추천안 (코드가 돌린 미리 돌려보기 요약)
   judgment?: Omit<JudgmentView, "recommendation" | "diagnosis"> | null;
