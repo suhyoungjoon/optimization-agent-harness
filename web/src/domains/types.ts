@@ -65,4 +65,6 @@ export interface DomainAdapter {
   valueNames?: Record<string, string>;  // [M8 추가] 조건 값 → 화면 이름 (예: boundary → 경계 지역). 없으면 값 그대로
   tradeoff?: TradeoffDefaults;          // [M13 추가] 득실 지도 기본 축·지표. 없으면 첫 번째 파라미터와 지표
   decisionText?: (decision: Record<string, unknown>) => string; // [M8 추가] 결정 한 줄 요약 (결정 과정 탭). 없으면 필드 값을 나열
+  toolNames?: Record<string, string>;   // 도메인 도구 이름 → 쉬운 말 (에이전트 탭). 없으면 도구 이름 그대로
+  argNames?: Record<string, string>;    // 도메인 도구 입력 이름·선택값 → 쉬운 말 (예: order_id → 지시서)
 }

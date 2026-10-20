@@ -45,6 +45,20 @@ export const dispatchAdapter: DomainAdapter = {
   ],
   valueNames: LABELS,
   decisionText: (d) => `${String(d.worker_id)} ${String(d.start_time)} (${stageName(d.matching_stage)})`,
+  toolNames: {
+    get_order: "지시서 내용 확인",
+    find_candidates: "배정 가능한 작업자 찾기",
+    check_assignment: "배정해도 되는지 확인",
+    get_worker_schedule: "작업자 일정 보기",
+    get_travel_time: "이동 시간 계산",
+    demand_by_hour: "시간대별 수요 보기",
+    worker_stats: "작업자별 가동 현황 보기",
+  },
+  argNames: {
+    order_id: "지시서", worker_id: "작업자", stage: "완화 단계", start_time: "시작", branch: "지점",
+    // worker_stats 정렬 기준 (값으로 나온다)
+    busy_min: "작업 시간", jobs: "작업 건수", utilization: "가동률", available_min: "가능 시간",
+  },
   reasonNames: {
     NO_SKILL: "기술 보유자 없음",
     NO_CERT: "자격 보유자 없음",

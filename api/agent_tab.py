@@ -46,6 +46,7 @@ def _default(fn, name: str):
 
 def _decision_event(d: dict) -> dict:
     return {"type": "decision", "turn": None, "item": d["item_id"], "status": d["status"],
+            "decision": d.get("decision"), "reason_code": d.get("reason_code"),   # 화면이 쉬운 말로 바꿔 보여 준다
             "text": f"{d['item_id']}: {d['status']}" + (f" {json.dumps(d['decision'], ensure_ascii=False)}" if d.get("decision") else "")
                     + (f" {d.get('reason_code')}" if d.get("reason_code") else "")}
 
@@ -165,7 +166,10 @@ def register(app: FastAPI, ctx: Context, demo: bool = False) -> None:
         return {"status": report["status"], "error": report.get("error"), "events": events,
                 "input": f"규칙 실행 {report['run_id']}" + (" · 관점별" if body.get("perspectives") else ""),
                 "output": output, "usage": _usage_summary(body.get("usage")), "graph": "analysis_agent",
-                "replayed_from": body.get("replayed_from")}
+                "replayed_from": body.get("replayed_from"),
+                # 관점별 분석: 줄마다 붙는 관점 id → 이름 (화면 표시용)
+                "item_labels": {k: v.get("name") or k for k, v in (body.get("perspectives") or {}).items()
+                                if isinstance(v, dict)}}
 
     def _proposals_view(batch_id: str) -> dict:
         batch = store.get_batch(batch_id)

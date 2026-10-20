@@ -597,6 +597,9 @@ export interface TimelineEvent {
   problems?: string[];
   ref?: string;
   status?: string;
+  tools?: string[];                          // llm: AI가 요청한 도구 이름들
+  decision?: Record<string, unknown> | null; // decision: 결정 내용 (도메인 형식)
+  reason_code?: string | null;               // decision: 실패 사유 코드
 }
 
 export interface AgentTabTimeline {
@@ -617,6 +620,7 @@ export interface AgentTabTimeline {
   total_events: number;
   constraints?: unknown[];
   problems?: string[];
+  item_labels?: Record<string, string>;   // 관점별 분석: 관점 id → 이름
 }
 
 // --- 계획 vs 실적 (M17) ---

@@ -5,6 +5,7 @@ import type {
 } from "../types";
 import type { DomainAdapter } from "../domains/types";
 import GraphCanvas, { type NodeView } from "./GraphCanvas";
+import { makeTerms, type Terms } from "./agentTerms";
 import { usePoll } from "./usePoll";
 
 // 에이전트 탭 (M16): 핵심 에이전트를 하나씩 실행하고, 그 처리 흐름(턴 → 도구 → 하네스 검사)을 한 화면에서 본다.
@@ -39,6 +40,7 @@ const fmtNum = (v: number | null | undefined) => (v == null ? "–" : v.toLocale
 
 export default function AgentRunsPanel({
   domain,
+  adapter,
   seed,
   faults,
   onOpenReport,
@@ -84,6 +86,7 @@ export default function AgentRunsPanel({
     (t) => !t.live && t.status !== "running",
     [current?.agent, current?.id], 700,
   );
+  const terms = useMemo(() => makeTerms(adapter, domain.dimensions), [adapter, domain.dimensions]);
   const shown = timeline && current && timeline.id === current.id ? timeline : null;
   useEffect(() => { if (shown && !shown.live && shown.status !== "running") refreshSources(); }, [shown?.status]);
 
@@ -242,7 +245,7 @@ export default function AgentRunsPanel({
           {current && !shown && <div className="panel muted">불러오는 중…</div>}
           {shown && <Summary t={shown} onOpenReport={onOpenReport} />}
           {shown && graph && <InnerGraph graph={graph} t={shown} />}
-          {shown && <Timeline t={shown} />}
+          {shown && <Timeline t={shown} terms={terms} />}
         </div>
       </div>
     </section>
@@ -320,7 +323,7 @@ function InnerGraph({ graph, t }: { graph: AgentsGraph; t: AgentTabTimeline }) {
   );
 }
 
-function Timeline({ t }: { t: AgentTabTimeline }) {
+function Timeline({ t, terms }: { t: AgentTabTimeline; terms: Terms }) {
   const ref = useRef<HTMLOListElement>(null);
   useEffect(() => {
     const el = ref.current;
@@ -328,27 +331,46 @@ function Timeline({ t }: { t: AgentTabTimeline }) {
   }, [t.events.length, t.live]);
   return (
     <div className="panel">
-      <h3>턴별 타임라인 <span className="muted small">(턴 → 도구 → 하네스 검사 · {t.total_events}줄{t.live ? " · 실행 중 한 줄씩 쌓임" : ""})</span></h3>
+      <h3>진행 기록 <span className="muted small">(AI 판단 → 도구 사용 → 검사 · {t.total_events}줄{t.live ? " · 실행 중 한 줄씩 쌓임" : ""})</span></h3>
       {t.events.length === 0 && <p className="muted small">{t.live ? "첫 응답을 기다리는 중…" : "기록이 없습니다."}</p>}
       <ol className="agent-timeline" ref={ref}>
-        {t.events.map((e) => <TimelineRow key={e.seq} e={e} showItem={t.agent !== "dispatch"} />)}
+        {t.events.map((e) => <TimelineRow key={e.seq} e={e} terms={terms} showItem={t.agent !== "dispatch"} itemLabels={t.item_labels} />)}
       </ol>
     </div>
   );
 }
 
-function TimelineRow({ e, showItem }: { e: TimelineEvent; showItem: boolean }) {
+// 원본(도구 이름·입력·결과 JSON)은 접어 둔다. 디버깅할 때 펼쳐 본다
+function Raw({ e }: { e: TimelineEvent }) {
+  const name = e.type === "tool" ? e.name : e.type === "llm" && e.tools?.length ? e.tools.join(", ") : null;
+  if (!name && !e.input && !e.output) return null;
+  return (
+    <details className="tl-raw">
+      <summary>자세히</summary>
+      {name && <div><code>{name}</code>{e.ref ? <span className="muted"> {e.ref}</span> : null}</div>}
+      {e.input ? <div>입력 <code>{e.input}</code></div> : null}
+      {e.output ? <div>결과 <code>{e.output}</code></div> : null}
+    </details>
+  );
+}
+
+function TimelineRow({ e, terms, showItem, itemLabels }: {
+  e: TimelineEvent; terms: Terms; showItem: boolean; itemLabels?: Record<string, string>;
+}) {
   if (e.type === "item") return <li className="tl-item">▸ {e.item}</li>;
-  const turn = e.turn ? <span className="tl-turn">턴 {e.turn}</span> : <span className="tl-turn" />;
+  const turn = e.turn ? <span className="tl-turn" title={`AI의 ${e.turn}번째 응답`}>{e.turn}번째</span> : <span className="tl-turn" />;
   // 배정은 항목 머리줄(▸)로 나뉘므로 줄마다 항목을 붙이지 않는다. 관점별 분석은 관점을 붙인다
-  const where = showItem && e.item && e.type !== "decision" ? <span className="muted small"> [{e.item}]</span> : null;
-  if (e.type === "llm") return <li className="tl-llm">{turn}<span className="tl-kind">AI 응답</span> {e.text}{where}</li>;
+  const where = showItem && e.item && e.type !== "decision" ? <span className="muted small"> [{itemLabels?.[e.item] ?? e.item}]</span> : null;
+  if (e.type === "llm") {
+    return <li className="tl-llm">{turn}<span className="tl-kind">AI 판단</span> {terms.aiAsked(e)}{where}<Raw e={e} /></li>;
+  }
   if (e.type === "tool") {
+    const args = terms.args(e.input);
     return (
       <li className={e.ok === false ? "tl-tool tl-bad" : "tl-tool"}>
-        {turn}<span className="tl-kind">도구</span> <code>{e.name}</code>{e.ref ? <span className="muted small"> {e.ref}</span> : null}
-        {e.input ? <span className="tl-io"> 입력 {e.input}</span> : null}
-        {e.output ? <span className="tl-io"> → {e.output}</span> : null}{where}
+        {turn}<span className="tl-kind">도구 사용</span> {terms.tool(e.name ?? e.text)}
+        {args ? <span className="tl-io"> ({args})</span> : null}
+        <span className="tl-io"> → {e.ok === false ? "오류" : "결과 받음"}</span>{where}<Raw e={e} />
       </li>
     );
   }
@@ -360,6 +382,6 @@ function TimelineRow({ e, showItem }: { e: TimelineEvent; showItem: boolean }) {
       </li>
     );
   }
-  if (e.type === "decision") return <li className="tl-decision"><span className="tl-turn" /><span className="tl-kind">결정</span> {e.text}</li>;
+  if (e.type === "decision") return <li className="tl-decision"><span className="tl-turn" /><span className="tl-kind">결정</span> {terms.decision(e)}</li>;
   return <li className="tl-end muted"><span className="tl-turn" />{e.text}</li>;
 }
