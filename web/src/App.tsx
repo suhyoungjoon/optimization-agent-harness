@@ -171,8 +171,9 @@ export default function App() {
 
   // 에이전트 탭에서 만든 분석 리포트를 문제 찾기 탭에서 연다 (다시 분석하지 않음, 비용 없음).
   // 그 리포트가 분석한 실행의 데이터·결정을 불러와야 지도 강조와 사람 판정이 동작한다.
-  const openReport = (reportId: string) =>
-    guard("분석 결과 불러오는 중", async () => {
+  // 개선안 묶음도 같은 방식으로 개선 제안 탭에서 연다 (묶음이 읽은 리포트 → 실행 → 데이터)
+  const openReport = (reportId: string, batchId: string | null = null) =>
+    guard(batchId ? "개선안 불러오는 중" : "분석 결과 불러오는 중", async () => {
       if (!domain) return;
       const report = await api.report(reportId);
       const run = await api.run(report.run_id);
@@ -183,10 +184,14 @@ export default function App() {
       await loadDecisions(run.run_id);
       upsert(run);
       setReportId(reportId);
-      setBatchId(null);
+      setBatchId(batchId);
       setSelectedItem(null);
-      setTab("analysis");
+      setTab(batchId ? "improve" : "analysis");
     });
+  const openBatch = async (batchId: string) => {
+    const batch = await api.batch(batchId).catch(() => null);
+    if (batch) openReport(batch.report_id, batchId);
+  };
 
   // Agent workflow 탭의 결과를 다른 탭이 이어받는다 (같은 데이터·실행·분석·제안을 그 탭에서 자세히 본다)
   const adoptWorkflow = (flow: WorkflowRun, target: string) =>
@@ -324,7 +329,7 @@ export default function App() {
         )}
         {domain && adapter && tab === "agentRuns" && (
           <Suspense fallback={<p className="muted">에이전트 화면 불러오는 중…</p>}>
-            <AgentRunsPanel domain={domain} adapter={adapter} seed={seed} faults={faults} onOpenReport={openReport} />
+            <AgentRunsPanel domain={domain} adapter={adapter} seed={seed} faults={faults} onOpenReport={(id) => openReport(id)} onOpenBatch={openBatch} />
           </Suspense>
         )}
         {domain && adapter && tab === "agents" && (

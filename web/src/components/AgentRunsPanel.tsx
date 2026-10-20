@@ -42,12 +42,14 @@ export default function AgentRunsPanel({
   seed,
   faults,
   onOpenReport,
+  onOpenBatch,
 }: {
   domain: DomainInfo;
   adapter: DomainAdapter;
   seed: number;
   faults: string[];
   onOpenReport?: (reportId: string) => void;   // 분석 리포트를 문제 찾기 탭에서 연다
+  onOpenBatch?: (batchId: string) => void;     // 개선안 묶음을 개선 제안 탭에서 연다
 }) {
   const [agent, setAgent] = useState<TabAgent>("dispatch");
   const [info, setInfo] = useState<AgentTabInfo | null>(null);
@@ -86,7 +88,11 @@ export default function AgentRunsPanel({
   );
   const terms = useMemo(() => makeTerms(adapter, domain.dimensions), [adapter, domain.dimensions]);
   const shown = timeline && current && timeline.id === current.id ? timeline : null;
-  useEffect(() => { if (shown && !shown.live && shown.status !== "running") refreshSources(); }, [shown?.status]);
+  useEffect(() => {
+    if (!shown || shown.live || shown.status === "running") return;
+    refreshSources();
+    api.agentTabHistory(shown.agent).then(setHistory).catch(() => undefined);   // 실행 중에 읽은 상태가 남지 않게
+  }, [shown?.status, shown?.live]);
 
   const me = info?.agents.find((a) => a.agent === agent);
   const missing = agent === "analysis" ? !ruleRun : agent === "proposals" ? !reportId : agent === "opinion" ? !proposalId || !opinion.trim() : false;
@@ -118,7 +124,16 @@ export default function AgentRunsPanel({
     }
   }
 
-  async function ruleBaseline() {   // 분석할 규칙 실행이 없을 때 (규칙 엔진, 비용 0)
+  // 비교 탭의 데이터 번호·심어둔 문제로 만든 규칙 실행 (전체 범위, 지금 설정 버전). 있으면 다시 만들지 않는다
+  const sameKey = [...faults].sort().join(",");
+  const sameRuleRun = sources?.rule_runs.find((r) => r.seed === seed && r.full && r.current_params
+    && [...(r.faults ?? [])].sort().join(",") === sameKey);
+
+  async function ruleBaseline() {   // 지금 조건의 규칙 실행 (규칙 엔진, 비용 0)
+    if (sameRuleRun) {
+      setRuleRun(sameRuleRun.id);
+      return;
+    }
     setBusy(true);
     try {
       const ds = await api.createDataset(domain.name, seed, faults);
@@ -170,9 +185,12 @@ export default function AgentRunsPanel({
                     {(sources?.rule_runs ?? []).map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
                   </select>
                 </label>
-                {!sources?.rule_runs.length && (
-                  <button disabled={busy} onClick={ruleBaseline}>규칙 방식 전체 실행 (비용 0)</button>
-                )}
+                <button disabled={busy || sameRuleRun?.id === ruleRun} onClick={ruleBaseline}
+                  title="비교 탭에 설정된 데이터 번호·심어둔 문제로 규칙 방식 전체 실행을 고른다. 없으면 새로 만든다 (규칙 엔진만 써서 AI 비용 없음)">
+                  {sameRuleRun ? (sameRuleRun.id === ruleRun ? "지금 조건의 실행을 고름" : "지금 조건의 실행 고르기")
+                    : "지금 조건으로 규칙 방식 실행 (비용 0)"}
+                </button>
+                <span className="muted small">지금 조건: 데이터 {seed} · 심어둔 문제 {faults.join("·") || "없음"} (비교 탭 설정)</span>
                 <label><input type="checkbox" checked={perspectives} onChange={(e) => setPerspectives(e.target.checked)} /> 관점별로 분석</label>
               </>
             )}
@@ -241,7 +259,7 @@ export default function AgentRunsPanel({
         <div className="agent-tab-main">
           {!current && <div className="panel muted">왼쪽에서 에이전트와 입력을 고르고 실행하거나, 끝난 실행을 고르세요.</div>}
           {current && !shown && <div className="panel muted">불러오는 중…</div>}
-          {shown && <Summary t={shown} onOpenReport={onOpenReport} />}
+          {shown && <Summary t={shown} onOpenReport={onOpenReport} onOpenBatch={onOpenBatch} />}
           {shown && graph && <InnerGraph graph={graph} t={shown} terms={terms} />}
           {shown && <Timeline t={shown} terms={terms} />}
         </div>
@@ -250,7 +268,9 @@ export default function AgentRunsPanel({
   );
 }
 
-function Summary({ t, onOpenReport }: { t: AgentTabTimeline; onOpenReport?: (reportId: string) => void }) {
+function Summary({ t, onOpenReport, onOpenBatch }: {
+  t: AgentTabTimeline; onOpenReport?: (reportId: string) => void; onOpenBatch?: (batchId: string) => void;
+}) {
   const u = t.usage;
   const running = t.live || t.status === "running";
   return (
@@ -276,6 +296,14 @@ function Summary({ t, onOpenReport }: { t: AgentTabTimeline; onOpenReport?: (rep
           <button onClick={() => onOpenReport(t.id)}
             title="발견 카드·근거 데이터·지도 강조·사람 판정을 문제 찾기 탭에서 본다. 다시 분석하지 않으므로 비용이 들지 않는다">
             문제 찾기 탭에서 보기 →
+          </button>
+        </p>
+      )}
+      {t.agent === "proposals" && t.status === "done" && onOpenBatch && (
+        <p>
+          <button onClick={() => onOpenBatch(t.id)}
+            title="개선안 카드·순위·미리 돌려보기·사람 승인을 개선 제안 탭에서 본다. 다시 만들지 않으므로 비용이 들지 않는다">
+            개선 제안 탭에서 보기 →
           </button>
         </p>
       )}
@@ -332,6 +360,10 @@ function InnerGraph({ graph, t, terms }: { graph: AgentsGraph; t: AgentTabTimeli
       </h3>
       <GraphCanvas ariaLabel="에이전트 내부 그래프" nodes={plain.nodes} edges={plain.edges} views={views} showIds={tech}
         height={300} nodeWidth={150} nodeHeight={tech ? 66 : 56} minFitZoom={0.55} padding={0.2} />
+      <p className="muted small gc-legend">
+        실선: 항상 이어지는 단계 · 점선: 상황에 따라 고르는 갈림길(선 이름이 조건) · 아래로 도는 선: 앞 단계로 되돌아감(마우스를 올리면 이름)
+        {t.live ? " · 파랗게 채운 카드: 지금 실행 중인 단계 · 굵게 움직이는 선: 방금 지나간 길" : ""}
+      </p>
     </div>
   );
 }

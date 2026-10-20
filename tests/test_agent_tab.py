@@ -147,6 +147,9 @@ def test_four_agents_run_alone_and_replay(client):
     assert all(len(v) == 1 for v in hist.values())
     src = client.get("/agent-tab/sources").json()
     assert src["rule_runs"] and src["reports"] and len(src["proposals"]) == 3
+    rr = src["rule_runs"][0]   # 분석 입력 목록: 조건을 쉬운 말로, 같은 조건 실행을 다시 만들지 않게 조건 필드
+    assert rr["label"] == "데이터 42 · 심어둔 문제 P1·P2·P3·P4 · 전체 1500건 · 설정 v1"
+    assert (rr["seed"], rr["faults"], rr["full"], rr["current_params"]) == (42, FAULTS, True, True)
 
 
 def test_errors(client):

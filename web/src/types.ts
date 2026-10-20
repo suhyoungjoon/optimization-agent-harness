@@ -571,7 +571,10 @@ export interface AgentTabInfo {
 }
 
 export interface AgentTabSources {
-  rule_runs: { id: string; label: string; dataset_id: string }[];
+  rule_runs: {
+    id: string; label: string; dataset_id: string;
+    seed?: number | null; faults?: string[]; full?: boolean; current_params?: boolean;   // 같은 조건 실행 찾기용
+  }[];
   reports: { id: string; label: string; run_id: string }[];
   proposals: { id: string; label: string; batch_id: string; status: string }[];
 }
