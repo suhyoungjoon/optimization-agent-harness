@@ -480,6 +480,11 @@ details.more > .more-body { margin-top: 8px; }
 .gc-card.gc-next, .gc-card.gc-waiting { box-shadow: 0 0 0 2px var(--series-1); opacity: 1; }
 .gc-card.gc-running { box-shadow: 0 0 0 3px var(--series-1); opacity: 1; animation: wf-pulse 0.8s ease-in-out infinite alternate; }
 .gc-card.gc-error { box-shadow: 0 0 0 2px var(--critical); }
+/* 실행 중인 노드: 채우고 글자를 반전 (버튼 primary와 같은 색) */
+.gc-card.gc-running { background: var(--series-1); color: #fff; }
+.gc-card.gc-running .gc-mark, .gc-card.gc-running .gc-summary, .gc-card.gc-running .gc-sub,
+.gc-card.gc-running .gc-sub code { color: #fff; }
+.gc-card.gc-running .gc-badge { color: #fff; border-color: rgba(255, 255, 255, 0.6); }
 .gc-card.gc-selected { outline: 2px dashed var(--series-1); outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) { .gc-card.gc-running { animation: none; } }
 .gc-head { display: flex; align-items: center; gap: 4px; font-size: 13px; white-space: nowrap; }
