@@ -41,11 +41,13 @@ export default function AgentRunsPanel({
   domain,
   seed,
   faults,
+  onOpenReport,
 }: {
   domain: DomainInfo;
   adapter: DomainAdapter;
   seed: number;
   faults: string[];
+  onOpenReport?: (reportId: string) => void;   // 분석 리포트를 문제 찾기 탭에서 연다
 }) {
   const [agent, setAgent] = useState<TabAgent>("dispatch");
   const [info, setInfo] = useState<AgentTabInfo | null>(null);
@@ -238,7 +240,7 @@ export default function AgentRunsPanel({
         <div className="agent-tab-main">
           {!current && <div className="panel muted">왼쪽에서 에이전트와 입력을 고르고 실행하거나, 끝난 실행을 고르세요.</div>}
           {current && !shown && <div className="panel muted">불러오는 중…</div>}
-          {shown && <Summary t={shown} />}
+          {shown && <Summary t={shown} onOpenReport={onOpenReport} />}
           {shown && graph && <InnerGraph graph={graph} t={shown} />}
           {shown && <Timeline t={shown} />}
         </div>
@@ -247,7 +249,7 @@ export default function AgentRunsPanel({
   );
 }
 
-function Summary({ t }: { t: AgentTabTimeline }) {
+function Summary({ t, onOpenReport }: { t: AgentTabTimeline; onOpenReport?: (reportId: string) => void }) {
   const u = t.usage;
   const running = t.live || t.status === "running";
   return (
@@ -268,6 +270,14 @@ function Summary({ t }: { t: AgentTabTimeline }) {
         {" · "}<span className="muted">{t.id}</span>
       </div>
       {t.note && <p className="muted small">{t.note}</p>}
+      {t.agent === "analysis" && t.status === "done" && onOpenReport && (
+        <p>
+          <button onClick={() => onOpenReport(t.id)}
+            title="발견 카드·근거 데이터·지도 강조·사람 판정을 문제 찾기 탭에서 본다. 다시 분석하지 않으므로 비용이 들지 않는다">
+            문제 찾기 탭에서 보기 →
+          </button>
+        </p>
+      )}
       {t.agent === "opinion" && !running && (
         <ul className="small">
           {(t.constraints ?? []).map((c, i) => <li key={i}><code>{JSON.stringify(c)}</code></li>)}
