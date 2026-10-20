@@ -550,6 +550,7 @@ input.approver { width: 9em; }
 .agent-timeline .tl-item { font-weight: 600; padding-top: 6px; }
 .agent-timeline .tl-ok .tl-kind { color: var(--good, #1a7f37); }
 .agent-timeline .tl-bad .tl-kind { color: var(--critical, #cf222e); }
+.agent-timeline .tl-info .tl-kind { color: var(--text-secondary); }
 
 /* 계획 vs 실적 (M17) */
 .outcome-box { border: 1px dashed var(--border); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }

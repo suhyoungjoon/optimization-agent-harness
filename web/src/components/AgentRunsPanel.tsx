@@ -33,8 +33,6 @@ function nodeOf(e: TimelineEvent): string | null {
   return null;
 }
 
-// 통과한 검사의 덧붙임 (예: 개선안 검사 ✓ 안 제목). 라벨·표시만 있으면 빈 문자열
-const checkDetail = (e: TimelineEvent) => e.text.replace(e.label ?? "", "").replace(/^[\s✓:]+/, "").trim();
 
 const fmtNum = (v: number | null | undefined) => (v == null ? "–" : v.toLocaleString());
 
@@ -357,7 +355,8 @@ function Timeline({ t, terms }: { t: AgentTabTimeline; terms: Terms }) {
 
 // 원본(도구 이름·입력·결과 JSON)은 접어 둔다. 디버깅할 때 펼쳐 본다
 function Raw({ e }: { e: TimelineEvent }) {
-  const name = e.type === "tool" ? e.name : e.type === "llm" && e.tools?.length ? e.tools.join(", ") : null;
+  const name = e.type === "tool" ? e.name : e.type === "llm" && e.tools?.length ? e.tools.join(", ")
+    : e.type === "check" || e.type === "nudge" ? e.text : null;
   if (!name && !e.input && !e.output) return null;
   return (
     <details className="tl-raw">
@@ -390,13 +389,18 @@ function TimelineRow({ e, terms, showItem, itemLabels }: {
     );
   }
   if (e.type === "check") {
+    const c = terms.check(e);
     return (
-      <li className={e.ok ? "tl-check tl-ok" : "tl-check tl-bad"}>
-        {turn}<span className="tl-kind">{e.ok ? "✓" : "✕"} {e.label}</span>{" "}
-        {e.ok ? checkDetail(e) : (e.problems ?? []).join(" · ") || e.text}{where}
+      <li className={`tl-check tl-${c.tone}`}>
+        {turn}<span className="tl-kind">{c.tone === "ok" ? "✓" : c.tone === "bad" ? "✕" : "↻"} {c.label}</span>{" "}
+        {c.detail}{where}<Raw e={e} />
       </li>
     );
   }
   if (e.type === "decision") return <li className="tl-decision"><span className="tl-turn" /><span className="tl-kind">결정</span> {terms.decision(e)}</li>;
+  if (e.type === "nudge") {
+    return <li className="tl-check tl-info">{turn}<span className="tl-kind">↻ 재요청</span> AI가 글로만 답해서 결과를 제출하라고 다시 요청함<Raw e={e} /></li>;
+  }
+  if (e.type === "end") return <li className="tl-end muted"><span className="tl-turn" />{terms.end(e)}</li>;
   return <li className="tl-end muted"><span className="tl-turn" />{e.text}</li>;
 }

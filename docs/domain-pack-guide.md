@@ -178,6 +178,8 @@ dispatch에서 쓴 네 패턴은 대부분의 배정·스케줄링 도메인으�
 | `valueNames` (선택, M8) | 조건 값 → 화면 이름 (예: `boundary` → "경계 지역", `pole` → "승주"). 문제 찾기의 조건 칩에 쓴다. 없으면 값 그대로 |
 | `decisionText` (선택, M8) | 결정 객체 → 한 줄 요약 (dispatch: "WA01 09:00 (조건 그대로)"). 결정 과정 탭의 결정 카드에 쓴다. 없으면 필드 값을 나열한다 |
 | `reasonNames` (선택, M8) | 도메인 사유 코드 → 짧은 쉬운 이름 (예: `CAPACITY` → "일정이 꽉 참"). 없으면 `dimensions.yaml`의 설명 문장을 그대로 쓴다. 코어 사유 이름은 `web/src/terms.ts` |
+| `toolNames` (선택) | 도메인 도구 이름 → 쉬운 말 (예: `find_candidates` → "배정 가능한 작업자 찾기"). 에이전트 탭의 진행 기록·처리 흐름에 쓴다. 없으면 도구 이름 그대로. 코어 도구 이름은 `web/src/components/agentTerms.ts` |
+| `argNames` (선택) | 도메인 도구 입력 이름·선택값 → 쉬운 말 (예: `order_id` → "지시서"). 에이전트 탭 도구 줄의 입력 요약에 쓴다. 묶는 기준 같은 차원 이름은 `dimensions.yaml`의 label을 먼저 쓴다 |
 
 탭 구성·하네스 토글·트레이스·분석·개선 화면은 코어 UI라 도메인이 건드리지 않는다.
 

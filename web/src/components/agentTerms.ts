@@ -59,12 +59,56 @@ export const PLAIN_EDGES: Record<string, string> = {
   "통과 (또는 재시도 소진)": "통과 (또는 다시 시도 끝)",
 };
 
+// 검사 이름 (서버 기록의 label은 그대로 두고 화면에서만 바꾼다. 그래프 노드 이름과 맞춤)
+const CHECK_NAMES: Record<string, string> = { "자동 검사": "규칙 위반 검사", "위험 결정 막기": "위험 결정 확인" };
+const GUARD_ACTIONS: Record<string, string> = {
+  confirmed: "확정", pass: "통과 (배정 결정이 아님)", blocked: "차단 (규칙 위반이 남은 결정)", pending_approval: "사람 승인 대기",
+};
+// 도구 루프가 끝난 이유
+const STOP_NAMES: Record<string, string> = {
+  submitted: "결과를 제출하고 마침",
+  no_submit: "결과를 제출하지 않고 마침",
+  max_calls: "AI 호출 한도에 닿아 멈춤",
+  refusal: "AI가 응답을 거절해 멈춤",
+};
+
 export interface Terms {
   tool: (name: string) => string;
   args: (input: string | undefined) => string;
   aiAsked: (e: TimelineEvent) => string;
   decision: (e: TimelineEvent) => string;
   brief: (e: TimelineEvent) => string;   // 그래프 노드 아래 한 줄 (마지막 진행)
+  check: (e: TimelineEvent) => { label: string; detail: string; tone: "ok" | "bad" | "info" };
+  end: (e: TimelineEvent) => string;
+}
+
+export function checkName(label: string | undefined): string {
+  return label ? CHECK_NAMES[label] ?? label : "검사";
+}
+
+// 통과한 검사의 덧붙임 (예: 개선안 검사 ✓ 안 제목). 라벨·표시만 있으면 빈 문자열
+const checkDetail = (e: TimelineEvent) => e.text.replace(e.label ?? "", "").replace(/^[\s✓✕:]+/, "").trim();
+
+function check(e: TimelineEvent): { label: string; detail: string; tone: "ok" | "bad" | "info" } {
+  const label = checkName(e.label);
+  if (e.label === "위험 결정 막기") {
+    const action = checkDetail(e);
+    const tone = action === "confirmed" || action === "pass" ? "ok" : action === "pending_approval" ? "info" : "bad";
+    return { label, detail: GUARD_ACTIONS[action] ?? action, tone };
+  }
+  if (e.label === "다시 시도") {   // 실패가 아니라 고쳐 오게 돌려보낸 것
+    const n = /^다시 시도 (\d+)/.exec(e.text)?.[1];
+    return { label, detail: `${n ? `${n}번째: ` : ""}위반 사유를 AI에게 알려 주고 다시 결정하게 함`, tone: "info" };
+  }
+  if (e.ok) return { label, detail: checkDetail(e) || "통과", tone: "ok" };
+  // 규칙 코드 접두어("skill_required: …")는 떼고 설명만
+  const problems = (e.problems ?? []).map((p) => p.replace(/^[a-z_]+: /, ""));
+  return { label, detail: problems.join(" · ") || checkDetail(e) || e.text, tone: "bad" };
+}
+
+function end(e: TimelineEvent): string {
+  const stop = (e as { stop?: string }).stop ?? /^끝: (\w+)/.exec(e.text)?.[1];
+  return stop ? `■ ${STOP_NAMES[stop] ?? `끝 (${stop})`}` : e.text;
 }
 
 // dims: 도메인 dimensions.yaml (묶는 기준 이름 등). 없으면 어댑터 이름만 쓴다
@@ -124,8 +168,11 @@ export function makeTerms(adapter: DomainAdapter, dims?: Dimensions): Terms {
     if (e.type === "llm") return aiAsked(e).replace("다음을 하기로 함: ", "");
     if (e.type === "tool") return `${tool(e.name ?? e.text)}${e.ok === false ? " (오류)" : ""}`;
     if (e.type === "decision") return decision(e);
-    if (e.type === "check") return `${e.ok ? "✓ 통과" : "✕ 문제 있음"}`;
+    if (e.type === "check") {
+      const c = check(e);
+      return `${c.tone === "ok" ? "✓" : c.tone === "bad" ? "✕" : "↻"} ${c.detail}`;
+    }
     return e.text;
   };
-  return { tool, args, aiAsked, decision, brief };
+  return { tool, args, aiAsked, decision, brief, check, end };
 }
