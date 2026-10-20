@@ -74,7 +74,9 @@ SYSTEM = """너는 최적화 규칙 개선 작업을 지휘하는 Supervisor다.
 규칙 (코드가 검사한다):
 - 추천안(recommendations)은 최대 3건이고, 이 실행에서 simulate로 돌린 안의 id(P… 또는 S…)만 쓸 수 있다.
   적용 불가 사유가 있는 안은 추천할 수 없다.
-- 추천의 expected_effect·loses에 쓴 수치는 cited_calls로 인용한 도구 결과(호출 번호 c1, c2 …)에 있어야 한다.
+- 추천의 expected_effect·loses에 쓴 수치는 cited_calls로 인용한 도구 결과(호출 번호 c1, c2 …)나 그 안의 변경값에 있어야 한다.
+  수치는 읽기 쉽게 반올림해 써라 (예: 0.6681985 → 66.8% 또는 0.668). 표시한 자릿수 안에서 같으면 근거로 인정된다.
+  사람에게 묻는 항목(questions_for_human)도 같은 방식으로 반올림해 쓴다.
 - 도구 호출은 전체 40회, run_analysis 3회, run_proposals 4회까지다. 예산을 넘으면 그때까지의 결과로 멈춘다.
 - 규칙을 바꾸거나 승인할 수 없다. 반영은 사람이 판단 보고서를 보고 한다."""
 
@@ -152,6 +154,9 @@ def judgment_problems(sub: dict, calls: dict, state: dict) -> list[str]:
             problems.append(f"{where}: cited_calls가 비었거나 없는 호출 번호가 있다")
             continue
         sources = [n for cid in cited for n in numbers_in(calls[cid].get("output"))]
+        # 추천한 안 자체의 변경값(구간 조건의 차원 값, 바꾼 값)도 근거로 인정한다: 구간 이름에 든 숫자가
+        # 지표 수치로 오인돼 반려되지 않게 (2026-10-20 실제 API S3에서 구간 값의 숫자가 걸림)
+        sources += numbers_in(sim.get("change"))
         for key in ("expected_effect", "loses"):
             bad = unsupported_numbers(str(r.get(key) or ""), sources)
             if bad:
