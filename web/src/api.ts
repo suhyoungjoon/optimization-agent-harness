@@ -1,7 +1,7 @@
 import type {
   CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DomainDefinition, DecisionRecord, DomainInfo, FindingLabel, HarnessInfo, Memory, HistoryRow, Proposal, ProposalBatch, Report, Run,
   SpecEstimate, TraceRecord, WorkflowGraph, WorkflowRun, AgentsGraph, AgentsRun, SweepAxis, SweepResult, Sensitivity, ChangeCard, SavedConstraint,
-  AgentTabInfo, AgentTabSources, AgentTabHistoryRow, AgentTabTimeline, TabAgent, ProposalOutcome, AgentsMode,
+  AgentTabInfo, AgentTabSources, AgentTabHistoryRow, AgentTabTimeline, TabAgent, ProposalOutcome, AgentsMode, LlmCacheState,
 } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -33,6 +33,9 @@ export const api = {
     request<AgentTabTimeline>(`/agent-tab/timeline/${agent}/${id}?after=${after}`),
   agentTabOpinion: (proposalId: string, opinion: string) =>
     request<{ id: string }>("/agent-tab/opinion", { method: "POST", body: JSON.stringify({ proposal_id: proposalId, opinion }) }),
+  llmCache: () => request<LlmCacheState>("/llm/cache"),
+  setLlmCache: (enabled: boolean) =>
+    request<LlmCacheState>("/llm/cache", { method: "POST", body: JSON.stringify({ enabled }) }),
   agentTabSupervisor: (runId: string, useSavedConstraints: boolean) =>
     request<{ id: string }>("/agent-tab/supervisor", { method: "POST",
       body: JSON.stringify({ run_id: runId, use_saved_constraints: useSavedConstraints }) }),

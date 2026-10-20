@@ -226,3 +226,25 @@ def test_supervisor_agent_runs_alone_and_replays(client):
     assert hist[0]["id"] == sid and "추천 1건" in hist[0]["label"]
     # 규칙 파일은 바뀌지 않는다 (반영은 사람이 개선 탭·agents 탭에서)
     assert load_params(load_pack("dispatch"))["version"] == 1
+
+
+# --- AI 응답 캐시 켜고 끄기 (서버 전체) --------------------------------------------------------------
+
+def test_llm_cache_toggle_applies_to_next_clients(client, monkeypatch):
+    from core.llm.client import load_config
+
+    monkeypatch.setenv("LLM_CACHE", "1")          # 끝나면 원래대로 (테스트 격리)
+    assert client.get("/llm/cache").json()["enabled"] is True
+    off = client.post("/llm/cache", json={"enabled": False}).json()
+    assert off["enabled"] is False and "LLM_CACHE" in off["source"]
+    assert load_config()["cache"] is False and load_config(role="analysis")["cache"] is False   # 다음 클라이언트부터
+    assert client.get("/harness/levels").json()["cache"] is False
+    assert client.post("/llm/cache", json={"enabled": True}).json()["enabled"] is True
+
+
+def test_usage_summary_reports_cached_calls(client):
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": FAULTS}).json()
+    rule = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    rep = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': rule['run_id']}).json()['id']}")
+    t = client.get(f"/agent-tab/timeline/analysis/{rep['id']}").json()
+    assert "cached_calls" in t["usage"]

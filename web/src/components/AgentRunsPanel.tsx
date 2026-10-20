@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type {
-  AgentsGraph, AgentTabHistoryRow, AgentTabInfo, AgentTabSources, AgentTabTimeline, DomainInfo, TabAgent, TimelineEvent,
+  AgentsGraph, AgentTabHistoryRow, AgentTabInfo, AgentTabSources, AgentTabTimeline, DomainInfo, LlmCacheState, TabAgent,
+  TimelineEvent,
 } from "../types";
 import type { DomainAdapter } from "../domains/types";
 import GraphCanvas, { type NodeView } from "./GraphCanvas";
@@ -110,6 +111,7 @@ export default function AgentRunsPanel({
   const [useSaved, setUseSaved] = useState(true);
   const [proposalId, setProposalId] = useState("");
   const [opinion, setOpinion] = useState("관할 밖 4km 초과 출동 불가");
+  const [cache, setCache] = useState<LlmCacheState | null>(null);   // AI 응답 캐시 (서버 전체)
 
   const refreshSources = () => api.agentTabSources().then((s) => {
     setSources(s);
@@ -118,6 +120,8 @@ export default function AgentRunsPanel({
     setProposalId((v) => v || s.proposals[0]?.id || "");
   }).catch(() => undefined);
   useEffect(() => { api.agentTabInfo().then(setInfo).catch((e) => setError(String(e.message ?? e))); refreshSources(); }, []);
+  useEffect(() => { api.llmCache().then(setCache).catch(() => setCache(null)); }, []);
+  const toggleCache = (enabled: boolean) => api.setLlmCache(enabled).then(setCache).catch((e) => setError(String(e.message ?? e)));
   useEffect(() => { api.agentTabHistory(agent).then(setHistory).catch(() => setHistory([])); }, [agent, current?.id]);
   const graphLevel = agent === "dispatch" ? level : "L5";
   const graphMode = agent === "supervisor" ? "supervisor" : "fixed";   // Supervisor 내부 그림은 supervisor 모드 그래프에만 있다
@@ -267,6 +271,13 @@ export default function AgentRunsPanel({
             )}
           </div>
 
+          {cache && !cache.demo && (
+            <label className="small agent-cache" title={`서버 전체 설정 (${cache.source}). 켜면 AI에게 보내는 입력이 이전과 똑같을 때 API를 부르지 않고 저장된 응답을 그대로 쓴다(비용 0, 결과도 같다). 끄면 매번 실제로 부른다(비용). 다음 실행부터 적용`}>
+              <input type="checkbox" checked={cache.enabled} onChange={(e) => toggleCache(e.target.checked)} />{" "}
+              저장된 AI 응답 재사용 (캐시)
+              <span className="muted"> {cache.enabled ? "· 같은 입력이면 비용 0, 결과 같음" : "· 매번 실제 호출 (비용)"}</span>
+            </label>
+          )}
           {!confirming ? (
             <button className="primary" disabled={busy || missing || !me} onClick={() => setConfirming(true)}>실행</button>
           ) : (
@@ -276,7 +287,8 @@ export default function AgentRunsPanel({
               ) : (
                 <p className="small">실제 AI로 실행합니다 (비용).<br />
                   제공사 <strong>{me?.provider}</strong> · 모델 <strong>{me?.model}</strong>
-                  {me?.effort ? ` · 생각 깊이 ${me.effort}` : ""}<br />호출 상한: {me?.max_calls}</p>
+                  {me?.effort ? ` · 생각 깊이 ${me.effort}` : ""}<br />호출 상한: {me?.max_calls}
+                  <br />캐시: {cache?.enabled ? "켬 (이전과 같은 입력이면 저장된 응답, 비용 0)" : "끔 (매번 실제 호출)"}</p>
               )}
               <button className="primary" onClick={start}>실행</button> <button onClick={() => setConfirming(false)}>취소</button>
             </div>
@@ -334,7 +346,10 @@ function Summary({ t, onOpenReport, onOpenBatch }: {
       </div>
       <div className="muted small">
         {u.provider ?? "–"} · {u.deployment && u.deployment !== u.model ? `${u.model} (${u.deployment})` : u.model ?? "–"}
-        {" · "}호출 {fmtNum(u.calls)} · 토큰 입력 {fmtNum(u.input_tokens)}
+        {" · "}호출 {fmtNum(u.calls)}
+        {u.cached_calls ? <span title="AI에게 보낸 입력이 이전과 똑같아 API를 부르지 않고 저장된 응답을 썼다 (비용 0)">
+          {` (캐시 ${u.cached_calls}${u.calls ? `/${u.calls}` : ""})`}</span> : null}
+        {" · "}토큰 입력 {fmtNum(u.input_tokens)}
         {u.cache_read_tokens ? ` + 캐시 ${fmtNum(u.cache_read_tokens)}` : ""} / 출력 {fmtNum(u.output_tokens)}
         {" · "}{u.seconds != null ? `${u.seconds.toFixed(1)}초` : "–"}
         {u.cost_usd != null ? ` · $${u.cost_usd.toFixed(4)}${u.cost_estimated ? " (추정)" : ""}` : running ? "" : " · 비용 미확인"}
