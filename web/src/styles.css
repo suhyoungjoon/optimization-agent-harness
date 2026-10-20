@@ -557,3 +557,5 @@ input.approver { width: 9em; }
 .outcome-table { border-collapse: collapse; width: 100%; max-width: 560px; }
 .outcome-table th, .outcome-table td { padding: 2px 8px; border-bottom: 1px solid var(--border); text-align: left; }
 .outcome-table td.num, .outcome-table th.num { text-align: right; }
+
+.gc-tech-toggle { float: right; font-weight: normal; }

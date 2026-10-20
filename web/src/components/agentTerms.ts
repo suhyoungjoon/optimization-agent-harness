@@ -30,11 +30,41 @@ const STATUS_NAMES: Record<string, string> = {
   success: "배정", failed: "배정 못 함", pending_approval: "사람 확인 대기", blocked: "막힘",
 };
 
+// 에이전트 내부 그래프 노드 (workflow/agents의 LangGraph 노드 id) → 쉬운 이름·설명.
+// 도메인 노드 이름(예: 다음 지시서)과 검사 이름(근거 검사 등)은 서버가 준 이름을 그대로 쓴다
+export const PLAIN_NODES: Record<string, { label?: string; description: string }> = {
+  ai: { label: "AI 판단", description: "AI가 지금까지 받은 자료를 보고 다음에 할 일을 정한다" },
+  tools: { label: "도구 사용", description: "AI가 요청한 조회·계산 도구를 코드가 실행하고 결과를 돌려준다" },
+  submit: { label: "결정 받기", description: "AI가 제출한 결정을 읽는다" },
+  validate: { label: "규칙 위반 검사", description: "결정이 필수 규칙을 어기지 않는지 코드가 검사한다 (AI가 판단하지 않음)" },
+  retry: { label: "고쳐서 다시", description: "위반 사유를 AI에게 알려 주고 다시 결정하게 한다" },
+  guardrail: { label: "위험 결정 확인", description: "위반이 남은 결정은 막고, 사람 확인이 필요한 결정은 대기로 돌린다" },
+  record: { label: "결정 기록", description: "최종 결정을 저장한다" },
+  trace: { label: "과정 저장", description: "AI 호출·도구·검사 단계를 모두 기록해 나중에 다시 볼 수 있게 한다" },
+  nudge: { label: "제출 다시 요청", description: "AI가 결과를 제출하지 않고 글로만 답하면 제출하라고 다시 요청한다" },
+  fail: { label: "실패 기록", description: "결정을 받지 못한 항목을 실패로 기록한다" },
+  check: { description: "AI가 제출한 결과를 코드가 검사한다. 문제가 있으면 돌려보내 고쳐 오게 한다" },
+  next_item: { description: "처리할 다음 항목으로 넘어간다" },
+};
+
+// 그래프 연결선 이름 → 쉬운 말
+export const PLAIN_EDGES: Record<string, string> = {
+  "도구 호출": "도구 요청",
+  "결과 전달": "결과를 AI에게",
+  "응답만 함": "도구 없이 답함",
+  "거절·한도": "멈춤 (거절·호출 한도)",
+  "제출": "결과 제출",
+  "반려 → 고쳐 오기": "문제 있음 → 고쳐 오게",
+  "위반 · 재시도 남음": "위반 → 다시 시도",
+  "통과 (또는 재시도 소진)": "통과 (또는 다시 시도 끝)",
+};
+
 export interface Terms {
   tool: (name: string) => string;
   args: (input: string | undefined) => string;
   aiAsked: (e: TimelineEvent) => string;
   decision: (e: TimelineEvent) => string;
+  brief: (e: TimelineEvent) => string;   // 그래프 노드 아래 한 줄 (마지막 진행)
 }
 
 // dims: 도메인 dimensions.yaml (묶는 기준 이름 등). 없으면 어댑터 이름만 쓴다
@@ -90,5 +120,12 @@ export function makeTerms(adapter: DomainAdapter, dims?: Dimensions): Terms {
     if (e.reason_code) return `${head} (${adapter.reasonNames?.[e.reason_code] ?? e.reason_code})`;
     return head;
   };
-  return { tool, args, aiAsked, decision };
+  const brief = (e: TimelineEvent) => {
+    if (e.type === "llm") return aiAsked(e).replace("다음을 하기로 함: ", "");
+    if (e.type === "tool") return `${tool(e.name ?? e.text)}${e.ok === false ? " (오류)" : ""}`;
+    if (e.type === "decision") return decision(e);
+    if (e.type === "check") return `${e.ok ? "✓ 통과" : "✕ 문제 있음"}`;
+    return e.text;
+  };
+  return { tool, args, aiAsked, decision, brief };
 }

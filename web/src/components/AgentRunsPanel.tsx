@@ -5,7 +5,7 @@ import type {
 } from "../types";
 import type { DomainAdapter } from "../domains/types";
 import GraphCanvas, { type NodeView } from "./GraphCanvas";
-import { makeTerms, type Terms } from "./agentTerms";
+import { PLAIN_EDGES, PLAIN_NODES, makeTerms, type Terms } from "./agentTerms";
 import { usePoll } from "./usePoll";
 
 // 에이전트 탭 (M16): 핵심 에이전트를 하나씩 실행하고, 그 처리 흐름(턴 → 도구 → 하네스 검사)을 한 화면에서 본다.
@@ -244,7 +244,7 @@ export default function AgentRunsPanel({
           {!current && <div className="panel muted">왼쪽에서 에이전트와 입력을 고르고 실행하거나, 끝난 실행을 고르세요.</div>}
           {current && !shown && <div className="panel muted">불러오는 중…</div>}
           {shown && <Summary t={shown} onOpenReport={onOpenReport} />}
-          {shown && graph && <InnerGraph graph={graph} t={shown} />}
+          {shown && graph && <InnerGraph graph={graph} t={shown} terms={terms} />}
           {shown && <Timeline t={shown} terms={terms} />}
         </div>
       </div>
@@ -291,34 +291,49 @@ function Summary({ t, onOpenReport }: { t: AgentTabTimeline; onOpenReport?: (rep
   );
 }
 
-function InnerGraph({ graph, t }: { graph: AgentsGraph; t: AgentTabTimeline }) {
+// 일반 보기: 노드·연결 이름을 쉬운 말로, 노드 종류·id는 숨김. "기술 정보 보기"를 켜면 LangGraph 탭과 같은 원래 표시
+function InnerGraph({ graph, t, terms }: { graph: AgentsGraph; t: AgentTabTimeline; terms: Terms }) {
+  const [tech, setTech] = useState(false);
   const sub = graph.agents[t.graph];
   const views = useMemo(() => {
     const counts: Record<string, number> = {};
-    const last: Record<string, string> = {};
+    const last: Record<string, TimelineEvent> = {};
     for (const e of t.events) {
       const n = nodeOf(e);
       if (!n) continue;
       counts[n] = (counts[n] ?? 0) + 1;
-      last[n] = e.text;
+      last[n] = e;
     }
     const lastNode = [...t.events].reverse().map(nodeOf).find((n) => n);
     const out: Record<string, NodeView> = {};
     for (const n of sub?.nodes ?? []) {
+      const e = last[n.id];
       out[n.id] = {
         state: t.live && lastNode === n.id ? "running" : counts[n.id] ? "done" : "idle",
         badge: counts[n.id] ? `${counts[n.id]}회` : undefined,
-        summary: last[n.id],
+        summary: e ? (tech ? e.text : terms.brief(e)) : undefined,
       };
     }
     return out;
-  }, [sub, t.events, t.live]);
-  if (!sub) return null;
+  }, [sub, t.events, t.live, tech, terms]);
+  const plain = useMemo(() => sub && !tech ? {
+    nodes: sub.nodes.map((n) => {
+      const p = PLAIN_NODES[n.id];
+      return p ? { ...n, label: p.label ?? n.label, description: p.description } : n;
+    }),
+    edges: sub.edges.map((e) => (e.label && PLAIN_EDGES[e.label] ? { ...e, label: PLAIN_EDGES[e.label] } : e)),
+  } : sub, [sub, tech]);
+  if (!sub || !plain) return null;
   return (
     <div className="panel gc-panel">
-      <h3>내부 흐름 <span className="muted small">(agents 탭과 같은 LangGraph 하위 그래프{t.level ? ` · 하네스 ${t.level}` : ""}{t.live ? " · 실행 중" : ""})</span></h3>
-      <GraphCanvas ariaLabel="에이전트 내부 그래프" nodes={sub.nodes} edges={sub.edges} views={views}
-        height={300} nodeWidth={150} nodeHeight={66} minFitZoom={0.55} padding={0.2} />
+      <h3>처리 흐름{" "}
+        <span className="muted small">(지나간 단계에 횟수 표시 · 카드에 마우스를 올리면 설명{t.level ? ` · 하네스 ${t.level}` : ""}{t.live ? " · 실행 중" : ""})</span>
+        <label className="small gc-tech-toggle" title="노드 종류·id와 원래 이름을 보여 준다 (LangGraph 탭과 같은 표시)">
+          <input type="checkbox" checked={tech} onChange={(e) => setTech(e.target.checked)} /> 기술 정보 보기
+        </label>
+      </h3>
+      <GraphCanvas ariaLabel="에이전트 내부 그래프" nodes={plain.nodes} edges={plain.edges} views={views} showIds={tech}
+        height={300} nodeWidth={150} nodeHeight={tech ? 66 : 56} minFitZoom={0.55} padding={0.2} />
     </div>
   );
 }
