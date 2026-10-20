@@ -97,7 +97,8 @@ def _decision_event(d: dict) -> dict:
 def _usage_summary(usage: dict | None, seconds=None) -> dict:
     u = usage or {}
     return {"provider": u.get("provider"), "model": u.get("model"), "deployment": u.get("deployment"),
-            "calls": u.get("llm_calls", u.get("calls")), "input_tokens": u.get("input_tokens"),
+            "calls": u.get("llm_calls", u.get("calls")), "cached_calls": u.get("cached_calls"),
+            "input_tokens": u.get("input_tokens"),
             "cache_read_tokens": u.get("cache_read_input_tokens"), "output_tokens": u.get("output_tokens"),
             "cost_usd": u.get("cost_usd"), "cost_estimated": bool(u.get("cost_estimated")),
             "seconds": u.get("seconds", seconds)}

@@ -641,7 +641,8 @@ export interface AgentTabTimeline {
   output: string | null;
   usage: { provider?: string | null; model?: string | null; deployment?: string | null; calls?: number | null;
     input_tokens?: number | null; cache_read_tokens?: number | null; output_tokens?: number | null;
-    cost_usd?: number | null; seconds?: number | null; cost_estimated?: boolean };
+    cost_usd?: number | null; seconds?: number | null; cost_estimated?: boolean;
+    cached_calls?: number | null };   // 저장된 응답(캐시)을 쓴 호출 수
   graph: string;
   level?: string;
   note?: string | null;
@@ -680,3 +681,5 @@ export interface ProposalOutcome {
   seconds: number;
   note: string;
 }
+// AI 응답 캐시 (서버 전체, 켜고 끄기)
+export interface LlmCacheState { enabled: boolean; demo: boolean; source: string }

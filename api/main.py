@@ -91,6 +91,10 @@ def accepts_role(factory: Callable) -> bool:
         return False
 
 
+class CacheToggle(BaseModel):
+    enabled: bool
+
+
 def create_app(db_path: str | Path | None = None, serve_web: bool = True,
                llm_factory: Callable[..., LLMClient] | None = None,
                demo_bundle: str | Path | None = None, demo_work_root: str | Path | None = None,
@@ -150,7 +154,25 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
                                                             "max_llm_calls_per_item")},
                         "roles": {role: {k: cfg.get(k) for k in ("model", "thinking", "effort")}
                                   for role in (llm_config.get("roles") or {}) for cfg in [load_config(role=role)]}},
-                "demo": demo.manifest if demo else None}
+                "demo": demo.manifest if demo else None,
+                "cache": bool(load_config().get("cache"))}   # 지금 값 (서버에서 켜고 끌 수 있다)
+
+    # --- AI 응답 캐시 켜고 끄기 (서버 전체, 다음 실행부터) ---
+    # 클라이언트는 실행할 때마다 load_config로 만들고, load_config는 환경변수 LLM_CACHE를 먼저 본다.
+    def cache_state() -> dict:
+        return {"enabled": bool(load_config().get("cache")), "demo": bool(demo),
+                "source": "이 서버에서 바꿈 (LLM_CACHE)" if "LLM_CACHE" in os.environ else "configs/llm.yaml"}
+
+    @app.get("/llm/cache")
+    def get_llm_cache():
+        return cache_state()
+
+    @app.post("/llm/cache")
+    def set_llm_cache(req: CacheToggle):
+        if demo:
+            raise HTTPException(400, "저장된 결과 보기에서는 AI를 부르지 않아 캐시 설정이 필요 없음")
+        os.environ["LLM_CACHE"] = "1" if req.enabled else "0"
+        return cache_state()
 
     @app.get("/demo")
     def demo_info():

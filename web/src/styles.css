@@ -578,3 +578,4 @@ input.approver { width: 9em; }
 .agent-timeline .tl-thinking .tl-kind { color: var(--series-1); }
 .agent-timeline .tl-thinking { animation: wf-pulse 1s ease-in-out infinite alternate; }
 @media (prefers-reduced-motion: reduce) { .agent-timeline .tl-thinking { animation: none; } }
+.agent-cache { display: block; margin: 6px 0; }
