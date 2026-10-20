@@ -136,7 +136,7 @@ def build_dispatch_agent(ctx: AgentContext, level: Level, llm=None, spec_text: s
             results.append({"type": "tool_result", "tool_use_id": use["id"],
                             "content": json.dumps(to_jsonable(out), ensure_ascii=False), "is_error": is_error})
             ctx.emit(agent, "tools", ("✕ " if is_error else "") + f"{use['name']} {json.dumps(use.get('input') or {}, ensure_ascii=False)[:80]}")
-            halted = halted or guard.check(use["name"], use.get("input"), is_error)
+            halted = halted or guard.check(use["name"], use.get("input"), is_error, state.get("calls"))
         if halted and not submit_id:
             return {"fail": (HALT_CODES[halted], guard.reason)}
         if submit_id:

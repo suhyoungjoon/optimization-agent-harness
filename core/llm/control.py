@@ -47,29 +47,37 @@ def failure_of_stop(stop: str, reason: str = "") -> dict | None:
 
 
 class RepeatGuard:
-    """연속 반복과 연속 도구 오류를 센다. check()가 stop 코드(repeated | tool_failure)를 돌려주면 멈춘다."""
+    """연속 반복과 연속 도구 오류를 센다. check()가 stop 코드(repeated | tool_failure)를 돌려주면 멈춘다.
+    도구 오류는 **AI 턴 단위**로 센다: 한 턴에 같은 도구를 여러 번(병렬) 불러 여러 번 틀려도 1번이다.
+    AI는 오류 메시지를 보고 다음 턴에 고치므로, 같은 도구가 연속 3턴 틀릴 때만 도구 실패로 본다. 성공하면 처음부터."""
 
     def __init__(self, repeat_limit: int = REPEAT_LIMIT, error_limit: int = TOOL_ERROR_LIMIT):
         self.repeat_limit, self.error_limit = repeat_limit, error_limit
         self.last_key: str | None = None
         self.repeats = 0
         self.errors: dict[str, int] = {}
+        self.error_turn: dict[str, Any] = {}
         self.reason = ""
 
     @staticmethod
     def key(name: str, args: Any) -> str:
         return name + json.dumps(args or {}, sort_keys=True, ensure_ascii=False, default=str)
 
-    def check(self, name: str, args: Any, is_error: bool) -> str | None:
+    def check(self, name: str, args: Any, is_error: bool, turn: Any = None) -> str | None:
+        """turn: 지금 AI 턴 번호 (없으면 호출마다 다른 턴으로 본다)."""
         k = self.key(name, args)
         self.repeats = self.repeats + 1 if k == self.last_key else 1
         self.last_key = k
-        self.errors[name] = self.errors.get(name, 0) + 1 if is_error else 0
+        if not is_error:
+            self.errors[name] = 0
+        elif turn is None or self.error_turn.get(name) != turn:
+            self.errors[name] = self.errors.get(name, 0) + 1
+            self.error_turn[name] = turn
         if self.repeats >= self.repeat_limit:
             self.reason = f"{name}을(를) 같은 인자로 {self.repeats}번 연속 호출"
             return "repeated"
         if self.errors[name] >= self.error_limit:
-            self.reason = f"{name}이(가) {self.errors[name]}번 연속 실패"
+            self.reason = f"{name}이(가) AI 응답 {self.errors[name]}번 연속으로 실패"
             return "tool_failure"
         return None
 

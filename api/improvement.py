@@ -365,7 +365,7 @@ def register(app: FastAPI, ctx: Context) -> None:
                           report["body"], llm, ctx.llm_config, salt=f"proposals:{report['id']}",
                           constraints=constraints, memory_text=proposal_memory_text(memory), retrieval=retrieval,
                           on_event=on_event)
-            meta = {"usage": out["usage"], "trials": out["trials"], "stop": out["stop"],
+            meta = {"usage": out["usage"], "trials": out["trials"], "stop": out["stop"], "failure": out.get("failure"),
                     "params_version": params.get("version"),
                     "calls": out["calls"], "timeline": timeline}   # 도구 호출·타임라인 (M16 에이전트 탭)
             if constraints:

@@ -115,7 +115,7 @@ def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, to
                             "content": tool_result_content(ref, out), "is_error": is_error})
             text = tool_text(use["name"], use.get("input") or {}, out) if tool_text else use["name"]
             emit("tools", ("✕ " if is_error else "") + text)
-            halted = halted or guard.check(use["name"], use.get("input"), is_error)
+            halted = halted or guard.check(use["name"], use.get("input"), is_error, state.get("llm_calls"))
         if halted and not submit_id:
             emit("tools", f"✕ 멈춤: {guard.reason}")
             return {"calls": calls, "stop": halted, "stop_reason": guard.reason}

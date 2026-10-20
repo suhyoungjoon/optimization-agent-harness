@@ -38,7 +38,7 @@ def test_repeat_guard_counts_consecutive_same_calls_only():
     assert g.check("a", {"x": 2}, False) == "repeated"
     g = RepeatGuard()
     assert [g.check("b", {"i": i}, True) for i in range(3)] == [None, None, "tool_failure"]
-    assert "3번 연속 실패" in g.reason
+    assert "AI 응답 3번 연속으로 실패" in g.reason
 
 
 def test_tool_loop_stops_on_repeat_with_failure_status():
@@ -52,6 +52,22 @@ def test_tool_loop_stops_on_repeat_with_failure_status():
 def test_tool_loop_stops_on_tool_failure():
     r = loop(lambda item, n, m, t: tool_use("broken", {"i": n}), [tool("broken", fail=True)])
     assert r.stop == "tool_failure" and r.failure["label"] == "도구 실패" and r.llm_calls == 3
+
+
+def test_parallel_errors_in_one_turn_count_once():
+    """회귀 (2026-10-20 실사용): 개선 에이전트가 한 턴에 simulate_params를 4번 불러 3번 형식이 틀리자 바로 멈췄다.
+    오류는 AI 턴 단위로 센다: 한 턴의 여러 오류는 1번, 다음 턴에 고칠 기회를 준다."""
+    g = RepeatGuard()
+    assert [g.check("sim", {"i": i}, True, turn=1) for i in range(3)] == [None, None, None]
+    assert g.check("sim", {"i": 9}, False, turn=1) is None and g.errors["sim"] == 0
+    assert [g.check("sim", {"t": t}, True, turn=t) for t in (2, 3, 4)] == [None, None, "tool_failure"]
+
+    def policy(item, n, m, t):     # 1턴: 병렬 4개 중 3개 오류 → 2턴: 제출
+        if n == 0:
+            return [tool_use("broken", {"i": i}) for i in range(3)] + [tool_use("look", {"ok": 1})]
+        return tool_use("submit", {})
+    r = loop(policy, [tool("broken", fail=True), tool()])
+    assert r.stop == "submitted" and r.failure is None
 
 
 def test_tool_loop_budget_stops_before_next_call():

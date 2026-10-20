@@ -128,7 +128,7 @@ def run_tool_loop(llm: LLMClient, *, system: str, user: str, tools: list[dict], 
             emit(tool_event(turn, use["name"], use.get("input"), to_jsonable(out), not is_error, ref=ref))
             tool_results.append({"type": "tool_result", "tool_use_id": use["id"],
                                  "content": tool_result_content(ref, out), "is_error": is_error})
-            halted = halted or guard.check(use["name"], use.get("input"), is_error)
+            halted = halted or guard.check(use["name"], use.get("input"), is_error, turn)
         if halted and submitted is None:
             result.stop, reason = halted, guard.reason
             break

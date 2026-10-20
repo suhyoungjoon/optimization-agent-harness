@@ -214,7 +214,7 @@ class HarnessRunner:
                 tracer.record(item_id, "tool_call", {"name": use["name"], "input": use.get("input")}, out)
                 results.append({"type": "tool_result", "tool_use_id": use["id"],
                                 "content": json.dumps(to_jsonable(out), ensure_ascii=False), "is_error": is_error})
-                halted = halted or guard.check(use["name"], use.get("input"), is_error)
+                halted = halted or guard.check(use["name"], use.get("input"), is_error, calls)
 
             if halted and submitted is None:   # M18-a 공통 실행 제어
                 return self._failed(instance, item_id, HALT_CODES[halted], guard.reason, llm_calls=calls, retries=retries)
