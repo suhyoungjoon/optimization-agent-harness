@@ -195,3 +195,15 @@ def test_different_metrics_are_not_related():
           "resource": [f("B지점 저활용", {"branch": ["B"]}, ["CAPACITY"], metric={"name": "worker_utilization", "direction": "low"})]}
     merged = merge_findings(by, {"failure": "실패", "resource": "자원"}, DIMS)
     assert [m["related"] for m in merged] == [[], []]
+
+
+def test_sum_usage_keeps_provider_deployment_and_estimate_flag():
+    from core.analysis.perspectives import _sum_usage
+    usages = [{"model": "gpt-5", "provider": "azure_openai", "deployment": "gpt-5", "cost_usd": 0.1, "cost_estimated": True,
+               "calls": 2, "input_tokens": 10},
+              {"model": "gpt-5", "provider": "azure_openai", "deployment": "gpt-5", "cost_usd": 0.2, "cost_estimated": True,
+               "calls": 3, "input_tokens": 5}]
+    out = _sum_usage(usages)
+    assert out["provider"] == "azure_openai" and out["deployment"] == "gpt-5" and out["cost_estimated"] is True
+    assert out["cost_usd"] == pytest.approx(0.3)
+    assert "provider" not in _sum_usage([{"model": "fake-model", "cost_usd": None}])   # 이전 기록은 그대로

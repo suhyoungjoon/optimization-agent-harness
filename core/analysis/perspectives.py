@@ -122,6 +122,12 @@ def _sum_usage(usages: list[dict]) -> dict:
     costs = [u["cost_usd"] for u in usages if u.get("cost_usd") is not None]
     out["cost_usd"] = sum(costs) if costs else None
     out["model"] = ", ".join(sorted({u["model"] for u in usages if u.get("model")}))
+    for key in ("provider", "deployment"):     # 재현 조건 (관점마다 같은 클라이언트 설정이라 보통 하나)
+        values = sorted({u[key] for u in usages if u.get(key)})
+        if values:
+            out[key] = ", ".join(values)
+    if out["cost_usd"] is not None and any(u.get("cost_estimated") for u in usages):
+        out["cost_estimated"] = True               # 단가 추정치 (화면 "(추정)")
     return out
 
 
