@@ -150,6 +150,7 @@ def run_supervisor(w: dict, make, salt: str) -> dict:
         "cost_usd": cost([out["usage"], *out["sub_usage"]]), "llm_calls": calls([out["usage"], *out["sub_usage"]]),
         "seconds": round(time.monotonic() - started, 1), "failure": out["failure"], "problems": out["problems"],
         "budget": out["budget"],
+        "draft": None if out["judgment"] else out["draft"],     # 검사에서 막혔을 때 원래 추천하려던 보고서
     }
 
 

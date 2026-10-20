@@ -164,3 +164,19 @@ def test_budget_shared_with_called_agents_stops_mid_run(world):
     assert out["stop"] == "budget" and out["failure"]["label"] == "예산 초과" and out["judgment"] is None
     assert budget.spent_usd >= 0.5 and len(sup.calls) < 4             # 보고서까지 가지 못함
     assert out["reports"]                                              # 그때까지의 결과는 남는다
+
+
+def test_numbers_from_the_recommended_change_and_rounding_are_grounded():
+    """회귀 (2026-10-20 실제 API S3): 기대 효과의 '10시만'에서 10이 지표 수치로 오인돼 해결 불가가 됐다.
+    추천한 안의 변경값(구간 조건 값)은 근거로 인정하고, 반올림한 수치도 인정한다."""
+    from core.improvement.supervisor import judgment_problems
+
+    calls = {"t1": {"ref": "c3", "name": "simulate", "output": {"after": {"rate": 0.6681985}}}}
+    state = {"simulations": {"S4": {"errors": [], "change": {"override_rules": [
+        {"when": {"branch": ["B"], "hour": ["10"]}, "set": {"matching.time_window_min[1]": 45}}]}}}}
+    base = {"hypotheses": [{"confidence": "중간"}], "attempts": [{}], "end_reason": "good_enough"}
+    ok = {"proposal_id": "S4", "cited_calls": ["c3"], "expected_effect": "B지점 10시만 허용오차 45분, 배정 성공률 66.8%",
+          "loses": "정시 배정 0.668 수준", "confidence": "중간"}
+    assert judgment_problems({**base, "recommendations": [ok]}, calls, state) == []
+    bad = {**ok, "expected_effect": "배정 성공률 71.2%"}
+    assert any("71.2%" in p for p in judgment_problems({**base, "recommendations": [bad]}, calls, state))
