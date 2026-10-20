@@ -42,12 +42,14 @@ export default function AgentRunsPanel({
   seed,
   faults,
   onOpenReport,
+  onOpenBatch,
 }: {
   domain: DomainInfo;
   adapter: DomainAdapter;
   seed: number;
   faults: string[];
   onOpenReport?: (reportId: string) => void;   // 분석 리포트를 문제 찾기 탭에서 연다
+  onOpenBatch?: (batchId: string) => void;     // 개선안 묶음을 개선 제안 탭에서 연다
 }) {
   const [agent, setAgent] = useState<TabAgent>("dispatch");
   const [info, setInfo] = useState<AgentTabInfo | null>(null);
@@ -86,7 +88,11 @@ export default function AgentRunsPanel({
   );
   const terms = useMemo(() => makeTerms(adapter, domain.dimensions), [adapter, domain.dimensions]);
   const shown = timeline && current && timeline.id === current.id ? timeline : null;
-  useEffect(() => { if (shown && !shown.live && shown.status !== "running") refreshSources(); }, [shown?.status]);
+  useEffect(() => {
+    if (!shown || shown.live || shown.status === "running") return;
+    refreshSources();
+    api.agentTabHistory(shown.agent).then(setHistory).catch(() => undefined);   // 실행 중에 읽은 상태가 남지 않게
+  }, [shown?.status, shown?.live]);
 
   const me = info?.agents.find((a) => a.agent === agent);
   const missing = agent === "analysis" ? !ruleRun : agent === "proposals" ? !reportId : agent === "opinion" ? !proposalId || !opinion.trim() : false;
@@ -253,7 +259,7 @@ export default function AgentRunsPanel({
         <div className="agent-tab-main">
           {!current && <div className="panel muted">왼쪽에서 에이전트와 입력을 고르고 실행하거나, 끝난 실행을 고르세요.</div>}
           {current && !shown && <div className="panel muted">불러오는 중…</div>}
-          {shown && <Summary t={shown} onOpenReport={onOpenReport} />}
+          {shown && <Summary t={shown} onOpenReport={onOpenReport} onOpenBatch={onOpenBatch} />}
           {shown && graph && <InnerGraph graph={graph} t={shown} terms={terms} />}
           {shown && <Timeline t={shown} terms={terms} />}
         </div>
@@ -262,7 +268,9 @@ export default function AgentRunsPanel({
   );
 }
 
-function Summary({ t, onOpenReport }: { t: AgentTabTimeline; onOpenReport?: (reportId: string) => void }) {
+function Summary({ t, onOpenReport, onOpenBatch }: {
+  t: AgentTabTimeline; onOpenReport?: (reportId: string) => void; onOpenBatch?: (batchId: string) => void;
+}) {
   const u = t.usage;
   const running = t.live || t.status === "running";
   return (
@@ -288,6 +296,14 @@ function Summary({ t, onOpenReport }: { t: AgentTabTimeline; onOpenReport?: (rep
           <button onClick={() => onOpenReport(t.id)}
             title="발견 카드·근거 데이터·지도 강조·사람 판정을 문제 찾기 탭에서 본다. 다시 분석하지 않으므로 비용이 들지 않는다">
             문제 찾기 탭에서 보기 →
+          </button>
+        </p>
+      )}
+      {t.agent === "proposals" && t.status === "done" && onOpenBatch && (
+        <p>
+          <button onClick={() => onOpenBatch(t.id)}
+            title="개선안 카드·순위·미리 돌려보기·사람 승인을 개선 제안 탭에서 본다. 다시 만들지 않으므로 비용이 들지 않는다">
+            개선 제안 탭에서 보기 →
           </button>
         </p>
       )}
