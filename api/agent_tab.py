@@ -8,6 +8,7 @@
 - GET  /agent-tab/history?agent=analysis     끝난 실행 목록 (다시 보기, API 호출 없음)
 - GET  /agent-tab/timeline/{agent}/{id}?after=N   요약 + 타임라인 (실행 중이면 쌓인 만큼)
 - POST /agent-tab/opinion                    의견 정리 단독 실행 (결과는 제약 확인 전 단계까지)
+- POST /agent-tab/supervisor                 분석·개선 Supervisor 단독 실행 (M18, 결과는 판단 보고서까지. 반영하지 않는다)
 """
 
 import inspect
@@ -22,16 +23,58 @@ from pydantic import BaseModel, Field
 from core.analysis.agent import analyze
 from core.improvement.memory import _proposal_change
 from core.improvement.proposer import propose
+from core.improvement.supervisor import LIMITS as SUPERVISOR_LIMITS
+from core.improvement.supervisor import supervise
+from core.llm.control import load_budget_config
 from core.llm.client import load_config
 from core.llm.events import check_event, llm_event, numbered, timeline_from_calls, timeline_from_traces, tool_event
-from core.registry import load_pack, load_params
+from core.registry import load_pack, load_params, load_perspectives
 
-from .improvement import Context, _run_context
+from .improvement import Context, _run_context, recorder
 
-AGENTS = ("dispatch", "analysis", "proposals", "opinion")
-AGENT_LABEL = {"dispatch": "배정", "analysis": "분석", "proposals": "개선", "opinion": "의견 정리"}
-ROLE = {"dispatch": None, "analysis": "analysis", "proposals": "proposals", "opinion": "proposals"}   # 의견 정리는 개선안 모델
+AGENTS = ("dispatch", "analysis", "proposals", "opinion", "supervisor")
+AGENT_LABEL = {"dispatch": "배정", "analysis": "분석", "proposals": "개선", "opinion": "의견 정리", "supervisor": "Supervisor"}
+ROLE = {"dispatch": None, "analysis": "analysis", "proposals": "proposals", "opinion": "proposals",   # 의견 정리는 개선안 모델
+        "supervisor": "supervisor"}
+TabAgentName = Literal["dispatch", "analysis", "proposals", "opinion", "supervisor"]
 OPINION_MAX_CALLS = 6        # workflow.agents.flow.opinion_agent_graph의 max_calls와 같다
+
+
+class SupervisorRequest(BaseModel):
+    run_id: str                       # 분석할 규칙 실행
+    use_saved_constraints: bool = True
+    use_knowledge: bool = True
+
+
+def _total_usage(out: dict, seconds: float) -> dict:
+    """Supervisor + 그가 부른 분석·개선 에이전트의 사용량 합 (모델·제공사는 Supervisor 것)."""
+    parts = [out["usage"], *[u for u in out.get("sub_usage") or [] if u]]
+    total = {k: sum(int(p.get(k) or 0) for p in parts)
+             for k in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}
+    costs = [p.get("cost_usd") for p in parts]
+    return {**{k: out["usage"].get(k) for k in ("provider", "model", "deployment")}, **total,
+            "llm_calls": sum(int(p.get("llm_calls", p.get("calls")) or 0) for p in parts),
+            "cost_usd": sum(c for c in costs if c is not None) if any(c is not None for c in costs) else None,
+            "cost_estimated": any(p.get("cost_estimated") for p in parts), "seconds": round(seconds, 2),
+            "supervisor_calls": out["usage"].get("llm_calls")}
+
+
+def _recommendations(out: dict, primary: list[str]) -> list[dict]:
+    """판단 보고서의 추천안 + 코드가 돌린 미리 돌려보기 요약 (화면용)."""
+    rows = []
+    for rec in (out.get("judgment") or {}).get("recommendations") or []:
+        pid = rec["proposal_id"]
+        sim = out["simulations"].get(pid) or {}
+        body = (out["proposals"].get(pid) or {}).get("proposal") or {}
+        result = sim.get("result") or {}
+        rows.append({**rec, "title": body.get("title") or f"Supervisor 직접 변경 {pid}",
+                     "change": {k: (body or sim.get("change") or {}).get(k) for k in ("params_changes", "override_rules")
+                                if (body or sim.get("change") or {}).get(k)},
+                     "primary": {k: [(result.get("before") or {}).get(k), (result.get("after") or {}).get(k)]
+                                 for k in primary},
+                     "constraint_violations": len(sim.get("constraint_violations") or []),
+                     "diagnosis": sim.get("diagnosis")})
+    return rows
 
 
 class OpinionRequest(BaseModel):
@@ -67,18 +110,23 @@ def register(app: FastAPI, ctx: Context, demo: bool = False) -> None:
     def info():
         """실행 전에 보여 줄 제공사·모델·호출 상한 (키 값은 보내지 않는다)."""
         cfg = ctx.llm_config
+        budget = load_budget_config()
         per_item = cfg.get("max_llm_calls_per_item", 12)
         limits = {"dispatch": f"지시서당 최대 {per_item}회 (10건이면 {per_item * 10}회)",
                   "analysis": f"최대 {_default(analyze, 'max_calls')}회 (관점별이면 관점마다)",
                   "proposals": f"최대 {_default(propose, 'max_calls')}회",
-                  "opinion": f"최대 {OPINION_MAX_CALLS}회"}
+                  "opinion": f"최대 {OPINION_MAX_CALLS}회",
+                  "supervisor": f"도구 호출 최대 {SUPERVISOR_LIMITS['total']}회 (분석 {SUPERVISOR_LIMITS['run_analysis']}·"
+                                f"개선 {SUPERVISOR_LIMITS['run_proposals']}) · 예산 ${budget.get('max_usd')}·"
+                                f"{int((budget.get('max_seconds') or 0) // 60)}분 (부른 에이전트 포함)"}
         out = []
         for agent in AGENTS:
             role_cfg = load_config(role=ROLE[agent])
             out.append({"agent": agent, "label": AGENT_LABEL[agent], "provider": role_cfg.get("provider"),
                         "model": role_cfg.get("model"), "effort": role_cfg.get("effort"), "max_calls": limits[agent]})
         return {"agents": out, "demo": demo, "fake": demo,
-                "note": "저장된 결과 보기: 배정·분석·개선은 저장된 실행을 재생하고, 의견 정리는 가짜 AI로 돈다" if demo else None}
+                "note": "저장된 결과 보기: 배정·분석·개선은 저장된 실행을 재생하고, 의견 정리·Supervisor는 가짜 AI로 돈다"
+                if demo else None}
 
     def _params_version(domain: str) -> int | None:
         try:
@@ -112,7 +160,7 @@ def register(app: FastAPI, ctx: Context, demo: bool = False) -> None:
         return {"rule_runs": rule_runs[::-1][:30], "reports": reports, "proposals": proposals[:60]}
 
     @app.get("/agent-tab/history")
-    def history(agent: Literal["dispatch", "analysis", "proposals", "opinion"], limit: int = 20):
+    def history(agent: TabAgentName, limit: int = 20):
         if agent == "dispatch":
             rows = [r for r in store.list_runs() if r["agent"] == "ai"][::-1][:limit]
             return [{"id": r["run_id"], "status": r["status"], "created_at": r["created_at"],
@@ -125,13 +173,17 @@ def register(app: FastAPI, ctx: Context, demo: bool = False) -> None:
         if agent == "proposals":
             return [{"id": b["id"], "status": b["status"], "created_at": b["created_at"],
                      "label": f"{b['report_id']} · 제안 {len(b.get('proposals') or [])}건"} for b in store.recent_batches(limit)]
+        if agent == "supervisor":
+            return [{"id": r["id"], "status": r["status"], "created_at": r["created_at"],
+                     "label": f"{r['run_id']} · 추천 {len((r.get('body') or {}).get('recommendations') or [])}건"}
+                    for r in store.recent_supervisor_runs(limit)]
         return [{"id": o["id"], "status": o["status"], "created_at": o["created_at"],
                  "label": f"\"{o['opinion'][:30]}\""} for o in store.recent_opinion_runs(limit)]
 
     @app.get("/agent-tab/timeline/{agent}/{run_id}")
-    def timeline(agent: Literal["dispatch", "analysis", "proposals", "opinion"], run_id: str, after: int = -1):
+    def timeline(agent: TabAgentName, run_id: str, after: int = -1):
         view = {"dispatch": _dispatch_view, "analysis": _analysis_view, "proposals": _proposals_view,
-                "opinion": _opinion_view}[agent](run_id)
+                "opinion": _opinion_view, "supervisor": _supervisor_view}[agent](run_id)
         live = ctx.live.get(f"{agent}:{run_id}")
         events = live if (view["status"] == "running" and live is not None) else view.pop("events")
         view.pop("events", None)
@@ -222,6 +274,86 @@ def register(app: FastAPI, ctx: Context, demo: bool = False) -> None:
                 "input": f"\"{run['opinion']}\" · 개선안 {run.get('proposal_id')}", "output": output,
                 "usage": _usage_summary(body.get("usage")), "graph": "opinion_agent",
                 "constraints": constraints, "problems": body.get("problems") or []}
+
+    def _supervisor_view(sid: str) -> dict:
+        run = store.get_supervisor_run(sid)
+        if run is None:
+            raise HTTPException(404, f"unknown supervisor run: {sid}")
+        body = run.get("body") or {}
+        judgment = body.get("judgment") or {}
+        recs = body.get("recommendations") or []
+        if run["status"] == "running":
+            output = None
+        elif judgment:
+            output = f"추천 {len(recs)}건 · 끝낸 이유: {body.get('end_reason_label') or judgment.get('end_reason')}"
+        else:
+            output = (body.get("failure") or {}).get("label") or "판단 보고서 없음"
+        counts = body.get("counts") or {}
+        return {"status": run["status"], "error": run.get("error"), "events": body.get("timeline") or [],
+                "input": f"규칙 실행 {run['run_id']}" + (" · 저장된 제약 사용" if body.get("constraints") else ""),
+                "output": output, "usage": _usage_summary(body.get("usage")), "graph": "supervisor_agent",
+                "note": (f"도구 호출 {counts.get('total', 0)}회 (분석 {counts.get('run_analysis', 0)}·"
+                         f"개선 {counts.get('run_proposals', 0)}) · 사용량은 부른 에이전트 포함") if counts else None,
+                "judgment": judgment or None, "recommendations": recs, "failure": body.get("failure"),
+                "problems": body.get("problems") or []}
+
+    # --- 분석·개선 Supervisor 단독 실행 (M18) ---
+    @app.post("/agent-tab/supervisor")
+    def run_supervisor(req: SupervisorRequest):
+        run = store.get_run(req.run_id)
+        if run is None or run["agent"] != "rule" or run["status"] != "done":
+            raise HTTPException(400, "끝난 규칙 실행으로만 Supervisor를 돌릴 수 있음")
+        _run, _dataset, pack, instance, _truth, decisions = _run_context(store, req.run_id)
+        if demo:
+            try:
+                from workflow.agents.api import _fake_llm_factory
+                from workflow.agents.context import AgentContext
+            except ImportError as exc:
+                raise HTTPException(501, f"가짜 AI를 쓸 수 없음: {exc}")
+            fake_ctx = AgentContext()
+            fake_ctx.data.update(pack=pack, instance=instance)
+            make_llm = _fake_llm_factory(fake_ctx)
+        else:
+            try:
+                ctx.make_llm("supervisor")
+            except Exception as exc:   # 키가 없거나 클라이언트를 만들 수 없음
+                raise HTTPException(503, f"LLM 클라이언트를 만들 수 없음: {exc}")
+            make_llm = ctx.make_llm
+        constraints = [c["body"] for c in store.list_constraints(run["domain"])] if req.use_saved_constraints else []
+        retrieval = (ctx.knowledge(run["domain"], ["regulation", "case", "opinion"])
+                     if (req.use_knowledge and ctx.knowledge and not demo) else None)
+        sid = store.create_supervisor_run(req.run_id)
+        ctx.executor.submit(_supervisor_job, sid, req.run_id, pack, instance, decisions, make_llm, constraints, retrieval)
+        return JSONResponse(status_code=202, content={"id": sid, "status": "running"})
+
+    def _supervisor_job(sid, run_id, pack, instance, decisions, make_llm, constraints, retrieval):
+        from core.improvement.supervisor import END_REASONS
+        from core.improvement.ranking import metric_specs
+
+        on_event, timeline = recorder(ctx.live, f"supervisor:{sid}")
+        started = time.monotonic()
+        try:
+            params = load_params(pack)
+            spec_text = open(pack.spec_path(), encoding="utf-8").read()
+            out = supervise(pack, lambda q: load_pack(pack.name, q), instance, decisions, params, spec_text,
+                            make_llm, ctx.llm_config, perspectives=load_perspectives(pack),
+                            constraints=constraints or None, retrieval=retrieval, salt=f"supervisor:{run_id}",
+                            on_event=on_event)
+            primary = [m["key"] for m in metric_specs(pack.dimensions()) if m.get("primary")]
+            judgment = out["judgment"] or {}
+            body = {"judgment": out["judgment"], "draft": out["draft"], "problems": out["problems"],
+                    "failure": out["failure"], "stop": out["stop"], "counts": out["counts"],
+                    "attempts_log": out["attempts_log"], "budget": out["budget"], "constraints": constraints,
+                    "recommendations": _recommendations(out, primary),
+                    "end_reason_label": END_REASONS.get(judgment.get("end_reason")),
+                    "findings": [{k: f.get(k) for k in ("id", "title", "slice")} for f in out["findings"].values()],
+                    "params_version": params.get("version"), "calls": out["calls"], "timeline": timeline,
+                    "usage": _total_usage(out, time.monotonic() - started), "sub_usage": out["sub_usage"]}
+            error = None if out["judgment"] else ((out["failure"] or {}).get("label") or "판단 보고서 없음") + (
+                f": {(out['failure'] or {}).get('reason')}" if (out["failure"] or {}).get("reason") else "")
+            store.finish_supervisor_run(sid, body, error)
+        except Exception as exc:
+            store.finish_supervisor_run(sid, {"timeline": timeline}, repr(exc))
 
     # --- 의견 정리 단독 실행 ---
     @app.post("/agent-tab/opinion")

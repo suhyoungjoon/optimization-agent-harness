@@ -586,7 +586,7 @@ export interface AgentsLoop {
 }
 
 // --- 에이전트 탭 (M16) ---
-export type TabAgent = "dispatch" | "analysis" | "proposals" | "opinion";
+export type TabAgent = "dispatch" | "analysis" | "proposals" | "opinion" | "supervisor";
 
 export interface AgentTabInfo {
   agents: { agent: TabAgent; label: string; provider: string; model: string; effort: string | null; max_calls: string }[];
@@ -649,6 +649,13 @@ export interface AgentTabTimeline {
   constraints?: unknown[];
   problems?: string[];
   item_labels?: Record<string, string>;   // 관점별 분석: 관점 id → 이름
+  // Supervisor (M18): 판단 보고서와 추천안 (코드가 돌린 미리 돌려보기 요약)
+  judgment?: Omit<JudgmentView, "recommendation" | "diagnosis"> | null;
+  recommendations?: (JudgmentView["recommendation"] & {
+    title: string; primary: Record<string, [number | null, number | null]>; constraint_violations: number;
+    diagnosis?: JudgmentView["diagnosis"];
+  })[];
+  failure?: { label: string; reason: string } | null;
 }
 
 // --- 계획 vs 실적 (M17) ---

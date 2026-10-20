@@ -33,6 +33,9 @@ export const api = {
     request<AgentTabTimeline>(`/agent-tab/timeline/${agent}/${id}?after=${after}`),
   agentTabOpinion: (proposalId: string, opinion: string) =>
     request<{ id: string }>("/agent-tab/opinion", { method: "POST", body: JSON.stringify({ proposal_id: proposalId, opinion }) }),
+  agentTabSupervisor: (runId: string, useSavedConstraints: boolean) =>
+    request<{ id: string }>("/agent-tab/supervisor", { method: "POST",
+      body: JSON.stringify({ run_id: runId, use_saved_constraints: useSavedConstraints }) }),
   proposeWith: (reportId: string, useSavedConstraints: boolean) =>
     request<{ id: string }>("/proposals", { method: "POST",
       body: JSON.stringify({ report_id: reportId, use_saved_constraints: useSavedConstraints }) }),

@@ -19,11 +19,19 @@ export const CORE_TOOL_NAMES: Record<string, string> = {
   submit_proposals: "개선안 제출",
   submit_decision: "배정 결정 제출",
   submit_constraints: "정리한 제약 제출",
+  // 분석·개선 Supervisor (M18)
+  run_analysis: "분석 에이전트 실행",
+  run_proposals: "개선 에이전트 실행",
+  simulate: "미리 돌려보기 (진단 신호)",
+  sweep: "파라미터 훑기",
+  submit_judgment: "판단 보고서 제출",
 };
 
 const CORE_ARG_NAMES: Record<string, string> = {
   group_by: "묶는 기준", filters: "조건", limit: "최대", sort_by: "정렬", query: "검색어", changes: "바꿀 값",
   field: "항목", status: "상태", reason: "사유", top_k: "최대",
+  proposal_id: "개선안", finding_ids: "발견", target_findings: "겨냥한 발견", focus: "초점", instruction: "지시",
+  question: "질문", slice: "구간", perspectives: "관점", axes: "축", metrics: "지표",
 };
 
 const STATUS_NAMES: Record<string, string> = {
@@ -131,6 +139,8 @@ export function makeTerms(adapter: DomainAdapter, dims?: Dimensions): Terms {
     if (typeof v === "string") return values[v] ?? fieldLabels[v] ?? argNames[v] ?? v;
     if (typeof v === "number" || typeof v === "boolean") return String(v);
     if (Array.isArray(v)) return v.map(value).join(", ");
+    if (v && typeof v === "object")   // 구간 {차원: [값]} 등
+      return Object.entries(v as Record<string, unknown>).map(([k, x]) => `${fieldLabels[k] ?? k} ${value(x)}`).join(", ");
     return "…";
   };
   // 도구 입력 JSON 요약 → "지시서 D01-O003 · 완화 단계 1". 잘린 JSON이면 비운다 (원본은 자세히에)
