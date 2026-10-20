@@ -613,6 +613,7 @@ export interface AgentTabHistoryRow {
 
 export interface TimelineEvent {
   seq: number;
+  at?: number;          // 실행 중 기록의 시각 (초, 서버 시계). 저장된 기록에는 없다
   type: "llm" | "tool" | "check" | "item" | "decision" | "end" | string;
   turn: number | null;
   item?: string;
