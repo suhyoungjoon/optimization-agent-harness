@@ -80,11 +80,29 @@ def register(app: FastAPI, ctx: Context, demo: bool = False) -> None:
         return {"agents": out, "demo": demo, "fake": demo,
                 "note": "저장된 결과 보기: 배정·분석·개선은 저장된 실행을 재생하고, 의견 정리는 가짜 AI로 돈다" if demo else None}
 
+    def _params_version(domain: str) -> int | None:
+        try:
+            return load_params(load_pack(domain)).get("version")
+        except Exception:   # noqa: BLE001 - 도메인 파일이 없으면 비교만 못 한다
+            return None
+
+    def _rule_run_source(r: dict, current_version: int | None = None) -> dict:
+        """분석 입력 목록 한 줄: 데이터 번호·심어둔 문제·범위·설정 버전 (같은 조건 실행을 다시 만들지 않게 화면이 비교한다)."""
+        ds = store.get_dataset(r["dataset_id"]) or {}
+        faults = ds.get("faults") or []
+        scope = r.get("scope")
+        size = f"{len(scope)}건" if scope else f"전체 {ds['items']}건" if ds.get("items") else "전체"
+        label = (f"데이터 {ds.get('seed', '?')} · 심어둔 문제 {'·'.join(faults) if faults else '없음'} · {size}"
+                 f" · 설정 v{r.get('params_version') or '?'}")
+        return {"id": r["run_id"], "label": label, "dataset_id": r["dataset_id"], "created_at": r["created_at"],
+                "seed": ds.get("seed"), "faults": faults, "full": not scope, "params_version": r.get("params_version"),
+                "current_params": current_version is not None and r.get("params_version") == current_version}
+
     @app.get("/agent-tab/sources")
     def sources():
-        rule_runs = [{"id": r["run_id"], "label": f"규칙 · {r['dataset_id']} · {'전체' if not r.get('scope') else str(len(r['scope'])) + '건'}",
-                      "dataset_id": r["dataset_id"], "created_at": r["created_at"]}
-                     for r in store.list_runs() if r["agent"] == "rule" and r["status"] == "done"]
+        runs = [r for r in store.list_runs() if r["agent"] == "rule" and r["status"] == "done"]
+        versions = {d: _params_version(d) for d in {r["domain"] for r in runs}}
+        rule_runs = [_rule_run_source(r, versions[r["domain"]]) for r in runs]
         reports = [{"id": r["id"], "label": f"{r['id']} · 발견 {len((r.get('body') or {}).get('findings') or [])}건",
                     "run_id": r["run_id"], "created_at": r["created_at"]}
                    for r in store.recent_reports(50) if r["status"] == "done"]

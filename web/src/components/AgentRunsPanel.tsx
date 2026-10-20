@@ -118,7 +118,16 @@ export default function AgentRunsPanel({
     }
   }
 
-  async function ruleBaseline() {   // 분석할 규칙 실행이 없을 때 (규칙 엔진, 비용 0)
+  // 비교 탭의 데이터 번호·심어둔 문제로 만든 규칙 실행 (전체 범위, 지금 설정 버전). 있으면 다시 만들지 않는다
+  const sameKey = [...faults].sort().join(",");
+  const sameRuleRun = sources?.rule_runs.find((r) => r.seed === seed && r.full && r.current_params
+    && [...(r.faults ?? [])].sort().join(",") === sameKey);
+
+  async function ruleBaseline() {   // 지금 조건의 규칙 실행 (규칙 엔진, 비용 0)
+    if (sameRuleRun) {
+      setRuleRun(sameRuleRun.id);
+      return;
+    }
     setBusy(true);
     try {
       const ds = await api.createDataset(domain.name, seed, faults);
@@ -170,9 +179,12 @@ export default function AgentRunsPanel({
                     {(sources?.rule_runs ?? []).map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
                   </select>
                 </label>
-                {!sources?.rule_runs.length && (
-                  <button disabled={busy} onClick={ruleBaseline}>규칙 방식 전체 실행 (비용 0)</button>
-                )}
+                <button disabled={busy || sameRuleRun?.id === ruleRun} onClick={ruleBaseline}
+                  title="비교 탭에 설정된 데이터 번호·심어둔 문제로 규칙 방식 전체 실행을 고른다. 없으면 새로 만든다 (규칙 엔진만 써서 AI 비용 없음)">
+                  {sameRuleRun ? (sameRuleRun.id === ruleRun ? "지금 조건의 실행을 고름" : "지금 조건의 실행 고르기")
+                    : "지금 조건으로 규칙 방식 실행 (비용 0)"}
+                </button>
+                <span className="muted small">지금 조건: 데이터 {seed} · 심어둔 문제 {faults.join("·") || "없음"} (비교 탭 설정)</span>
                 <label><input type="checkbox" checked={perspectives} onChange={(e) => setPerspectives(e.target.checked)} /> 관점별로 분석</label>
               </>
             )}
@@ -332,6 +344,10 @@ function InnerGraph({ graph, t, terms }: { graph: AgentsGraph; t: AgentTabTimeli
       </h3>
       <GraphCanvas ariaLabel="에이전트 내부 그래프" nodes={plain.nodes} edges={plain.edges} views={views} showIds={tech}
         height={300} nodeWidth={150} nodeHeight={tech ? 66 : 56} minFitZoom={0.55} padding={0.2} />
+      <p className="muted small gc-legend">
+        실선: 항상 이어지는 단계 · 점선: 상황에 따라 고르는 갈림길(선 이름이 조건) · 아래로 도는 선: 앞 단계로 되돌아감(마우스를 올리면 이름)
+        {t.live ? " · 굵게 움직이는 선: 방금 지나간 길" : ""}
+      </p>
     </div>
   );
 }
