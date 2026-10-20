@@ -38,6 +38,20 @@ function nodeOf(e: TimelineEvent, sub = false): string | null {
 }
 
 
+// 실행 중 지금 일하는 노드. 타임라인 줄은 일이 끝난 뒤에 생기므로(AI 판단 줄은 AI 응답이 와야 생긴다),
+// 마지막 줄의 다음 차례를 본다: 도구 결과·반려·재요청·다음 항목 뒤에는 AI가 생각하는 중이다
+function workingNode(t: AgentTabTimeline): string | null {
+  if (!t.live) return null;
+  const e = t.events[t.events.length - 1];
+  if (!e) return t.agent === "dispatch" ? "next_item" : "ai";
+  if (t.agent === "supervisor" && e.item) return "tools";          // Supervisor가 부른 에이전트가 일하는 중
+  if (e.type === "llm") return (e.tools ?? []).length || /^\d+번째: (?!글로만)/.test(e.text) ? "tools" : nodeOf(e);
+  if (e.type === "tool" || e.type === "item" || e.type === "nudge") return "ai";
+  if (e.type === "check" && (e.label === "다시 시도" || !e.ok)) return "ai";
+  if (e.type === "decision") return "next_item";
+  return nodeOf(e);
+}
+
 const fmtNum = (v: number | null | undefined) => (v == null ? "–" : v.toLocaleString());
 
 export default function AgentRunsPanel({
@@ -343,7 +357,7 @@ function InnerGraph({ graph, t, terms }: { graph: AgentsGraph; t: AgentTabTimeli
       counts[n] = (counts[n] ?? 0) + 1;
       last[n] = e;
     }
-    const lastNode = [...t.events].reverse().map((e) => nodeOf(e, viaTools)).find((n) => n);
+    const lastNode = workingNode(t);
     const out: Record<string, NodeView> = {};
     for (const n of sub?.nodes ?? []) {
       const e = last[n.id];
@@ -387,6 +401,16 @@ function Timeline({ t, terms }: { t: AgentTabTimeline; terms: Terms }) {
     const el = ref.current;
     if (el && t.live) el.scrollTop = el.scrollHeight;
   }, [t.events.length, t.live]);
+  // 실행 중 AI 응답을 기다리는 동안 경과 시간 (도구는 대개 1초 안에 끝나고, 시간은 대부분 AI 판단에 든다)
+  const working = workingNode(t);
+  const last = t.events[t.events.length - 1];
+  const [now, setNow] = useState(() => Date.now() / 1000);
+  useEffect(() => {
+    if (!t.live) return;
+    const id = setInterval(() => setNow(Date.now() / 1000), 1000);
+    return () => clearInterval(id);
+  }, [t.live]);
+  const waited = last?.at != null ? Math.max(0, Math.round(now - last.at)) : null;
   return (
     <div className="panel">
       <h3>진행 기록 <span className="muted small">(AI 판단 → 도구 사용 → 검사 · {t.total_events}줄{t.live ? " · 실행 중 한 줄씩 쌓임" : ""})</span></h3>
@@ -394,6 +418,10 @@ function Timeline({ t, terms }: { t: AgentTabTimeline; terms: Terms }) {
       <ol className="agent-timeline" ref={ref}>
         {t.events.map((e) => <TimelineRow key={e.seq} e={e} terms={terms} showItem={t.agent !== "dispatch"} itemLabels={t.item_labels}
           nested={t.agent === "supervisor" && !!e.item} />)}
+        {working === "ai" && t.events.length > 0 && (
+          <li className="tl-thinking muted"><span className="tl-turn" /><span className="tl-kind">AI 판단</span>
+            AI가 생각하는 중…{waited != null ? ` ${waited}초` : ""}</li>
+        )}
       </ol>
     </div>
   );

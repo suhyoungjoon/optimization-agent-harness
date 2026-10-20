@@ -575,3 +575,6 @@ input.approver { width: 9em; }
 .judgment-rec dd { margin: 0; }
 .judgment-ask { background: var(--surface-2, rgba(42, 120, 214, 0.06)); border-radius: 6px; padding: 6px 10px; margin: 8px 0; }
 .ag-mode { font-weight: 600; }
+.agent-timeline .tl-thinking .tl-kind { color: var(--series-1); }
+.agent-timeline .tl-thinking { animation: wf-pulse 1s ease-in-out infinite alternate; }
+@media (prefers-reduced-motion: reduce) { .agent-timeline .tl-thinking { animation: none; } }
