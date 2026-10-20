@@ -138,3 +138,29 @@ def test_budget_is_shared_and_stops_supervisor(world):
 def test_judgment_tool_requires_core_fields():
     req = judgment_tool()["input_schema"]["required"]
     assert {"recommendations", "hypotheses", "attempts", "end_reason"} <= set(req)
+
+
+def test_same_tool_same_args_three_times_stops_as_repeated(world):
+    def script(n, m):
+        return tool_use("sweep", {"axes": [{"path": "matching.area_extension_km[2]", "values": [3, 4]}]})
+    out, sup = run(world, script)
+    assert out["stop"] == "repeated" and out["failure"]["label"] == "반복 실패" and len(sup.calls) == 3
+    assert out["judgment"] is None and [a["tool"] for a in out["attempts_log"]] == ["sweep"] * 3
+
+
+def test_budget_shared_with_called_agents_stops_mid_run(world):
+    """하위 에이전트(분석·개선)의 비용도 같은 예산에서 나간다. 넘으면 Supervisor가 다음 턴 전에 멈춘다."""
+    priced = {"pricing_per_mtok": {"fake-model": {"input": 1000.0, "output": 1000.0}}}   # 호출 하나에 약 $0.16
+    pack, params, instance, decisions, spec, policy = world
+    sup = FakeLLM(lambda item, n, m, t: happy(n, m))
+
+    def make_llm(role):
+        llm = sup if role == "supervisor" else FakeLLM(policy)
+        llm.config = priced
+        return llm
+    budget = Budget(max_usd=0.5)
+    out = supervise(pack, lambda p: load_pack("dispatch", p), instance, decisions, params, spec, make_llm, priced,
+                    perspectives=load_perspectives(pack), salt="t", budget=budget)
+    assert out["stop"] == "budget" and out["failure"]["label"] == "예산 초과" and out["judgment"] is None
+    assert budget.spent_usd >= 0.5 and len(sup.calls) < 4             # 보고서까지 가지 못함
+    assert out["reports"]                                              # 그때까지의 결과는 남는다
