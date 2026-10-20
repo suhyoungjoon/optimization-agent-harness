@@ -169,6 +169,25 @@ export default function App() {
 
   const selectItem = (id: string) => setSelectedItem(id);
 
+  // 에이전트 탭에서 만든 분석 리포트를 문제 찾기 탭에서 연다 (다시 분석하지 않음, 비용 없음).
+  // 그 리포트가 분석한 실행의 데이터·결정을 불러와야 지도 강조와 사람 판정이 동작한다.
+  const openReport = (reportId: string) =>
+    guard("분석 결과 불러오는 중", async () => {
+      if (!domain) return;
+      const report = await api.report(reportId);
+      const run = await api.run(report.run_id);
+      const full = await api.dataset(domain.name, run.dataset_id);
+      setSeed(full.seed);
+      setFaults(full.faults);
+      setDataset(full);
+      await loadDecisions(run.run_id);
+      upsert(run);
+      setReportId(reportId);
+      setBatchId(null);
+      setSelectedItem(null);
+      setTab("analysis");
+    });
+
   // Agent workflow 탭의 결과를 다른 탭이 이어받는다 (같은 데이터·실행·분석·제안을 그 탭에서 자세히 본다)
   const adoptWorkflow = (flow: WorkflowRun, target: string) =>
     guard("워크플로우 결과 불러오는 중", async () => {
@@ -305,7 +324,7 @@ export default function App() {
         )}
         {domain && adapter && tab === "agentRuns" && (
           <Suspense fallback={<p className="muted">에이전트 화면 불러오는 중…</p>}>
-            <AgentRunsPanel domain={domain} adapter={adapter} seed={seed} faults={faults} />
+            <AgentRunsPanel domain={domain} adapter={adapter} seed={seed} faults={faults} onOpenReport={openReport} />
           </Suspense>
         )}
         {domain && adapter && tab === "agents" && (
