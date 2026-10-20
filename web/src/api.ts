@@ -1,7 +1,7 @@
 import type {
   CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DomainDefinition, DecisionRecord, DomainInfo, FindingLabel, HarnessInfo, Memory, HistoryRow, Proposal, ProposalBatch, Report, Run,
   SpecEstimate, TraceRecord, WorkflowGraph, WorkflowRun, AgentsGraph, AgentsRun, SweepAxis, SweepResult, Sensitivity, ChangeCard, SavedConstraint,
-  AgentTabInfo, AgentTabSources, AgentTabHistoryRow, AgentTabTimeline, TabAgent, ProposalOutcome,
+  AgentTabInfo, AgentTabSources, AgentTabHistoryRow, AgentTabTimeline, TabAgent, ProposalOutcome, AgentsMode,
 } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -33,15 +33,19 @@ export const api = {
     request<AgentTabTimeline>(`/agent-tab/timeline/${agent}/${id}?after=${after}`),
   agentTabOpinion: (proposalId: string, opinion: string) =>
     request<{ id: string }>("/agent-tab/opinion", { method: "POST", body: JSON.stringify({ proposal_id: proposalId, opinion }) }),
+  agentTabSupervisor: (runId: string, useSavedConstraints: boolean) =>
+    request<{ id: string }>("/agent-tab/supervisor", { method: "POST",
+      body: JSON.stringify({ run_id: runId, use_saved_constraints: useSavedConstraints }) }),
   proposeWith: (reportId: string, useSavedConstraints: boolean) =>
     request<{ id: string }>("/proposals", { method: "POST",
       body: JSON.stringify({ report_id: reportId, use_saved_constraints: useSavedConstraints }) }),
-  agentsGraph: (level: string, domain?: string, perspectives = false, endCheck?: "fixed" | "supervisor") =>
+  agentsGraph: (level: string, domain?: string, perspectives = false, endCheck?: "fixed" | "supervisor",
+    mode: AgentsMode = "fixed") =>
     request<AgentsGraph>(`/agents/graph?level=${level}` + (perspectives && domain ? `&domain=${domain}&perspectives=true` : "")
-      + (endCheck ? `&end_check=${endCheck}` : "")),
+      + (endCheck ? `&end_check=${endCheck}` : "") + (mode === "supervisor" ? "&mode=supervisor" : "")),
   agentsStart: (body: { domain: string; seed: number; faults: string[]; items: number; level: string; metrics: unknown[];
     llm: "fake" | "claude"; pace: number; perspectives?: boolean; end_check?: "fixed" | "supervisor";
-    use_saved_constraints?: boolean }) => request<AgentsRun>("/agents/runs", { method: "POST", body: JSON.stringify(body) }),
+    use_saved_constraints?: boolean; mode?: AgentsMode }) => request<AgentsRun>("/agents/runs", { method: "POST", body: JSON.stringify(body) }),
   agentsGet: (id: string, after = -1) => request<AgentsRun>(`/agents/runs/${id}?after=${after}`),
   agentsStep: (id: string, action: "next" | "approve" | "reject" | "opinion" | "confirm", note = "", constraints?: unknown[]) =>
     request<AgentsRun>(`/agents/runs/${id}/step`, { method: "POST", body: JSON.stringify({ action, note, constraints }) }),

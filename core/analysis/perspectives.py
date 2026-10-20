@@ -11,6 +11,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
 from core.interfaces import DecisionRecord, DomainPack
+from core.llm.control import Budget, failure
 
 from .agent import analyze
 
@@ -133,16 +134,18 @@ def _sum_usage(usages: list[dict]) -> dict:
 
 def analyze_perspectives(pack: DomainPack, instance, decisions: list[DecisionRecord], make_llm: Callable[[], object],
                          llm_config: dict, perspectives: list[dict], salt: str = "", max_calls: int = 30,
-                         memory_text: str = "", on_event=None) -> dict:
+                         memory_text: str = "", on_event=None, budget: Budget | None = None) -> dict:
     """관점마다 analyze를 병렬로 돌리고 합친다. make_llm: 관점마다 새 LLM 클라이언트를 만든다 (인자 없음).
-    리포트 형식은 analyze와 같고 perspectives(관점별 결과)가 더 붙는다."""
+    리포트 형식은 analyze와 같고 perspectives(관점별 결과)가 더 붙는다.
+    budget: 관점들이 나눠 쓰는 실행 예산 하나 (없으면 configs/workflow.yaml로 새로 만든다)."""
     started = time.monotonic()
+    budget = budget if budget is not None else Budget.from_config()
 
     def run(p: dict) -> dict:
         try:
             sink = (lambda e, pid=p["id"]: on_event({**e, "item": pid})) if on_event else None   # 관점별로 나눠 보이게
             return analyze(pack, instance, decisions, make_llm(), llm_config, salt=salt, max_calls=max_calls,
-                           memory_text=memory_text, perspective=p, on_event=sink)
+                           memory_text=memory_text, perspective=p, on_event=sink, budget=budget)
         except Exception as exc:  # 한 관점의 실패가 리포트 전체를 막지 않게
             return {"error": f"{type(exc).__name__}: {exc}"}
 
@@ -159,7 +162,8 @@ def combine_results(perspectives: list[dict], results: list[dict], dimensions: d
     for p, r in zip(perspectives, results):
         pid = p["id"]
         if "error" in r:
-            per[pid] = {"name": p["name"], "error": r["error"], "findings": 0, "dropped": 0, "stop": None}
+            per[pid] = {"name": p["name"], "error": r["error"], "findings": 0, "dropped": 0, "stop": None,
+                        "failure": failure("tool_failure", r["error"])}
             continue
         rename = {}
         for cid, call in r["calls"].items():
@@ -172,7 +176,8 @@ def combine_results(perspectives: list[dict], results: list[dict], dimensions: d
         dropped += [{**d, "perspective": pid} for d in r["dropped"]]
         usages.append(r["usage"])
         per[pid] = {"name": p["name"], "error": None, "findings": len(r["findings"]), "dropped": len(r["dropped"]),
-                    "stop": r["stop"], "feedback_rounds": r.get("feedback_rounds", 0), "usage": r["usage"]}
+                    "stop": r["stop"], "failure": r.get("failure"), "feedback_rounds": r.get("feedback_rounds", 0),
+                    "usage": r["usage"]}
 
     usage = _sum_usage(usages)
     usage["seconds"] = max((u.get("seconds") or 0 for u in usages), default=0)
@@ -182,6 +187,9 @@ def combine_results(perspectives: list[dict], results: list[dict], dimensions: d
         "dropped": dropped,
         "calls": calls,
         "stop": "submitted" if any(v["stop"] == "submitted" for v in per.values()) else "failed",
+        # 모든 관점이 실패했을 때만 리포트 실패 (관점별 실패는 perspectives[*].failure)
+        "failure": None if any(v["stop"] == "submitted" for v in per.values())
+        else next((v["failure"] for v in per.values() if v.get("failure")), failure("unresolved")),
         "feedback_rounds": sum(v.get("feedback_rounds", 0) for v in per.values()),
         "usage": usage,
         "perspectives": per,

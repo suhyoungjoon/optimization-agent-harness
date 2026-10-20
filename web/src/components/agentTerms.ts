@@ -19,11 +19,19 @@ export const CORE_TOOL_NAMES: Record<string, string> = {
   submit_proposals: "개선안 제출",
   submit_decision: "배정 결정 제출",
   submit_constraints: "정리한 제약 제출",
+  // 분석·개선 Supervisor (M18)
+  run_analysis: "분석 에이전트 실행",
+  run_proposals: "개선 에이전트 실행",
+  simulate: "미리 돌려보기 (진단 신호)",
+  sweep: "파라미터 훑기",
+  submit_judgment: "판단 보고서 제출",
 };
 
 const CORE_ARG_NAMES: Record<string, string> = {
   group_by: "묶는 기준", filters: "조건", limit: "최대", sort_by: "정렬", query: "검색어", changes: "바꿀 값",
   field: "항목", status: "상태", reason: "사유", top_k: "최대",
+  proposal_id: "개선안", finding_ids: "발견", target_findings: "겨냥한 발견", focus: "초점", instruction: "지시",
+  question: "질문", slice: "구간", perspectives: "관점", axes: "축", metrics: "지표",
 };
 
 const STATUS_NAMES: Record<string, string> = {
@@ -70,6 +78,9 @@ const STOP_NAMES: Record<string, string> = {
   no_submit: "결과를 제출하지 않고 마침",
   max_calls: "AI 호출 한도에 닿아 멈춤",
   refusal: "AI가 응답을 거절해 멈춤",
+  repeated: "반복 실패: 같은 도구를 같은 인자로 계속 불러 멈춤",
+  tool_failure: "도구 실패: 같은 도구가 계속 실패해 멈춤",
+  budget: "예산 초과: 비용·시간 상한에 닿아 그때까지의 결과로 멈춤",
 };
 
 export interface Terms {
@@ -108,7 +119,8 @@ function check(e: TimelineEvent): { label: string; detail: string; tone: "ok" | 
 
 function end(e: TimelineEvent): string {
   const stop = (e as { stop?: string }).stop ?? /^끝: (\w+)/.exec(e.text)?.[1];
-  return stop ? `■ ${STOP_NAMES[stop] ?? `끝 (${stop})`}` : e.text;
+  const why = (e as { failure?: { reason?: string } }).failure?.reason;   // 반복·도구 실패·예산 초과의 사유
+  return stop ? `■ ${STOP_NAMES[stop] ?? `끝 (${stop})`}${why ? ` — ${why}` : ""}` : e.text;
 }
 
 // dims: 도메인 dimensions.yaml (묶는 기준 이름 등). 없으면 어댑터 이름만 쓴다
@@ -127,6 +139,8 @@ export function makeTerms(adapter: DomainAdapter, dims?: Dimensions): Terms {
     if (typeof v === "string") return values[v] ?? fieldLabels[v] ?? argNames[v] ?? v;
     if (typeof v === "number" || typeof v === "boolean") return String(v);
     if (Array.isArray(v)) return v.map(value).join(", ");
+    if (v && typeof v === "object")   // 구간 {차원: [값]} 등
+      return Object.entries(v as Record<string, unknown>).map(([k, x]) => `${fieldLabels[k] ?? k} ${value(x)}`).join(", ");
     return "…";
   };
   // 도구 입력 JSON 요약 → "지시서 D01-O003 · 완화 단계 1". 잘린 JSON이면 비운다 (원본은 자세히에)

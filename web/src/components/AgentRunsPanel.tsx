@@ -6,6 +6,7 @@ import type {
 import type { DomainAdapter } from "../domains/types";
 import GraphCanvas, { type NodeView } from "./GraphCanvas";
 import { PLAIN_EDGES, PLAIN_NODES, makeTerms, type Terms } from "./agentTerms";
+import { fmtMetric } from "./MetricsPanel";
 import { usePoll } from "./usePoll";
 
 // 에이전트 탭 (M16): 핵심 에이전트를 하나씩 실행하고, 그 처리 흐름(턴 → 도구 → 하네스 검사)을 한 화면에서 본다.
@@ -16,10 +17,13 @@ const AGENTS: { id: TabAgent; label: string; desc: string }[] = [
   { id: "analysis", label: "분석", desc: "규칙 실행 결과를 집계 도구로 살펴 문제와 원인을 낸다. 근거 숫자는 근거 검사가 확인한다" },
   { id: "proposals", label: "개선", desc: "분석 리포트를 읽고 규칙 개선안을 낸다. 미리 돌려보기 도구로 시험하고, 코드가 안마다 검사한다" },
   { id: "opinion", label: "의견 정리", desc: "개선안에 대한 현장 의견 한 줄을 제약으로 정리한다. 제약 형식 검사를 통과해야 한다 (사람 확인 전 단계까지)" },
+  { id: "supervisor", label: "Supervisor", desc: "분석·개선 에이전트와 미리 돌려보기·파라미터 훑기를 도구로 부르며 다음 행동을 스스로 정하고 판단 보고서를 낸다. 추천은 미리 돌려본 적용 가능한 안만 (코드가 검사). 규칙은 바꾸지 않는다 (반영은 사람이 개선 탭·LangGraph agents 탭에서)" },
 ];
 
-// 타임라인 이벤트 → 내부 그래프 노드 (agents 탭과 같은 하위 그래프)
-function nodeOf(e: TimelineEvent): string | null {
+// 타임라인 이벤트 → 내부 그래프 노드 (agents 탭과 같은 하위 그래프).
+// sub: Supervisor처럼 다른 에이전트를 부르는 경우, 그 에이전트의 진행(item이 붙은 줄)은 도구 노드 안의 일이다
+function nodeOf(e: TimelineEvent, sub = false): string | null {
+  if (sub && e.item) return e.type === "end" ? null : "tools";
   if (e.type === "llm") return "ai";
   if (e.type === "tool") return "tools";
   if (e.type === "item") return "next_item";
@@ -79,7 +83,9 @@ export default function AgentRunsPanel({
   useEffect(() => { api.agentTabInfo().then(setInfo).catch((e) => setError(String(e.message ?? e))); refreshSources(); }, []);
   useEffect(() => { api.agentTabHistory(agent).then(setHistory).catch(() => setHistory([])); }, [agent, current?.id]);
   const graphLevel = agent === "dispatch" ? level : "L5";
-  useEffect(() => { api.agentsGraph(graphLevel).then(setGraph).catch(() => setGraph(null)); }, [graphLevel]);
+  const graphMode = agent === "supervisor" ? "supervisor" : "fixed";   // Supervisor 내부 그림은 supervisor 모드 그래프에만 있다
+  useEffect(() => { api.agentsGraph(graphLevel, undefined, false, undefined, graphMode).then(setGraph).catch(() => setGraph(null)); },
+    [graphLevel, graphMode]);
 
   const timeline = usePoll<AgentTabTimeline>(
     current ? () => api.agentTabTimeline(current.agent, current.id) : null,
@@ -95,7 +101,8 @@ export default function AgentRunsPanel({
   }, [shown?.status, shown?.live]);
 
   const me = info?.agents.find((a) => a.agent === agent);
-  const missing = agent === "analysis" ? !ruleRun : agent === "proposals" ? !reportId : agent === "opinion" ? !proposalId || !opinion.trim() : false;
+  const missing = agent === "analysis" || agent === "supervisor" ? !ruleRun : agent === "proposals" ? !reportId
+    : agent === "opinion" ? !proposalId || !opinion.trim() : false;
 
   async function start() {
     setConfirming(false);
@@ -113,6 +120,8 @@ export default function AgentRunsPanel({
         id = (await api.analyze(ruleRun, { perspectives })).id;
       } else if (agent === "proposals") {
         id = (await api.proposeWith(reportId, useSaved)).id;
+      } else if (agent === "supervisor") {
+        id = (await api.agentTabSupervisor(ruleRun, useSaved)).id;
       } else {
         id = (await api.agentTabOpinion(proposalId, opinion.trim())).id;
       }
@@ -178,7 +187,7 @@ export default function AgentRunsPanel({
                 </label>
               </>
             )}
-            {agent === "analysis" && (
+            {(agent === "analysis" || agent === "supervisor") && (
               <>
                 <label>규칙 실행 결과{" "}
                   <select value={ruleRun} onChange={(e) => setRuleRun(e.target.value)}>
@@ -191,7 +200,9 @@ export default function AgentRunsPanel({
                     : "지금 조건으로 규칙 방식 실행 (비용 0)"}
                 </button>
                 <span className="muted small">지금 조건: 데이터 {seed} · 심어둔 문제 {faults.join("·") || "없음"} (비교 탭 설정)</span>
-                <label><input type="checkbox" checked={perspectives} onChange={(e) => setPerspectives(e.target.checked)} /> 관점별로 분석</label>
+                {agent === "analysis"
+                  ? <label><input type="checkbox" checked={perspectives} onChange={(e) => setPerspectives(e.target.checked)} /> 관점별로 분석</label>
+                  : <label><input type="checkbox" checked={useSaved} onChange={(e) => setUseSaved(e.target.checked)} /> 저장된 제약 사용</label>}
               </>
             )}
             {agent === "proposals" && (
@@ -260,6 +271,7 @@ export default function AgentRunsPanel({
           {!current && <div className="panel muted">왼쪽에서 에이전트와 입력을 고르고 실행하거나, 끝난 실행을 고르세요.</div>}
           {current && !shown && <div className="panel muted">불러오는 중…</div>}
           {shown && <Summary t={shown} onOpenReport={onOpenReport} onOpenBatch={onOpenBatch} />}
+          {shown && shown.agent === "supervisor" && !shown.live && <SupervisorResult t={shown} adapter={adapter} />}
           {shown && graph && <InnerGraph graph={graph} t={shown} terms={terms} />}
           {shown && <Timeline t={shown} terms={terms} />}
         </div>
@@ -324,13 +336,14 @@ function InnerGraph({ graph, t, terms }: { graph: AgentsGraph; t: AgentTabTimeli
   const views = useMemo(() => {
     const counts: Record<string, number> = {};
     const last: Record<string, TimelineEvent> = {};
+    const viaTools = t.agent === "supervisor";
     for (const e of t.events) {
-      const n = nodeOf(e);
+      const n = nodeOf(e, viaTools);
       if (!n) continue;
       counts[n] = (counts[n] ?? 0) + 1;
       last[n] = e;
     }
-    const lastNode = [...t.events].reverse().map(nodeOf).find((n) => n);
+    const lastNode = [...t.events].reverse().map((e) => nodeOf(e, viaTools)).find((n) => n);
     const out: Record<string, NodeView> = {};
     for (const n of sub?.nodes ?? []) {
       const e = last[n.id];
@@ -379,7 +392,8 @@ function Timeline({ t, terms }: { t: AgentTabTimeline; terms: Terms }) {
       <h3>진행 기록 <span className="muted small">(AI 판단 → 도구 사용 → 검사 · {t.total_events}줄{t.live ? " · 실행 중 한 줄씩 쌓임" : ""})</span></h3>
       {t.events.length === 0 && <p className="muted small">{t.live ? "첫 응답을 기다리는 중…" : "기록이 없습니다."}</p>}
       <ol className="agent-timeline" ref={ref}>
-        {t.events.map((e) => <TimelineRow key={e.seq} e={e} terms={terms} showItem={t.agent !== "dispatch"} itemLabels={t.item_labels} />)}
+        {t.events.map((e) => <TimelineRow key={e.seq} e={e} terms={terms} showItem={t.agent !== "dispatch"} itemLabels={t.item_labels}
+          nested={t.agent === "supervisor" && !!e.item} />)}
       </ol>
     </div>
   );
@@ -400,20 +414,22 @@ function Raw({ e }: { e: TimelineEvent }) {
   );
 }
 
-function TimelineRow({ e, terms, showItem, itemLabels }: {
+function TimelineRow({ e, terms, showItem, itemLabels, nested = false }: {
   e: TimelineEvent; terms: Terms; showItem: boolean; itemLabels?: Record<string, string>;
+  nested?: boolean;   // Supervisor가 부른 에이전트의 줄: 들여 써서 Supervisor 자신의 턴과 나눈다
 }) {
+  const n = nested ? " tl-sub" : "";
   if (e.type === "item") return <li className="tl-item">▸ {e.item}</li>;
   const turn = e.turn ? <span className="tl-turn" title={`AI의 ${e.turn}번째 응답`}>{e.turn}번째</span> : <span className="tl-turn" />;
   // 배정은 항목 머리줄(▸)로 나뉘므로 줄마다 항목을 붙이지 않는다. 관점별 분석은 관점을 붙인다
   const where = showItem && e.item && e.type !== "decision" ? <span className="muted small"> [{itemLabels?.[e.item] ?? e.item}]</span> : null;
   if (e.type === "llm") {
-    return <li className="tl-llm">{turn}<span className="tl-kind">AI 판단</span> {terms.aiAsked(e)}{where}<Raw e={e} /></li>;
+    return <li className={"tl-llm" + n}>{turn}<span className="tl-kind">AI 판단</span> {terms.aiAsked(e)}{where}<Raw e={e} /></li>;
   }
   if (e.type === "tool") {
     const args = terms.args(e.input);
     return (
-      <li className={e.ok === false ? "tl-tool tl-bad" : "tl-tool"}>
+      <li className={(e.ok === false ? "tl-tool tl-bad" : "tl-tool") + n}>
         {turn}<span className="tl-kind">도구 사용</span> {terms.tool(e.name ?? e.text)}
         {args ? <span className="tl-io"> ({args})</span> : null}
         <span className="tl-io"> → {e.ok === false ? "오류" : "결과 받음"}</span>{where}<Raw e={e} />
@@ -423,7 +439,7 @@ function TimelineRow({ e, terms, showItem, itemLabels }: {
   if (e.type === "check") {
     const c = terms.check(e);
     return (
-      <li className={`tl-check tl-${c.tone}`}>
+      <li className={`tl-check tl-${c.tone}${n}`}>
         {turn}<span className="tl-kind">{c.tone === "ok" ? "✓" : c.tone === "bad" ? "✕" : "↻"} {c.label}</span>{" "}
         {c.detail}{where}<Raw e={e} />
       </li>
@@ -431,8 +447,65 @@ function TimelineRow({ e, terms, showItem, itemLabels }: {
   }
   if (e.type === "decision") return <li className="tl-decision"><span className="tl-turn" /><span className="tl-kind">결정</span> {terms.decision(e)}</li>;
   if (e.type === "nudge") {
-    return <li className="tl-check tl-info">{turn}<span className="tl-kind">↻ 재요청</span> AI가 글로만 답해서 결과를 제출하라고 다시 요청함<Raw e={e} /></li>;
+    return <li className={"tl-check tl-info" + n}>{turn}<span className="tl-kind">↻ 재요청</span> AI가 글로만 답해서 결과를 제출하라고 다시 요청함<Raw e={e} /></li>;
   }
-  if (e.type === "end") return <li className="tl-end muted"><span className="tl-turn" />{terms.end(e)}</li>;
+  if (e.type === "end") return <li className={"tl-end muted" + n}><span className="tl-turn" />{terms.end(e)}{where}</li>;
   return <li className="tl-end muted"><span className="tl-turn" />{e.text}</li>;
+}
+
+// Supervisor (M18) 판단 보고서: 추천안(코드가 돌린 미리 돌려보기 요약), 사람에게 묻는 것, 원인 가설·시도 기록
+function SupervisorResult({ t, adapter }: { t: AgentTabTimeline; adapter: DomainAdapter }) {
+  const j = t.judgment;
+  const recs = t.recommendations ?? [];
+  const fmt = (k: string, v: number | null) => {
+    const f = adapter.metrics.find((m) => m.key === k)?.format;
+    return v == null ? "–" : f ? fmtMetric(v, f) : v.toFixed(2);
+  };
+  const label = (k: string) => adapter.metrics.find((m) => m.key === k)?.label ?? k;
+  return (
+    <div className="panel judgment-card">
+      <h3>판단 보고서 <span className="muted small">(규칙은 바꾸지 않음 · 반영은 개선 탭·LangGraph agents 탭에서 사람이)</span></h3>
+      {!j && (
+        <p className="critical-text small">
+          ✕ {t.failure?.label ?? "판단 보고서 없음"}{t.failure?.reason ? `: ${t.failure.reason}` : ""}
+          {(t.problems ?? []).length > 0 && <><br />{(t.problems ?? []).join(" · ")}</>}
+        </p>
+      )}
+      {j?.summary && <p>{j.summary}</p>}
+      {recs.length > 0 && (
+        <ol className="small">
+          {recs.map((r) => (
+            <li key={r.proposal_id}>
+              <strong>{r.title}</strong> <span className="muted">({r.proposal_id} · 확신도 {r.confidence})</span>
+              <br />
+              {Object.entries(r.primary).map(([k, [b, a]]) => `${label(k)} ${fmt(k, b)} → ${fmt(k, a)}`).join(" · ")}
+              {r.constraint_violations > 0 && <span className="warning-text"> · 제약 위반 {r.constraint_violations}건</span>}
+              <br />기대 효과: {r.expected_effect} · 잃는 것: {r.loses}
+            </li>
+          ))}
+        </ol>
+      )}
+      {j && (j.questions_for_human ?? []).length > 0 && (
+        <div className="judgment-ask small">
+          <strong>사람에게 묻는 것</strong>
+          <ul>{j.questions_for_human.map((q, i) => <li key={i}>{q}</li>)}</ul>
+        </div>
+      )}
+      {j && (
+        <details className="small">
+          <summary>원인 가설 {j.hypotheses.length}개 · 시도 기록 {j.attempts.length}단계 · 추천하지 않은 안 {(j.not_recommended ?? []).length}건</summary>
+          <ul>
+            {j.hypotheses.map((h, i) => (
+              <li key={i}><strong>{h.statement}</strong> (확신도 {h.confidence}) — 지지: {h.support} · 반대: {h.against}
+                <br /><span className="muted">뒤집을 증거: {h.would_flip}</span></li>
+            ))}
+          </ul>
+          <ol>{j.attempts.map((a, i) => <li key={i}>{a.what} — {a.why} → <em>{a.learned}</em></li>)}</ol>
+          {(j.not_recommended ?? []).length > 0 && (
+            <ul>{(j.not_recommended ?? []).map((n, i) => <li key={i}>추천하지 않음 {n.proposal_id}: {n.reason}</li>)}</ul>
+          )}
+        </details>
+      )}
+    </div>
+  );
 }

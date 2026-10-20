@@ -98,6 +98,15 @@ CREATE TABLE IF NOT EXISTS saved_constraints (  -- 사람이 확정한 제약 (M
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS supervisor_runs (  -- 분석·개선 Supervisor 단독 실행 (M18, 에이전트 탭). 판단 보고서까지
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,          -- 분석할 규칙 실행
+    status TEXT NOT NULL,          -- running | done | error
+    body TEXT,                     -- {judgment, draft, problems, failure, counts, recommendations, timeline, usage, ...}
+    error TEXT,
+    created_at REAL NOT NULL,
+    finished_at REAL
+);
 CREATE TABLE IF NOT EXISTS opinion_runs (  -- 의견 정리 에이전트 단독 실행 (M16 에이전트 탭). 제약 확인 전 결과까지
     id TEXT PRIMARY KEY,
     proposal_id TEXT,              -- 의견을 남긴 개선안
@@ -452,6 +461,34 @@ class Store:
             ids = [r["id"] for r in self.conn.execute(
                 "SELECT id FROM proposal_batches ORDER BY created_at DESC LIMIT ?", (limit,))]
         return [self.get_batch(i) for i in ids]
+
+    # --- 분석·개선 Supervisor 단독 실행 (M18) ---
+    def create_supervisor_run(self, run_id: str) -> str:
+        sid = f"sup-{uuid.uuid4().hex[:8]}"
+        with self.lock, self.conn:
+            self.conn.execute("INSERT INTO supervisor_runs (id, run_id, status, created_at) VALUES (?, ?, 'running', ?)",
+                              (sid, run_id, time.time()))
+        return sid
+
+    def finish_supervisor_run(self, sid: str, body: dict, error: str | None = None) -> None:
+        """error가 있으면 상태 error (판단 보고서 실패 등). 본문은 어느 쪽이든 남긴다 (시도 기록)."""
+        with self.lock, self.conn:
+            self.conn.execute("UPDATE supervisor_runs SET status = ?, error = ?, body = ?, finished_at = ? WHERE id = ?",
+                              ("error" if error else "done", error,
+                               json.dumps(to_jsonable(body), ensure_ascii=False), time.time(), sid))
+
+    def get_supervisor_run(self, sid: str) -> dict | None:
+        with self.lock:
+            row = self.conn.execute("SELECT * FROM supervisor_runs WHERE id = ?", (sid,)).fetchone()
+        if row is None:
+            return None
+        return {**dict(row), "body": json.loads(row["body"]) if row["body"] else None}
+
+    def recent_supervisor_runs(self, limit: int = 20) -> list[dict]:
+        with self.lock:
+            ids = [r["id"] for r in self.conn.execute(
+                "SELECT id FROM supervisor_runs ORDER BY created_at DESC LIMIT ?", (limit,))]
+        return [self.get_supervisor_run(i) for i in ids]
 
     # --- 의견 정리 단독 실행 (M16) ---
     def create_opinion_run(self, proposal_id: str | None, opinion: str) -> str:

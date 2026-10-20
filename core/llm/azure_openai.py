@@ -10,7 +10,8 @@ import os
 from pathlib import Path
 from typing import Any
 
-from core.llm.client import USAGE_KEYS, LLMResponse, ResponseCache, deployment_for, load_config, load_dotenv
+from core.llm.client import (USAGE_KEYS, LLMResponse, ResponseCache, deployment_for, load_config, load_dotenv,
+                             retry_options)
 
 DEFAULT_KEY_ENVS = ("MY_PROJECT_AZURE_API_KEY", "AZURE_OPENAI_API_KEY")
 RAW_ARGS_KEY = "_raw_arguments"     # JSON으로 풀리지 않은 arguments 원문 (다시 보낼 때 그대로 돌려준다)
@@ -179,7 +180,7 @@ class AzureOpenAIClient:
             from openai import AzureOpenAI  # 실제 호출 때만 필요 (pip install -e ".[azure]")
 
             api = AzureOpenAI(api_key=key, azure_endpoint=self._setting("endpoint"),
-                              api_version=self._setting("api_version"))
+                              api_version=self._setting("api_version"), **retry_options(self.config))
         self.api = api
 
     def _setting(self, name: str) -> str:

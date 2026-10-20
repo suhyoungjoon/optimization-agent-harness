@@ -1,6 +1,7 @@
 """LangGraph agents API (M10).
 
 - GET  /agents/graph?level=L3      상위 그래프 + 에이전트 하위 그래프 (레벨에 따라 배정 에이전트 모양이 바뀐다)
+                                    &mode=supervisor 이면 분석·개선 구간이 Supervisor 노드 하나 (M18)
                                     &domain=dispatch&perspectives=true 이면 분석 에이전트를 관점별 병렬 → 합치기로
 - POST /agents/runs                 첫 단계 앞에서 멈춘 새 실행
 - GET  /agents/runs/{id}?after=N    상태 + 에이전트 내부 진행 기록 (N번 이후)
@@ -31,6 +32,7 @@ class AgentsStart(BaseModel):
     use_knowledge: bool = True    # 개선 제안·의견 정리 에이전트에 문서 검색 도구 (M15-C). RAG 비교 실험은 false
     end_check: Literal["fixed", "supervisor"] | None = None   # 종료 판정 (M15-D). 없으면 configs/workflow.yaml
     use_saved_constraints: bool = True   # 이전에 확정해 저장한 제약을 불러와 처음부터 쓴다 (M15 후속)
+    mode: Literal["fixed", "supervisor"] = "fixed"   # M18: supervisor면 분석·개선 구간을 Supervisor가 지휘 (기본 꺼짐)
 
 
 def _fake_llm_factory(ctx):
@@ -108,13 +110,15 @@ class AgentRuns:
                 raise HTTPException(501, f"가짜 AI를 쓸 수 없음 (레포에서 실행해야 함): {exc}")
         else:
             try:
-                clients = {role: make_client(load_config(role=role)) for role in (None, "analysis", "proposals")}
+                clients = {role: make_client(load_config(role=role))
+                           for role in (None, "analysis", "proposals", "supervisor")}
             except Exception as exc:  # 자격 증명이 없는 경우 등
                 raise HTTPException(503, f"LLM 클라이언트를 만들 수 없음: {exc}")
             ctx.make_llm = lambda role=None: clients[role]
-        graph = build_flow(ctx, levels, end_check=req.end_check)
-        inputs = req.model_dump(exclude={"llm", "pace", "use_knowledge", "end_check", "use_saved_constraints"})
-        flow_id = self.runs.start(graph, {**inputs, "log": []}, llm=kind, end_check=req.end_check, _ctx=ctx)
+        graph = build_flow(ctx, levels, end_check=req.end_check, mode=req.mode)
+        inputs = req.model_dump(exclude={"llm", "pace", "use_knowledge", "end_check", "use_saved_constraints", "mode"})
+        flow_id = self.runs.start(graph, {**inputs, "log": []}, llm=kind, end_check=req.end_check, mode=req.mode,
+                                  _ctx=ctx)
         return self.snapshot(flow_id)
 
     def snapshot(self, flow_id: str, after: int = -1) -> dict:
@@ -129,7 +133,8 @@ class AgentRuns:
                 "stop_reason": values.get("stop_reason"), "report": d.get("final_report"),
                 "decisions": d.get("round_decisions") or [], "retrieval": d.get("retrieval_meta"),
                 "pending_constraints": d.get("pending_constraints") or [],
-                "saved_loaded": d.get("saved_loaded") or [], "saved_skipped": d.get("saved_skipped") or []}
+                "saved_loaded": d.get("saved_loaded") or [], "saved_skipped": d.get("saved_skipped") or [],
+                "judgment": d.get("judgment")}    # M18 Supervisor 판단 보고서 (마지막 호출)
         last = ctx.recent(limit=1)
         return {**snap, "steps": values.get("log", []), "events": ctx.recent(after),
                 "counts": ctx.counts(), "last_event": last[0] if last else None, "proposals": proposals, "loop": loop,
@@ -153,7 +158,8 @@ def register(app: FastAPI, demo: bool = False, retrieval_path=None, store=None) 
 
     @app.get("/agents/graph")
     def agents_graph(level: str = "L3", domain: str | None = None, perspectives: bool = False,
-                     end_check: Literal["fixed", "supervisor"] | None = None):
+                     end_check: Literal["fixed", "supervisor"] | None = None,
+                     mode: Literal["fixed", "supervisor"] = "fixed"):
         reason = _unavailable()
         if reason:
             return {"available": False, "reason": reason}
@@ -166,7 +172,7 @@ def register(app: FastAPI, demo: bool = False, retrieval_path=None, store=None) 
             raise HTTPException(400, f"unknown harness level: {level}")
         ps = _perspectives(domain) if perspectives and domain else None
         return {"available": True, "demo": demo, "level": level, "perspectives": bool(ps),
-                **describe_all(levels, level, ps, end_check)}
+                **describe_all(levels, level, ps, end_check, mode)}
 
     @app.post("/agents/runs")
     def start_agents(req: AgentsStart):

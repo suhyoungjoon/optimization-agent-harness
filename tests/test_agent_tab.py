@@ -110,7 +110,7 @@ def wait(client, url):
 
 def test_four_agents_run_alone_and_replay(client):
     info = {a["agent"]: a for a in client.get("/agent-tab/info").json()["agents"]}
-    assert set(info) == {"dispatch", "analysis", "proposals", "opinion"}
+    assert set(info) == {"dispatch", "analysis", "proposals", "opinion", "supervisor"}   # M18: Supervisor 추가
     assert info["dispatch"]["provider"] == load_config()["provider"] and "최대" in info["analysis"]["max_calls"]
     ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": FAULTS}).json()
 
@@ -143,7 +143,7 @@ def test_four_agents_run_alone_and_replay(client):
     assert t["status"] == "done" and t["constraints"][0]["max"] == 4 and t["constraints"][0]["source"] == "현장 의견"
     assert [e["type"] for e in t["events"]][:2] == ["llm", "tool"] and t["events"][1]["input"]   # 도구 입력까지 저장
 
-    hist = {a: client.get(f"/agent-tab/history?agent={a}").json() for a in info}
+    hist = {a: client.get(f"/agent-tab/history?agent={a}").json() for a in info if a != "supervisor"}
     assert all(len(v) == 1 for v in hist.values())
     src = client.get("/agent-tab/sources").json()
     assert src["rule_runs"] and src["reports"] and len(src["proposals"]) == 3
@@ -182,5 +182,47 @@ def test_demo_mode_replays_and_opinion_uses_fake_ai(tmp_path):
         oid = c.post("/agent-tab/opinion", json={"proposal_id": batch["proposals"][0]["id"],
                                                  "opinion": "관할 밖 4km 초과 출동 불가"}).json()["id"]
         assert wait(c, f"/agent-tab/timeline/opinion/{oid}")["status"] == "done"
+        sid = c.post("/agent-tab/supervisor", json={"run_id": rule["run_id"]}).json()["id"]   # M18: 가짜 AI
+        assert wait_long(c, f"/agent-tab/timeline/supervisor/{sid}")["recommendations"][0]["proposal_id"] == "P1"
     finally:
         set_domain_files_root(None)
+
+
+# --- M18: 분석·개선 Supervisor (다섯 번째 에이전트) ---------------------------------------------------
+
+def wait_long(client, url):
+    for _ in range(1500):
+        body = client.get(url).json()
+        if body.get("status") != "running":
+            return body
+        time.sleep(0.02)
+    raise TimeoutError(url)
+
+
+def test_supervisor_agent_runs_alone_and_replays(client):
+    info = {a["agent"]: a for a in client.get("/agent-tab/info").json()["agents"]}
+    assert info["supervisor"]["label"] == "Supervisor" and "분석 3" in info["supervisor"]["max_calls"]
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": FAULTS}).json()
+    rule = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    assert client.post("/agent-tab/supervisor", json={"run_id": "nope"}).status_code == 400
+    res = client.post("/agent-tab/supervisor", json={"run_id": rule["run_id"]})
+    assert res.status_code == 202
+    sid = res.json()["id"]
+    t = wait_long(client, f"/agent-tab/timeline/supervisor/{sid}")
+    assert t["status"] == "done" and t["graph"] == "supervisor_agent" and t["output"].startswith("추천 1건")
+    rec = t["recommendations"][0]
+    assert rec["proposal_id"] == "P1" and rec["title"].startswith("경계 지역만") and rec["confidence"] == "중간"
+    assert rec["primary"]["assignment_rate"][1] > rec["primary"]["assignment_rate"][0]
+    assert t["judgment"]["hypotheses"] and t["judgment"]["questions_for_human"]
+    # Supervisor 자신의 턴 + 그가 부른 분석·개선 에이전트의 진행 (item으로 구분)
+    items = {e.get("item") for e in t["events"]}
+    assert {"분석 R1", "개선 B1"} <= items
+    own = [e for e in t["events"] if not e.get("item")]
+    assert [e["name"] for e in own if e["type"] == "tool"] == ["run_analysis", "run_proposals", "simulate"]
+    assert any(e["type"] == "check" and e["label"] == "판단 보고서 검사" and e["ok"] for e in own)
+    assert t["usage"]["calls"] > 4                                     # 부른 에이전트의 호출 포함
+    assert "도구 호출 3회" in t["note"]
+    hist = client.get("/agent-tab/history?agent=supervisor").json()
+    assert hist[0]["id"] == sid and "추천 1건" in hist[0]["label"]
+    # 규칙 파일은 바뀌지 않는다 (반영은 사람이 개선 탭·agents 탭에서)
+    assert load_params(load_pack("dispatch"))["version"] == 1

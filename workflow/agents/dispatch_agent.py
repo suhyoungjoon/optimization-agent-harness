@@ -16,9 +16,10 @@ from langgraph.graph import END, START, StateGraph
 
 from core.harness import guardrail, validator_loop
 from core.harness.levels import Level
-from core.harness.runner import SUBMIT_TOOL, HarnessRunner
+from core.harness.runner import HALT_CODES, SUBMIT_TOOL, HarnessRunner
 from core.interfaces import DecisionRecord, ToolContext
 from core.llm.client import Usage
+from core.llm.control import RepeatGuard
 from core.storage.store import to_jsonable
 
 from .context import AgentContext
@@ -65,6 +66,8 @@ def build_dispatch_agent(ctx: AgentContext, level: Level, llm=None, spec_text: s
 
     def instance():
         return ctx.data["sub_instance"]
+
+    guards: dict[str, RepeatGuard] = {}   # 항목 id → 연속 반복·도구 오류 감지 (M18-a)
 
     def next_item(state: DispatchState):
         idx = state.get("idx", -1) + 1
@@ -121,7 +124,8 @@ def build_dispatch_agent(ctx: AgentContext, level: Level, llm=None, spec_text: s
     def tools_node(state: DispatchState):
         _, handlers = runner()._tools(instance())
         tool_ctx = ToolContext(item_id=state["item"], decisions=list(state.get("placed") or []))
-        results, submit_id = [], None
+        results, submit_id, halted = [], None, None
+        guard = guards.setdefault(state["item"], RepeatGuard())   # 항목마다 (M18-a)
         for use in last_uses(state):
             if use["name"] == SUBMIT_TOOL:
                 submit_id = use["id"]
@@ -132,11 +136,16 @@ def build_dispatch_agent(ctx: AgentContext, level: Level, llm=None, spec_text: s
             results.append({"type": "tool_result", "tool_use_id": use["id"],
                             "content": json.dumps(to_jsonable(out), ensure_ascii=False), "is_error": is_error})
             ctx.emit(agent, "tools", ("✕ " if is_error else "") + f"{use['name']} {json.dumps(use.get('input') or {}, ensure_ascii=False)[:80]}")
+            halted = halted or guard.check(use["name"], use.get("input"), is_error, state.get("calls"))
+        if halted and not submit_id:
+            return {"fail": (HALT_CODES[halted], guard.reason)}
         if submit_id:
             return {"pending": results, "submit_id": submit_id}
         return {"messages": state["messages"] + [{"role": "user", "content": results}]}
 
     def after_tools(state: DispatchState) -> str:
+        if state.get("fail"):
+            return GIVE_UP
         return SUBMIT if state.get("submit_id") else TO_AI
 
     def submit(state: DispatchState):
@@ -226,7 +235,7 @@ def build_dispatch_agent(ctx: AgentContext, level: Level, llm=None, spec_text: s
     ai_paths = {SUBMIT: "submit", TEXT_ONLY: "nudge", GIVE_UP: "fail"}
     if level.tools:
         ai_paths[TOOL_CALL] = "tools"
-        g.add_conditional_edges("tools", after_tools, {TO_AI: "ai", SUBMIT: "submit"})
+        g.add_conditional_edges("tools", after_tools, {TO_AI: "ai", SUBMIT: "submit", GIVE_UP: "fail"})
     g.add_conditional_edges("ai", after_ai, ai_paths)
     g.add_edge("nudge", "ai")
     after_check = "guardrail" if level.guardrail else "record"

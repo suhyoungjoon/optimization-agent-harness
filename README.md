@@ -124,6 +124,13 @@ LLM_PROVIDER=azure_openai LLM_CACHE=0 python -m scripts.m15_eval all --repeats 3
 python -m scripts.m15_eval all --fake      # 키 없이 흐름만 (가짜 AI)
 ```
 
+M18 분석·개선 Supervisor(LangGraph agents 탭 **Supervisor 지휘**, 에이전트 탭 **Supervisor**)는 고정 흐름과 같은 데이터로 비교한다. 시나리오 S1 정상, S2 분석이 놓침(첫 분석만 gpt-4.1-mini), S3 득실 충돌(정시 배정 감소 한도 1%p). 사람 승인 없이 각 방식이 첫 번째로 내미는 안을 규칙 엔진으로 미리 돌려 비교하고, 규칙 파일은 바꾸지 않는다. 결과는 `runs/m18_eval/<시각>/summary.md`.
+
+```bash
+LLM_CACHE=0 python -m scripts.m18_eval all --repeats 3 --max-usd 15
+python -m scripts.m18_eval all --fake      # 키 없이 흐름만 (가짜 AI, 비용 0)
+```
+
 비용 때문에 AI는 실행 범위를 **1일차 앞 10건(시범)**부터 돌려 건당 비용을 확인한 뒤 넓힌다. 규칙 agent는 비용이 없으니 전체로 돌린다.
 
 실행 결과는 `runs/harness.db`(SQLite)에 쌓인다. `runs/`는 커밋하지 않는다.

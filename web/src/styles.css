@@ -556,6 +556,8 @@ input.approver { width: 9em; }
 .agent-timeline .tl-ok .tl-kind { color: var(--good, #1a7f37); }
 .agent-timeline .tl-bad .tl-kind { color: var(--critical, #cf222e); }
 .agent-timeline .tl-info .tl-kind { color: var(--text-secondary); }
+/* Supervisor가 부른 에이전트의 줄 (M18): 들여 써서 Supervisor 자신의 턴과 나눈다 */
+.agent-timeline .tl-sub { padding-left: 28px; font-size: 12px; color: var(--text-secondary); border-left: 2px solid var(--border); }
 
 /* 계획 vs 실적 (M17) */
 .outcome-box { border: 1px dashed var(--border); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
@@ -565,3 +567,11 @@ input.approver { width: 9em; }
 .outcome-table td.num, .outcome-table th.num { text-align: right; }
 
 .gc-tech-toggle { float: right; font-weight: normal; }
+
+/* Supervisor 판단 보고서 (M18) */
+.judgment-card { border-left: 4px solid var(--series-1); }
+.judgment-rec { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 8px 0; }
+.judgment-rec dt { color: var(--text-secondary); }
+.judgment-rec dd { margin: 0; }
+.judgment-ask { background: var(--surface-2, rgba(42, 120, 214, 0.06)); border-radius: 6px; padding: 6px 10px; margin: 8px 0; }
+.ag-mode { font-weight: 600; }

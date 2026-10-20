@@ -137,8 +137,13 @@ def test_failure_modes(pack, small):  # noqa: F811
     _, _, got = run(pack, small, "L2", rule_policy, stop_reason="refusal")
     assert got["O1"].reason_code == "LLM_REFUSAL"
 
-    _, _, got = run(pack, small, "L2", lambda item, n, m, t: tool_use("get_order", {"order_id": item}))
+    # 조회만 계속하면 호출 상한 (같은 인자 연속 반복은 M18-a 반복 감지가 먼저 끊으므로 도구를 번갈아 부른다)
+    _, _, got = run(pack, small, "L2", lambda item, n, m, t:
+                    tool_use("get_order" if n % 2 else "get_worker_schedule",
+                             {"order_id": item} if n % 2 else {"worker_id": "W1"}))
     assert got["O1"].reason_code == "LLM_MAX_TURNS"
+    _, _, got = run(pack, small, "L2", lambda item, n, m, t: tool_use("get_order", {"order_id": item}))
+    assert got["O1"].reason_code == "LLM_REPEATED"
 
     _, _, got = run(pack, small, "L2", lambda item, n, m, t:
                     RuntimeError("boom") if item == "O1" else rule_policy(item, n, m, t))
