@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.llm.client import LLMClient, Usage
+from core.llm.control import Budget, RepeatGuard, failure_of_stop
 from core.llm.events import EventSink, check_event, llm_event, tool_event
 from core.storage.store import to_jsonable
 
@@ -17,12 +18,13 @@ from core.storage.store import to_jsonable
 @dataclass
 class LoopResult:
     submission: dict | None
-    stop: str                                  # submitted | no_submit | max_calls | refusal
+    stop: str                                  # submitted | no_submit | max_calls | refusal | repeated | tool_failure | budget
     calls: dict[str, dict] = field(default_factory=dict)   # tool_use id → {ref, name, input, output, is_error}
     usage: Usage = field(default_factory=Usage)
     llm_calls: int = 0
     feedback_rounds: int = 0
     seconds: float = 0.0
+    failure: dict | None = None                # 표준 실패 상태 (core.llm.control.FAILURES). 제출했으면 None
 
 
 def call_ref(n: int) -> str:
@@ -68,9 +70,11 @@ def run_tool_loop(llm: LLMClient, *, system: str, user: str, tools: list[dict], 
                   max_calls: int = 30, salt: str = "",
                   check_submission: Callable[[dict, dict], list[str]] | None = None,
                   max_feedback: int = 1, on_event: EventSink | None = None,
-                  check_label: str = "제출 검사") -> LoopResult:
+                  check_label: str = "제출 검사", budget: Budget | None = None) -> LoopResult:
     """check_submission(submission, calls)가 문제 목록을 돌려주면 한 번(max_feedback) 고쳐 오게 한다.
-    on_event: 턴마다 AI 응답·도구 호출·제출 검사를 알린다 (core.llm.events 형식, M16 에이전트 탭). 없으면 알리지 않는다."""
+    on_event: 턴마다 AI 응답·도구 호출·제출 검사를 알린다 (core.llm.events 형식, M16 에이전트 탭). 없으면 알리지 않는다.
+    budget: 실행 예산 (M18-a). 넘으면 그때까지의 결과로 멈춘다(stop budget). 같은 도구·같은 인자 연속 반복이나
+    같은 도구 연속 오류도 멈춘다(stop repeated | tool_failure)."""
     emit = on_event or (lambda event: None)
     started = time.time()
     handlers = {t["name"]: t["handler"] for t in tools}
@@ -80,11 +84,17 @@ def run_tool_loop(llm: LLMClient, *, system: str, user: str, tools: list[dict], 
     messages: list[dict] = [{"role": "user", "content": user}]
     result = LoopResult(submission=None, stop="max_calls")
     nudged = False
+    guard, reason = RepeatGuard(), ""
 
     while result.llm_calls < max_calls:
+        if budget and (over := budget.exceeded()):
+            result.stop, reason = "budget", over
+            break
         resp = llm.create(system=system_blocks, messages=messages, tools=api_tools, salt=salt)
         result.llm_calls += 1
         result.usage.add(resp)
+        if budget:
+            budget.charge(resp, getattr(llm, "model", ""), getattr(llm, "config", {}) or {})
         turn = result.llm_calls
         uses = [b for b in resp.content if b.get("type") == "tool_use"]
         emit(llm_event(turn, [u["name"] for u in uses],
@@ -101,7 +111,7 @@ def run_tool_loop(llm: LLMClient, *, system: str, user: str, tools: list[dict], 
             messages.append({"role": "user", "content": f"{submit_tool['name']} 도구로 결과를 제출하라."})
             continue
 
-        tool_results, submitted = [], None
+        tool_results, submitted, halted = [], None, None
         for use in uses:
             if use["name"] == submit_tool["name"]:
                 submitted = use
@@ -118,6 +128,10 @@ def run_tool_loop(llm: LLMClient, *, system: str, user: str, tools: list[dict], 
             emit(tool_event(turn, use["name"], use.get("input"), to_jsonable(out), not is_error, ref=ref))
             tool_results.append({"type": "tool_result", "tool_use_id": use["id"],
                                  "content": tool_result_content(ref, out), "is_error": is_error})
+            halted = halted or guard.check(use["name"], use.get("input"), is_error)
+        if halted and submitted is None:
+            result.stop, reason = halted, guard.reason
+            break
 
         if submitted is not None:
             submission = decode_json_args(submitted.get("input") or {}, submit_tool.get("input_schema") or {})
@@ -135,7 +149,9 @@ def run_tool_loop(llm: LLMClient, *, system: str, user: str, tools: list[dict], 
         messages.append({"role": "user", "content": tool_results})
 
     result.seconds = time.time() - started
-    emit({"type": "end", "turn": result.llm_calls, "stop": result.stop, "text": f"끝: {result.stop}"})
+    result.failure = failure_of_stop(result.stop, reason)
+    end = {"type": "end", "turn": result.llm_calls, "stop": result.stop, "text": f"끝: {result.stop}"}
+    emit({**end, "failure": result.failure} if result.failure else end)
     return result
 
 

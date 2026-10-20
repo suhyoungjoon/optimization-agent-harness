@@ -6,6 +6,7 @@
 
 from core.interfaces import DecisionRecord, DomainPack
 from core.llm.client import LLMClient
+from core.llm.control import Budget
 from core.llm.tool_loop import call_list_text, resolve_call, run_tool_loop, usage_dict
 
 from .aggregate_tools import Aggregator
@@ -171,7 +172,8 @@ def finalize_findings(findings: list[dict], calls: dict, dimensions: dict) -> tu
     for f in findings:
         problems = grounding_problems(f, calls)
         if problems:
-            dropped.append({"finding": f, "problems": problems})
+            # 지우지 않고 '근거 부족'으로 남긴다 (M18-a: Supervisor가 본다, 사람 화면은 접어 둔다)
+            dropped.append({"finding": f, "problems": problems, "status": "insufficient_evidence"})
         else:
             kept.append({**strip_bad_resources(strip_bad_slice(f, dimensions), calls, dimensions),
                          "cited_calls": cited_call_ids(f, calls),
@@ -186,12 +188,13 @@ _problems = grounding_problems
 
 def analyze(pack: DomainPack, instance, decisions: list[DecisionRecord], llm: LLMClient, llm_config: dict,
             salt: str = "", max_calls: int = 30, memory_text: str = "", perspective: dict | None = None,
-            extra_tools: list[dict] | None = None, on_event=None) -> dict:
+            extra_tools: list[dict] | None = None, on_event=None, budget: Budget | None = None) -> dict:
     """memory_text: 이전 회차에서 사람이 내린 판정 (core.improvement.memory.analysis_memory_text). 비면 입력이 이전과 같다.
     perspective: 관점 하나 ({id, name, question, tools}, core.analysis.perspectives). 주면 그 관점의 도구만 주고
     질문을 시스템 프롬프트 뒤에 붙인다. 없으면 입력이 이전과 같다.
     extra_tools: 더 붙일 도구 (예: 과거 사례 검색 search_knowledge, M15-C). 숫자 근거는 여전히 집계 도구 인용만 인정한다.
-    on_event: 턴마다 진행을 알린다 (core.llm.events, M16 에이전트 탭)."""
+    on_event: 턴마다 진행을 알린다 (core.llm.events, M16 에이전트 탭).
+    budget: 실행 예산 (M18-a). 없으면 configs/workflow.yaml의 budget으로 새로 만든다."""
     dimensions = pack.dimensions()
     tools = Aggregator(decisions, dimensions).tools() + pack.analysis_tools(instance, decisions)
     system, tools = perspective_view(analysis_system(dimensions), tools, perspective)
@@ -205,7 +208,7 @@ def analyze(pack: DomainPack, instance, decisions: list[DecisionRecord], llm: LL
             f"분석 대상 항목 수: {len(decisions)}") + memory_text
     result = run_tool_loop(llm, system=system, user=user, tools=tools, submit_tool=report_submit_tool(dimensions, metric_names),
                            max_calls=max_calls, salt=salt, check_submission=check, on_event=on_event,
-                           check_label="근거 검사")
+                           check_label="근거 검사", budget=budget if budget is not None else Budget.from_config())
 
     kept, dropped = finalize_findings((result.submission or {}).get("findings") or [], result.calls, dimensions)
     return {
@@ -214,6 +217,7 @@ def analyze(pack: DomainPack, instance, decisions: list[DecisionRecord], llm: LL
         "dropped": dropped,
         "calls": result.calls,
         "stop": result.stop,
+        "failure": result.failure,
         "feedback_rounds": result.feedback_rounds,
         "usage": usage_dict(result, llm.model, llm_config),
     }

@@ -79,6 +79,8 @@ export const CORE_REASON_NAMES: Record<string, string> = {
   LLM_REFUSAL: "AI가 거절함",
   LLM_MAX_TURNS: "AI 호출 횟수 초과",
   LLM_ERROR: "AI 호출 오류",
+  LLM_REPEATED: "AI가 같은 조회를 반복해 멈춤",
+  TOOL_FAILURE: "도구가 계속 실패해 멈춤",
   UNSPECIFIED: "사유 없이 미배정",
   BLOCKED_BY_GUARDRAIL: "위험 결정이라 막음",
   NEEDS_APPROVAL: "승인이 필요해 대기",

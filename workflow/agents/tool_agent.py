@@ -15,6 +15,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from core.llm.client import Usage
+from core.llm.control import Budget, RepeatGuard, failure_of_stop
 from core.llm.tool_loop import call_ref, decode_json_args, tool_result_content
 from core.storage.store import to_jsonable
 
@@ -31,7 +32,8 @@ class ToolAgentState(TypedDict, total=False):
     llm_calls: int
     feedback_rounds: int
     nudged: bool
-    stop: str                       # submitted | no_submit | max_calls | refusal
+    stop: str                       # submitted | no_submit | max_calls | refusal | repeated | tool_failure | budget
+    stop_reason: str                # 반복·도구 실패·예산 초과의 사유
     usage: Any                      # core.llm.client.Usage
 
 
@@ -42,10 +44,15 @@ TO_AI, REJECT, PASS = "결과 전달", "반려 → 고쳐 오기", "통과"
 def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, tools: list[dict], submit_tool: dict,
                      check: Callable[[dict, dict], list[str]] | None = None, check_label: str = "검사",
                      feedback: bool = True, max_calls: int = 30, max_feedback: int = 1, salt: str = "",
-                     tool_text: Callable[[str, dict, Any], str] | None = None, node_name: str | None = None):
+                     tool_text: Callable[[str, dict, Any], str] | None = None, node_name: str | None = None,
+                     budget: Budget | None = None):
     """check(submission, calls) → 문제 목록. feedback=False면 문제를 기록만 하고 끝낸다 (돌려보내지 않음).
     node_name: 이 하위 그래프가 바깥 그래프의 한 노드일 때 (관점별 분석의 관점 노드). 진행 기록을 그 노드 이름으로
-    남기고 내부 단계는 글 앞에 붙인다 (화면이 바깥 그래프의 노드를 밝힌다)."""
+    남기고 내부 단계는 글 앞에 붙인다 (화면이 바깥 그래프의 노드를 밝힌다).
+    budget: 실행 예산 (M18-a). 없으면 ctx.data["budget"](워크플로우가 나눠 쓰는 것), 그것도 없으면 설정값으로 새로.
+    같은 도구·같은 인자 연속 반복, 같은 도구 연속 오류, 예산 초과면 멈춘다 (stop repeated | tool_failure | budget)."""
+    budget = budget if budget is not None else ctx.data.get("budget") or Budget.from_config()
+    guard = RepeatGuard()
     inner_labels = {"ai": "AI", "tools": "도구", "check": check_label, "nudge": "재촉"}
 
     def emit(node: str, text: str) -> None:
@@ -61,8 +68,12 @@ def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, to
     submit_name = submit_tool["name"]
 
     def ai(state: ToolAgentState):
+        if over := budget.exceeded():
+            emit("ai", f"✕ 예산 초과: {over}")
+            return {"stop": "budget", "stop_reason": over}
         resp = llm.create(system=system_blocks, messages=state["messages"], tools=api_tools, salt=salt)
         state["usage"].add(resp)
+        budget.charge(resp, getattr(llm, "model", ""), getattr(llm, "config", {}) or {})
         n = state.get("llm_calls", 0) + 1
         uses = [b for b in resp.content if b.get("type") == "tool_use"]
         names = ", ".join(u["name"] for u in uses) or "글로만 답함"
@@ -76,7 +87,7 @@ def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, to
         return [b for b in content if b.get("type") == "tool_use"] if isinstance(content, list) else []
 
     def after_ai(state: ToolAgentState) -> str:
-        if state.get("stop") == "refusal" or state.get("llm_calls", 0) > max_calls:
+        if state.get("stop") in ("refusal", "budget") or state.get("llm_calls", 0) > max_calls:
             return REFUSED
         uses = last_uses(state)
         if not uses:
@@ -86,7 +97,7 @@ def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, to
         return SUBMIT
 
     def run_tools(state: ToolAgentState):
-        calls, results, submit_id = dict(state.get("calls") or {}), [], None
+        calls, results, submit_id, halted = dict(state.get("calls") or {}), [], None, None
         for use in last_uses(state):
             if use["name"] == submit_name:
                 submit_id = use["id"]
@@ -104,6 +115,10 @@ def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, to
                             "content": tool_result_content(ref, out), "is_error": is_error})
             text = tool_text(use["name"], use.get("input") or {}, out) if tool_text else use["name"]
             emit("tools", ("✕ " if is_error else "") + text)
+            halted = halted or guard.check(use["name"], use.get("input"), is_error)
+        if halted and not submit_id:
+            emit("tools", f"✕ 멈춤: {guard.reason}")
+            return {"calls": calls, "stop": halted, "stop_reason": guard.reason}
         if submit_id:
             return {"calls": calls, "pending": results, "submit_id": submit_id}
         return {"calls": calls, "messages": state["messages"] + [{"role": "user", "content": results}]}
@@ -111,6 +126,8 @@ def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, to
     def after_tools(state: ToolAgentState) -> str:
         if state.get("submit_id"):
             return SUBMIT
+        if state.get("stop") in ("repeated", "tool_failure"):
+            return REFUSED
         return REFUSED if state.get("llm_calls", 0) >= max_calls else TO_AI
 
     def run_check(state: ToolAgentState):
@@ -150,5 +167,8 @@ def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, to
 
 
 def run_tool_agent(graph, user: str) -> ToolAgentState:
-    return graph.invoke({"messages": [{"role": "user", "content": user}], "usage": Usage(), "llm_calls": 0},
-                        {"recursion_limit": 500})
+    """끝난 상태에 표준 실패 상태(failure, core.llm.control)를 붙인다. 제출했으면 None."""
+    out = graph.invoke({"messages": [{"role": "user", "content": user}], "usage": Usage(), "llm_calls": 0},
+                       {"recursion_limit": 500})
+    stop = out.get("stop") or ("max_calls" if out.get("nudged") is not True else "no_submit")
+    return {**out, "failure": failure_of_stop(stop, out.get("stop_reason", ""))}

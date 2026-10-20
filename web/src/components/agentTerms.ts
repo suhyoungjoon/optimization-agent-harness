@@ -70,6 +70,9 @@ const STOP_NAMES: Record<string, string> = {
   no_submit: "결과를 제출하지 않고 마침",
   max_calls: "AI 호출 한도에 닿아 멈춤",
   refusal: "AI가 응답을 거절해 멈춤",
+  repeated: "반복 실패: 같은 도구를 같은 인자로 계속 불러 멈춤",
+  tool_failure: "도구 실패: 같은 도구가 계속 실패해 멈춤",
+  budget: "예산 초과: 비용·시간 상한에 닿아 그때까지의 결과로 멈춤",
 };
 
 export interface Terms {
@@ -108,7 +111,8 @@ function check(e: TimelineEvent): { label: string; detail: string; tone: "ok" | 
 
 function end(e: TimelineEvent): string {
   const stop = (e as { stop?: string }).stop ?? /^끝: (\w+)/.exec(e.text)?.[1];
-  return stop ? `■ ${STOP_NAMES[stop] ?? `끝 (${stop})`}` : e.text;
+  const why = (e as { failure?: { reason?: string } }).failure?.reason;   // 반복·도구 실패·예산 초과의 사유
+  return stop ? `■ ${STOP_NAMES[stop] ?? `끝 (${stop})`}${why ? ` — ${why}` : ""}` : e.text;
 }
 
 // dims: 도메인 dimensions.yaml (묶는 기준 이름 등). 없으면 어댑터 이름만 쓴다

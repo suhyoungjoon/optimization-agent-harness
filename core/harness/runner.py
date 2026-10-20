@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from core.interfaces import DecisionRecord, DomainPack, ToolContext
+from core.llm.control import RepeatGuard
 from core.llm.client import LLMClient, Usage
 from core.llm.events import EventSink, summarize
 from core.storage.store import to_jsonable
@@ -21,6 +22,7 @@ from .levels import Level
 from .tracer import Tracer
 
 SUBMIT_TOOL = "submit_decision"
+HALT_CODES = {"repeated": "LLM_REPEATED", "tool_failure": "TOOL_FAILURE"}   # RepeatGuard stop → 사유 코드
 MAX_CONSECUTIVE_ERRORS = 3
 
 # 코어가 쓰는 사유 코드 (도메인 사유 코드와 함께 표시한다)
@@ -29,6 +31,8 @@ CORE_REASON_CODES = {
     "LLM_REFUSAL": "LLM이 요청을 거절함",
     "LLM_MAX_TURNS": "항목당 LLM 호출 상한에 도달",
     "LLM_ERROR": "LLM 호출 오류",
+    "LLM_REPEATED": "같은 도구를 같은 인자로 연속 반복해 멈춤",
+    "TOOL_FAILURE": "같은 도구가 연속으로 실패해 멈춤",
     "UNSPECIFIED": "LLM이 사유 코드 없이 미배정으로 제출",
     guardrail.BLOCKED: "필수조건 위반으로 가드레일이 차단",
     guardrail.NEEDS_APPROVAL: "승인 필요 조건에 해당해 대기",
@@ -172,6 +176,7 @@ class HarnessRunner:
         ctx = ToolContext(item_id=item_id, decisions=list(placed))
         calls = retries = 0
         nudged = False
+        guard = RepeatGuard()
         while True:
             if calls >= self.max_calls:
                 return self._failed(instance, item_id, "LLM_MAX_TURNS",
@@ -195,7 +200,7 @@ class HarnessRunner:
                 messages.append({"role": "user", "content": "submit_decision 도구로 결정을 제출하라."})
                 continue
 
-            results, submitted = [], None
+            results, submitted, halted = [], None, None
             for use in tool_uses:
                 if use["name"] == SUBMIT_TOOL:
                     submitted = use
@@ -209,7 +214,10 @@ class HarnessRunner:
                 tracer.record(item_id, "tool_call", {"name": use["name"], "input": use.get("input")}, out)
                 results.append({"type": "tool_result", "tool_use_id": use["id"],
                                 "content": json.dumps(to_jsonable(out), ensure_ascii=False), "is_error": is_error})
+                halted = halted or guard.check(use["name"], use.get("input"), is_error)
 
+            if halted and submitted is None:   # M18-a 공통 실행 제어
+                return self._failed(instance, item_id, HALT_CODES[halted], guard.reason, llm_calls=calls, retries=retries)
             if submitted is None:
                 messages.append({"role": "user", "content": results})
                 continue

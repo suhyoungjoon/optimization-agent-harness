@@ -167,7 +167,8 @@ def _analysis_result(ctx: AgentContext, out: dict, llm) -> dict:
     kept, dropped = analysis_core.finalize_findings((out.get("submission") or {}).get("findings") or [], calls, dims)
     usage = {**out["usage"].to_dict(llm.model, ctx.llm_config), "llm_calls": out.get("llm_calls", 0)}
     return {"summary": (out.get("submission") or {}).get("summary", ""), "findings": kept, "dropped": dropped,
-            "calls": calls, "stop": out.get("stop") or "no_submit", "feedback_rounds": out.get("feedback_rounds", 0),
+            "calls": calls, "stop": out.get("stop") or "no_submit", "failure": out.get("failure"),
+            "feedback_rounds": out.get("feedback_rounds", 0),
             "usage": usage}
 
 

@@ -141,6 +141,16 @@ class Usage:
         return out
 
 
+def retry_options(config: dict) -> dict:
+    """SDK 클라이언트의 다시 시도·시간 제한 (configs/llm.yaml의 retries·timeout_s, M18-a). 없으면 SDK 기본값."""
+    out = {}
+    if config.get("retries") is not None:
+        out["max_retries"] = int(config["retries"])
+    if config.get("timeout_s") is not None:
+        out["timeout"] = float(config["timeout_s"])
+    return out
+
+
 def deployment_for(model: str, config: dict) -> str:
     """Azure deployment 이름. 설정의 대응표(azure.deployments)에 없으면 모델 이름 그대로."""
     return ((config.get("azure") or {}).get("deployments") or {}).get(model) or model
@@ -198,7 +208,7 @@ class AnthropicClient:
                 raise RuntimeError('anthropic 패키지가 없음: pip install -e ".[anthropic]" (기본 제공사는 azure_openai)') from exc
 
             load_dotenv(env_path)
-            api = anthropic.Anthropic(api_key=api_key_from_env())
+            api = anthropic.Anthropic(api_key=api_key_from_env(), **retry_options(self.config))
         self.api = api
 
     def create(self, *, system: list[dict], messages: list[dict], tools: list[dict],
