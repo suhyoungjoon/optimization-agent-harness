@@ -21,13 +21,14 @@ interface CardData extends Record<string, unknown> {
   node: WorkflowNode;
   view: NodeView;
   terminal: boolean;
+  showIds: boolean;
 }
 
 const MARK = { done: "✓", next: "▶", running: "…", error: "✕", waiting: "⏸", idle: "" } as const;
 const KIND_NAME: Record<string, string> = { ai: "AI", rule: "규칙 계산", human: "사람", tool: "도구·흐름", check: "검사" };
 
 function Card({ data }: NodeProps<Node<CardData>>) {
-  const { node, view, terminal } = data;
+  const { node, view, terminal, showIds } = data;
   const handles = (
     <>
       <Handle type="target" position={Position.Left} id="l" />
@@ -51,10 +52,12 @@ function Card({ data }: NodeProps<Node<CardData>>) {
         <strong>{node.label ?? node.id}</strong>
         {view.badge && <span className="gc-badge">{view.badge}</span>}
       </div>
-      <div className="gc-sub">
-        <span className="gc-kind">{(node as { agent?: boolean }).agent ? "AI 에이전트" : KIND_NAME[node.kind ?? "rule"] ?? ""}</span>
-        <code>{node.id}</code>
-      </div>
+      {showIds && (
+        <div className="gc-sub">
+          <span className="gc-kind">{(node as { agent?: boolean }).agent ? "AI 에이전트" : KIND_NAME[node.kind ?? "rule"] ?? ""}</span>
+          <code>{node.id}</code>
+        </div>
+      )}
       {view.summary && <div className="gc-summary">{view.summary}</div>}
     </div>
   );
@@ -115,6 +118,7 @@ export default function GraphCanvas({
   follow,
   minFitZoom = 0.5,
   padding = 0.16,
+  showIds = true,
 }: {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
@@ -128,6 +132,7 @@ export default function GraphCanvas({
   follow?: string | null;   // 이 노드로 화면을 옮긴다 (바뀔 때마다)
   minFitZoom?: number;      // 전체 맞춤의 최소 배율. 이보다 작아져야 다 들어가면 일부만 보이고 끌어서 이동
   padding?: number;         // 전체 맞춤 여백 (아래로 도는 되돌림 선이 잘리지 않게)
+  showIds?: boolean;        // 카드에 노드 종류·id 표시 (끄면 이름만. 에이전트 탭의 쉬운 보기)
 }) {
   // 구조(노드·연결)가 바뀔 때만 다시 배치한다 (하네스 레벨을 바꾸면 배정 에이전트 그래프가 다시 배치된다)
   const shape = JSON.stringify([nodes.map((n) => n.id), edges.map((e) => [e.source, e.target])]);
@@ -161,7 +166,7 @@ export default function GraphCanvas({
   const size = (id: string) => (id.startsWith("__") ? { width: 46, height: 30 } : { width: nodeWidth, height: nodeHeight });
   const rfNodes: Node<CardData>[] = nodes.map((n) => ({
     id: n.id, type: "card", position: layout[n.id] ?? { x: 0, y: 0 }, ...size(n.id), measured: size(n.id),
-    data: { node: n, view: views[n.id] ?? {}, terminal: n.id.startsWith("__") },
+    data: { node: n, view: views[n.id] ?? {}, terminal: n.id.startsWith("__"), showIds },
     draggable: false, connectable: false, selectable: false,
   }));
 
