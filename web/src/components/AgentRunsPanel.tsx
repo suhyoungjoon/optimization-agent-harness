@@ -350,7 +350,9 @@ export default function AgentRunsPanel({
           {shown && <Summary t={shown} onOpenReport={onOpenReport} onOpenBatch={onOpenBatch} />}
           {shown && shown.agent === "supervisor" && !shown.live && <SupervisorResult t={shown} adapter={adapter} />}
           {shown && graph && <InnerGraph graph={graph} t={shown} terms={terms} flash={flash} />}
-          {shown && <Timeline t={shown} terms={terms} flash={flash} />}
+          {shown && (shown.agent === "supervisor"
+            ? <SupervisorTimeline t={shown} terms={terms} flash={flash} adapter={adapter} />
+            : <Timeline t={shown} terms={terms} flash={flash} />)}
         </div>
       </div>
     </section>
@@ -666,6 +668,117 @@ function OpinionResult({ t }: { t: AgentTabTimeline }) {
         </p>
       ))}
       {err && <p className="critical-text">✕ {err}</p>}
+    </div>
+  );
+}
+
+// Supervisor 진행 기록 (대화 형식): Supervisor → 받는 쪽 요청, 그 쪽의 진행(접힘), 받는 쪽 → Supervisor 보고.
+// 저장된 실행은 서버가 원본에서 만든 messages를, 실행 중에는 진행 줄을 쓴다.
+const TEAM_LABEL: Record<string, string> = {
+  supervisor: "Supervisor", analysis_agent: "분석 에이전트", proposal_agent: "개선 에이전트", engine: "규칙 엔진",
+  search: "문서 검색", check: "보고서 검사",
+};
+
+function SupervisorTimeline({ t, terms, flash, adapter }: {
+  t: AgentTabTimeline; terms: Terms; flash: string | null; adapter: DomainAdapter;
+}) {
+  const ref = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el && t.live) el.scrollTop = el.scrollHeight;
+  }, [t.events.length, t.live]);
+  // 부른 에이전트의 진행: item("분석 R1", "개선 B1") → 줄들. 같은 종류는 부른 순서대로
+  const subs = useMemo(() => {
+    const byItem = new Map<string, TimelineEvent[]>();
+    for (const e of t.events) if (e.item) byItem.set(e.item, [...(byItem.get(e.item) ?? []), e]);
+    return byItem;
+  }, [t.events]);
+  const order = (prefix: string) => [...subs.keys()].filter((k) => k.startsWith(prefix));
+  const headline = adapter.metrics.filter((m) => m.headline || m.primary);
+  const fmt = (k: string, v: number | null) => {
+    const f = adapter.metrics.find((m) => m.key === k)?.format;
+    return v == null ? "–" : f ? fmtMetric(v, f) : v.toFixed(2);
+  };
+  const working = t.live ? flash ?? workingNode(t) : null;
+  const own = t.events.filter((e) => !e.item);
+  const seen: Record<string, number> = {};
+  const rows: JSX.Element[] = [];
+  const subDetails = (to: string, key: string) => {
+    const prefix = to === "analysis_agent" ? "분석" : to === "proposal_agent" ? "개선" : null;
+    if (!prefix) return null;
+    const i = seen[prefix] = (seen[prefix] ?? -1) + 1;
+    const item = order(prefix)[i];
+    const evs = item ? subs.get(item) ?? [] : [];
+    if (!evs.length) return null;
+    return (
+      <li key={`${key}-sub`} className="tl-subgroup">
+        <details open={t.live && working === to}>
+          <summary className="muted small">{TEAM_LABEL[to]} 진행 {evs.length}줄 ({item})</summary>
+          <ol className="agent-timeline">
+            {evs.map((e) => <TimelineRow key={e.seq} e={{ ...e, item: undefined }} terms={terms} showItem={false} nested />)}
+          </ol>
+        </details>
+      </li>
+    );
+  };
+  own.forEach((e, idx) => {
+    const turn = e.turn ? <span className="tl-turn" title={`Supervisor의 ${e.turn}번째 응답`}>{e.turn}번째</span> : <span className="tl-turn" />;
+    if (e.type === "llm") {
+      const asked = e.tools ?? [];
+      if (!asked.length) {
+        rows.push(<li key={e.seq} className="tl-msg">{turn}<span className="tl-kind">Supervisor</span> 도구 없이 글로만 답함<Raw e={e} /></li>);
+        return;
+      }
+      // 실행 중이고 아직 보고가 오지 않은 요청: 받는 쪽이 일하는 중
+      const answered = own.slice(idx + 1).some((x) => x.type === "tool" || x.type === "check");
+      if (t.live && !answered) {
+        asked.forEach((name, j) => {
+          const to = TEAM_TOOL[name] ?? "supervisor";
+          rows.push(<li key={`${e.seq}-p${j}`} className="tl-msg tl-ask">{turn}
+            <span className="tl-kind">Supervisor → {TEAM_LABEL[to]}</span> {terms.tool(name)}
+            <span className="muted"> · {TEAM_LABEL[to]}가 일하는 중…</span></li>);
+          const d = subDetails(to, `${e.seq}-p${j}`);
+          if (d) rows.push(d);
+        });
+      }
+      return;
+    }
+    if (e.type === "tool") {
+      const m = t.messages?.[e.ref ?? ""];
+      const to = m?.to ?? TEAM_TOOL[e.name ?? ""] ?? "supervisor";
+      const ask = m?.ask ?? (terms.args(e.input) || terms.tool(e.name ?? ""));
+      const where = m?.slice ? ` · 구간: ${terms.args(JSON.stringify(m.slice))}` : "";
+      rows.push(<li key={`${e.seq}-a`} className="tl-msg tl-ask">{turn}
+        <span className="tl-kind">Supervisor → {TEAM_LABEL[to]}</span> {ask}{where}</li>);
+      const d = subDetails(to, String(e.seq));
+      if (d) rows.push(d);
+      const metrics = m?.metrics ? headline.filter((h) => m.metrics?.[h.key]).map((h) => {
+        const [b, a] = m.metrics![h.key];
+        return `${h.label} ${fmt(h.key, b)} → ${fmt(h.key, a)}`;
+      }).join(" · ") : "";
+      rows.push(<li key={`${e.seq}-r`} className={"tl-msg tl-reply" + (e.ok === false ? " tl-bad" : "")}><span className="tl-turn" />
+        <span className="tl-kind">{TEAM_LABEL[to]} → Supervisor</span> {m?.reply ?? (e.ok === false ? "오류" : "결과 받음")}
+        {metrics && <span className="tl-io"> · {metrics}</span>}<Raw e={e} /></li>);
+      return;
+    }
+    if (e.type === "check") {
+      const c = terms.check(e);
+      rows.push(<li key={e.seq} className={`tl-msg tl-${c.tone}`}>{turn}
+        <span className="tl-kind">보고서 검사 → Supervisor</span> {c.tone === "ok" ? "✓ 통과" : `✕ 반려: ${c.detail}`}<Raw e={e} /></li>);
+      return;
+    }
+    if (e.type === "end") rows.push(<li key={e.seq} className="tl-end muted"><span className="tl-turn" />{terms.end(e)}</li>);
+  });
+  return (
+    <div className="panel">
+      <h3>진행 기록 <span className="muted small">(Supervisor와 에이전트들이 주고받은 요청·보고 · 각 에이전트의 세부 진행은 접혀 있음{t.live ? " · 실행 중 한 줄씩 쌓임" : ""})</span></h3>
+      {t.events.length === 0 && <p className="muted small">{t.live ? "Supervisor의 첫 판단을 기다리는 중…" : "기록이 없습니다."}</p>}
+      <ol className="agent-timeline" ref={ref}>
+        {rows}
+        {t.live && working === "supervisor" && !flash && own.length > 0 && (
+          <li className="tl-thinking muted"><span className="tl-turn" /><span className="tl-kind">Supervisor</span>생각하는 중…</li>
+        )}
+      </ol>
     </div>
   );
 }

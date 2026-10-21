@@ -42,6 +42,92 @@ TabAgentName = Literal["dispatch", "analysis", "proposals", "opinion", "supervis
 OPINION_MAX_CALLS = 6        # workflow.agents.flow.opinion_agent_graph의 max_calls와 같다
 
 
+TEAM_TO = {"run_analysis": "analysis_agent", "run_proposals": "proposal_agent", "simulate": "engine", "sweep": "engine",
+           "search_knowledge": "search"}
+
+
+def _clip(text, n: int = 140) -> str:
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= n else text[: n - 1] + "…"
+
+
+def team_messages(calls: dict, perspective_names: dict | None = None) -> dict:
+    """Supervisor 도구 호출 → 대화 한 쌍씩 (호출 번호 → {to, ask, reply, ...}). 에이전트 탭이 "누가 누구에게 무엇을"로 보인다.
+    저장된 원본(입력·결과 전체)에서 만든다. 실행 중에는 없다 (화면이 진행 줄에서 간단히 만든다)."""
+    names = perspective_names or {}
+    out = {}
+    for c in calls.values():
+        name, args, res = c.get("name", ""), c.get("input") or {}, c.get("output") or {}
+        msg = {"ref": c.get("ref"), "tool": name, "to": TEAM_TO.get(name, "supervisor"), "ok": not c.get("is_error")}
+        if name == "run_analysis":
+            parts = []
+            if args.get("perspectives"):
+                parts.append("관점별로: " + "·".join(names.get(p, p) for p in args["perspectives"]))
+            if args.get("question"):
+                parts.append(f"\"{_clip(args['question'], 160)}\"")
+            msg.update(ask=" / ".join(parts) or "전체 분석", slice=args.get("slice"))
+            if isinstance(res, dict) and "findings" in res:
+                titles = [f.get("title", "") for f in res["findings"]]
+                msg.update(report_id=res.get("report_id"), items=res.get("items"),
+                           reply=f"발견 {len(titles)}건" + (f": {' · '.join(_clip(t, 40) for t in titles[:3])}"
+                                                           + (f" 외 {len(titles) - 3}건" if len(titles) > 3 else "") if titles else "")
+                           + (f" (근거 부족으로 뺀 발견 {res['dropped_insufficient_evidence']}건)"
+                              if res.get("dropped_insufficient_evidence") else ""),
+                           findings=[{"id": f.get("id"), "title": f.get("title")} for f in res["findings"]])
+        elif name == "run_proposals":
+            ids = args.get("finding_ids") or []
+            parts = [f"대상 발견 {ids[0]}" + (f" 외 {len(ids) - 1}건" if len(ids) > 1 else "") if ids else "모든 발견"]
+            if args.get("focus"):
+                parts.append(f"초점: {_clip(args['focus'], 80)}")
+            if args.get("instruction"):
+                parts.append(f"지시: {_clip(args['instruction'], 120)}")
+            msg["ask"] = " / ".join(parts)
+            if isinstance(res, dict) and "proposals" in res:
+                ps = res["proposals"]
+                msg.update(batch=res.get("batch"),
+                           reply=f"개선안 {len(ps)}건" + (": " + " · ".join(
+                               f"{p.get('id')} {_clip(p.get('title'), 40)}" + (" (적용 불가)" if p.get("errors") else "")
+                               for p in ps) if ps else "") + (f" ({res['failure']['label']})" if res.get("failure") else ""),
+                           proposals=[{"id": p.get("id"), "title": p.get("title"), "errors": p.get("errors")} for p in ps])
+        elif name == "simulate":
+            msg["ask"] = (f"{args['proposal_id']} 미리 돌려보기" if args.get("proposal_id")
+                          else "직접 쓴 변경 미리 돌려보기")
+            msg["change"] = {k: args[k] for k in ("params_changes", "override_rules") if args.get(k)} or None
+            if isinstance(res, dict) and "after" in res:
+                d = res.get("diagnosis") or {}
+                tc = d.get("target_changes") or []
+                bits = []
+                if tc:
+                    good = sum(1 for t in tc if t.get("improved"))
+                    bits.append(f"{'겨냥한' if d.get('targeted') else '발견'} 구간 {good}/{len(tc)}개 실패율 감소")
+                if d.get("worsened_metrics"):
+                    bits.append(f"나빠진 지표 {len(d['worsened_metrics'])}개")
+                if d.get("missed_slices"):
+                    bits.append(f"놓친 구간 {len(d['missed_slices'])}개")
+                if d.get("dominated_by"):
+                    bits.append(f"더 나은 훑기 점 {len(d['dominated_by'])}개")
+                if res.get("constraint_violations"):
+                    bits.append(f"제약 위반 {len(res['constraint_violations'])}건")
+                msg.update(sim_id=res.get("id"), metrics={k: [res["before"].get(k), res["after"].get(k)] for k in res["after"]},
+                           reply=" · ".join(bits) or "결과 받음", worsened=[w.get("metric") for w in d.get("worsened_metrics") or []])
+        elif name == "sweep":
+            axes = args.get("axes") or []
+            msg["ask"] = "훑기: " + ", ".join(f"{a.get('path')} 값 {len(a.get('values') or [])}개" for a in axes)
+            if isinstance(res, dict) and "points" in res:
+                msg["reply"] = f"조합 {len(res['points'])}개 결과"
+        elif name == "search_knowledge":
+            msg["ask"] = f"\"{_clip(args.get('query'), 80)}\" 찾기"
+            if isinstance(res, dict) and "hits" in res:
+                msg["reply"] = f"문서 {len(res['hits'])}건: " + ", ".join(h.get("ref", "") for h in res["hits"][:5])
+        else:
+            msg["ask"] = name
+        if isinstance(res, dict) and "error" in res:
+            msg["reply"] = "오류: " + _clip(res["error"], 160)
+        msg.setdefault("reply", "결과 받음")
+        out[msg["ref"]] = msg
+    return out
+
+
 class OpinionSaveRequest(BaseModel):
     constraints: list[dict] | None = None   # 사람이 고친 제약 (없으면 에이전트가 정리한 그대로)
 
@@ -284,6 +370,13 @@ def register(app: FastAPI, ctx: Context, demo: bool = False) -> None:
                 "constraints": constraints, "problems": body.get("problems") or [],
                 "saved": body.get("saved") or []}     # 사람이 확정해 저장한 제약 id
 
+    def _perspective_names(run_id: str) -> dict:
+        run = store.get_run(run_id)
+        try:
+            return {p["id"]: p["name"] for p in load_perspectives(load_pack(run["domain"]))} if run else {}
+        except Exception:   # noqa: BLE001 - 이름이 없으면 id 그대로
+            return {}
+
     def _supervisor_view(sid: str) -> dict:
         run = store.get_supervisor_run(sid)
         if run is None:
@@ -303,6 +396,7 @@ def register(app: FastAPI, ctx: Context, demo: bool = False) -> None:
                 "output": output, "usage": _usage_summary(body.get("usage")), "graph": "supervisor_team",
                 "note": (f"도구 호출 {counts.get('total', 0)}회 (분석 {counts.get('run_analysis', 0)}·"
                          f"개선 {counts.get('run_proposals', 0)}) · 사용량은 부른 에이전트 포함") if counts else None,
+                "messages": team_messages(body.get("calls") or {}, _perspective_names(run["run_id"])),
                 "judgment": judgment or None, "recommendations": recs, "failure": body.get("failure"),
                 "problems": body.get("problems") or []}
 

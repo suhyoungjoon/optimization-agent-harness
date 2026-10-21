@@ -579,3 +579,10 @@ input.approver { width: 9em; }
 .agent-timeline .tl-thinking { animation: wf-pulse 1s ease-in-out infinite alternate; }
 @media (prefers-reduced-motion: reduce) { .agent-timeline .tl-thinking { animation: none; } }
 .agent-cache { display: block; margin: 6px 0; }
+/* Supervisor 대화 형식 진행 기록 */
+.agent-timeline .tl-msg .tl-kind { min-width: 150px; }
+.agent-timeline .tl-ask .tl-kind { color: var(--series-1); }
+.agent-timeline .tl-reply .tl-kind { color: var(--good-text); }
+.agent-timeline .tl-reply.tl-bad .tl-kind { color: var(--critical); }
+.agent-timeline .tl-subgroup { border-bottom: none; padding-left: 46px; }
+.agent-timeline .tl-subgroup .agent-timeline { max-height: none; }
