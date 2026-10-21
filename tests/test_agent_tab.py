@@ -209,7 +209,7 @@ def test_supervisor_agent_runs_alone_and_replays(client):
     assert res.status_code == 202
     sid = res.json()["id"]
     t = wait_long(client, f"/agent-tab/timeline/supervisor/{sid}")
-    assert t["status"] == "done" and t["graph"] == "supervisor_agent" and t["output"].startswith("추천 1건")
+    assert t["status"] == "done" and t["graph"] == "supervisor_team" and t["output"].startswith("추천 1건")
     rec = t["recommendations"][0]
     assert rec["proposal_id"] == "P1" and rec["title"].startswith("경계 지역만") and rec["confidence"] == "중간"
     assert rec["primary"]["assignment_rate"][1] > rec["primary"]["assignment_rate"][0]

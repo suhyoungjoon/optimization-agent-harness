@@ -300,7 +300,7 @@ def register(app: FastAPI, ctx: Context, demo: bool = False) -> None:
         counts = body.get("counts") or {}
         return {"status": run["status"], "error": run.get("error"), "events": body.get("timeline") or [],
                 "input": f"규칙 실행 {run['run_id']}" + (" · 저장된 제약 사용" if body.get("constraints") else ""),
-                "output": output, "usage": _usage_summary(body.get("usage")), "graph": "supervisor_agent",
+                "output": output, "usage": _usage_summary(body.get("usage")), "graph": "supervisor_team",
                 "note": (f"도구 호출 {counts.get('total', 0)}회 (분석 {counts.get('run_analysis', 0)}·"
                          f"개선 {counts.get('run_proposals', 0)}) · 사용량은 부른 에이전트 포함") if counts else None,
                 "judgment": judgment or None, "recommendations": recs, "failure": body.get("failure"),

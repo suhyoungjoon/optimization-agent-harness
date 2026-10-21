@@ -39,6 +39,12 @@ def test_graph_shape_follows_mode(client):  # noqa: F811
     assert {"ai", "tools", "check", "nudge"} <= ids(inner)
     assert next(n for n in inner["nodes"] if n["id"] == "check")["label"] == "판단 보고서 검사"
     assert "supervisor_agent" not in fixed["agents"]
+    # 에이전트 탭 팀 그림: Supervisor가 요청하고 각 에이전트·규칙 엔진이 보고한다
+    team = sup["agents"]["supervisor_team"]
+    assert ids(team) >= {"supervisor", "analysis_agent", "proposal_agent", "engine", "check"}
+    labels = {(e["source"], e["target"]): e["label"] for e in team["edges"]}
+    assert labels[("supervisor", "analysis_agent")] == "분석 요청" and labels[("analysis_agent", "supervisor")] == "발견 보고"
+    assert labels[("check", "supervisor")] == "반려 → 고쳐 오기"
 
 
 def test_supervisor_mode_runs_to_human_review_with_judgment(client):  # noqa: F811
