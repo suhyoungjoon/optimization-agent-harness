@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type {
-  AgentsGraph, AgentTabHistoryRow, AgentTabInfo, AgentTabSources, AgentTabTimeline, DomainInfo, LlmCacheState, TabAgent,
+  AgentsGraph, AgentTabHistoryRow, AgentTabInfo, AgentTabSources, AgentTabTimeline, Constraint, DomainInfo, LlmCacheState, TabAgent,
   TimelineEvent,
 } from "../types";
 import type { DomainAdapter } from "../domains/types";
 import GraphCanvas, { type NodeView } from "./GraphCanvas";
 import { PLAIN_EDGES, PLAIN_NODES, makeTerms, type Terms } from "./agentTerms";
 import { fmtMetric } from "./MetricsPanel";
+import { constraintText } from "./ImprovementPanel";
 import { usePoll } from "./usePoll";
 
 // 에이전트 탭 (M16): 핵심 에이전트를 하나씩 실행하고, 그 처리 흐름(턴 → 도구 → 하네스 검사)을 한 화면에서 본다.
@@ -372,12 +373,7 @@ function Summary({ t, onOpenReport, onOpenBatch }: {
           </button>
         </p>
       )}
-      {t.agent === "opinion" && !running && (
-        <ul className="small">
-          {(t.constraints ?? []).map((c, i) => <li key={i}><code>{JSON.stringify(c)}</code></li>)}
-          {(t.problems ?? []).map((p, i) => <li key={`p${i}`} className="critical-text">✕ {p}</li>)}
-        </ul>
-      )}
+      {t.agent === "opinion" && !running && <OpinionResult t={t} />}
     </div>
   );
 }
@@ -573,6 +569,46 @@ function SupervisorResult({ t, adapter }: { t: AgentTabTimeline; adapter: Domain
           )}
         </details>
       )}
+    </div>
+  );
+}
+
+// 의견 정리 결과: 정리한 제약 + 사람이 확정해 저장 (LangGraph agents 탭의 "제약 확인"과 같은 일)
+function OpinionResult({ t }: { t: AgentTabTimeline }) {
+  const [saved, setSaved] = useState<string[]>(t.saved ?? []);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setSaved(t.saved ?? []); setErr(null); }, [t.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const cs = (t.constraints ?? []) as Constraint[];
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      setSaved((await api.agentTabOpinionSave(t.id)).saved);
+    } catch (e) {
+      setErr(String((e as Error).message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="small">
+      <ul>
+        {cs.map((c, i) => <li key={i}>{constraintText(c)} <span className="muted">(<code>{JSON.stringify(c)}</code>)</span></li>)}
+        {(t.problems ?? []).map((p, i) => <li key={`p${i}`} className="critical-text">✕ {p}</li>)}
+      </ul>
+      {t.status === "done" && cs.length > 0 && (saved.length ? (
+        <p className="good-text">✓ 제약 {saved.length}개 저장됨. 다음 개선안 요청에서 "저장된 제약 사용"을 켜면 쓰인다 (개선 제안 탭 저장된 제약에서 끄고 켬)</p>
+      ) : (
+        <p>
+          <button className="primary" disabled={busy} onClick={save}
+            title="정리한 제약이 의견과 맞으면 확정해 저장한다. 형식은 코드가 다시 검사한다. 저장하면 다음 개선안 요청·LangGraph agents 실행이 불러오고, 의견은 문서 검색 색인에 현장 의견으로 남는다">
+            제약 확정해 저장
+          </button>{" "}
+          <span className="muted">의견과 맞을 때만 저장하세요. 저장 전에는 개선안에 영향이 없습니다</span>
+        </p>
+      ))}
+      {err && <p className="critical-text">✕ {err}</p>}
     </div>
   );
 }

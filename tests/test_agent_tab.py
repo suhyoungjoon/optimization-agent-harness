@@ -248,3 +248,28 @@ def test_usage_summary_reports_cached_calls(client):
     rep = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': rule['run_id']}).json()['id']}")
     t = client.get(f"/agent-tab/timeline/analysis/{rep['id']}").json()
     assert "cached_calls" in t["usage"]
+
+
+def test_opinion_constraints_can_be_confirmed_and_saved(client):
+    """에이전트 탭 의견 정리: 사람이 확정하면 제약을 저장한다 (형식은 코드가 다시 검사). 다음 개선안 요청이 불러온다."""
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": FAULTS}).json()
+    rule = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    rep = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': rule['run_id']}).json()['id']}")
+    batch = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': rep['id']}).json()['id']}")
+    oid = client.post("/agent-tab/opinion", json={"proposal_id": batch["proposals"][0]["id"],
+                                                 "opinion": "관할 밖 4km 초과 출동 불가"}).json()["id"]
+    t = wait(client, f"/agent-tab/timeline/opinion/{oid}")
+    assert t["status"] == "done" and t["constraints"] and t["saved"] == []
+    assert client.get("/constraints?domain=dispatch").json() == []                       # 확정 전에는 저장하지 않는다
+
+    bad = client.post(f"/agent-tab/opinion/{oid}/save", json={"constraints": [{"type": "param", "path": "nope.x", "max": 1}]})
+    assert bad.status_code == 400 and "형식" in bad.json()["detail"]
+    res = client.post(f"/agent-tab/opinion/{oid}/save", json={})
+    assert res.status_code == 200 and res.json()["saved"]
+    saved = client.get("/constraints?domain=dispatch").json()
+    assert [c["id"] for c in saved] == res.json()["saved"] and saved[0]["origin"] == "agent-tab"
+    assert saved[0]["body"]["max"] == 4 and saved[0]["opinion"] == "관할 밖 4km 초과 출동 불가"
+    assert client.get(f"/agent-tab/timeline/opinion/{oid}").json()["saved"] == res.json()["saved"]
+    # 다음 개선안 요청이 저장된 제약을 쓴다
+    b2 = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': rep['id'], 'use_saved_constraints': True}).json()['id']}")
+    assert b2["meta"]["saved_constraints"] == res.json()["saved"]

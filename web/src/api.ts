@@ -36,6 +36,9 @@ export const api = {
   llmCache: () => request<LlmCacheState>("/llm/cache"),
   setLlmCache: (enabled: boolean) =>
     request<LlmCacheState>("/llm/cache", { method: "POST", body: JSON.stringify({ enabled }) }),
+  agentTabOpinionSave: (id: string, constraints?: unknown[]) =>
+    request<{ saved: string[]; constraints: unknown[] }>(`/agent-tab/opinion/${id}/save`, { method: "POST",
+      body: JSON.stringify(constraints ? { constraints } : {}) }),
   agentTabSupervisor: (runId: string, useSavedConstraints: boolean) =>
     request<{ id: string }>("/agent-tab/supervisor", { method: "POST",
       body: JSON.stringify({ run_id: runId, use_saved_constraints: useSavedConstraints }) }),

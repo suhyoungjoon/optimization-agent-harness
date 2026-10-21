@@ -8,6 +8,7 @@
 - GET  /agent-tab/history?agent=analysis     끝난 실행 목록 (다시 보기, API 호출 없음)
 - GET  /agent-tab/timeline/{agent}/{id}?after=N   요약 + 타임라인 (실행 중이면 쌓인 만큼)
 - POST /agent-tab/opinion                    의견 정리 단독 실행 (결과는 제약 확인 전 단계까지)
+- POST /agent-tab/opinion/{id}/save         정리한 제약을 사람이 확정해 저장 (LangGraph 흐름의 제약 확인과 같음, 다음 개선안이 쓴다)
 - POST /agent-tab/supervisor                 분석·개선 Supervisor 단독 실행 (M18, 결과는 판단 보고서까지. 반영하지 않는다)
 """
 
@@ -21,12 +22,13 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from core.analysis.agent import analyze
+from core.improvement.constraints import constraint_errors
 from core.improvement.memory import _proposal_change
 from core.improvement.proposer import propose
 from core.improvement.supervisor import LIMITS as SUPERVISOR_LIMITS
 from core.improvement.supervisor import supervise
-from core.llm.control import load_budget_config
 from core.llm.client import load_config
+from core.llm.control import load_budget_config
 from core.llm.events import check_event, llm_event, numbered, timeline_from_calls, timeline_from_traces, tool_event
 from core.registry import load_pack, load_params, load_perspectives
 
@@ -38,6 +40,10 @@ ROLE = {"dispatch": None, "analysis": "analysis", "proposals": "proposals", "opi
         "supervisor": "supervisor"}
 TabAgentName = Literal["dispatch", "analysis", "proposals", "opinion", "supervisor"]
 OPINION_MAX_CALLS = 6        # workflow.agents.flow.opinion_agent_graph의 max_calls와 같다
+
+
+class OpinionSaveRequest(BaseModel):
+    constraints: list[dict] | None = None   # 사람이 고친 제약 (없으면 에이전트가 정리한 그대로)
 
 
 class SupervisorRequest(BaseModel):
@@ -269,12 +275,14 @@ def register(app: FastAPI, ctx: Context, demo: bool = False) -> None:
             raise HTTPException(404, f"unknown opinion run: {oid}")
         body = run.get("body") or {}
         constraints = body.get("constraints") or []
-        output = (f"제약 {len(constraints)}개 (사람 확인 전)" if run["status"] == "done"
+        output = (f"제약 {len(constraints)}개 " + ("(확정해 저장함)" if body.get("saved") else "(사람 확인 전)")
+                  if run["status"] == "done"
                   else None if run["status"] == "running" else "제약으로 정리하지 못함")
         return {"status": run["status"], "error": run.get("error"), "events": body.get("timeline") or [],
                 "input": f"\"{run['opinion']}\" · 개선안 {run.get('proposal_id')}", "output": output,
                 "usage": _usage_summary(body.get("usage")), "graph": "opinion_agent",
-                "constraints": constraints, "problems": body.get("problems") or []}
+                "constraints": constraints, "problems": body.get("problems") or [],
+                "saved": body.get("saved") or []}     # 사람이 확정해 저장한 제약 id
 
     def _supervisor_view(sid: str) -> dict:
         run = store.get_supervisor_run(sid)
@@ -355,6 +363,44 @@ def register(app: FastAPI, ctx: Context, demo: bool = False) -> None:
             store.finish_supervisor_run(sid, body, error)
         except Exception as exc:
             store.finish_supervisor_run(sid, {"timeline": timeline}, repr(exc))
+
+    @app.post("/agent-tab/opinion/{oid}/save")
+    def save_opinion_constraints(oid: str, req: OpinionSaveRequest):
+        """정리한 제약을 사람이 확정해 저장한다. 형식은 코드가 다시 검사한다(고친 제약 포함).
+        저장한 제약은 다음 개선안 요청(저장된 제약 사용)이 불러오고, 의견은 문서 검색 색인에 현장 의견으로 남는다."""
+        run = store.get_opinion_run(oid)
+        if run is None:
+            raise HTTPException(404, f"unknown opinion run: {oid}")
+        body = run.get("body") or {}
+        if run["status"] != "done":
+            raise HTTPException(400, "제약으로 정리된 의견만 저장할 수 있음")
+        cs = [dict(c) for c in (req.constraints if req.constraints is not None else body.get("constraints") or [])
+              if isinstance(c, dict)]
+        cs = [{**c, "source": c.get("source") or "현장 의견", "note": c.get("note") or run["opinion"]} for c in cs]
+        proposal = store.get_proposal(run["proposal_id"]) if run.get("proposal_id") else None
+        report = store.get_report(proposal["report_id"]) if proposal else None
+        if not cs or report is None:
+            raise HTTPException(400, "저장할 제약이 없음" if not cs else "의견을 남긴 개선안을 찾을 수 없음")
+        rule_run, _dataset, pack, instance, _truth, decisions = _run_context(store, report["run_id"])
+        params = load_params(pack)
+        errors = constraint_errors(cs, params, sorted(pack.metrics(instance, decisions)), pack.dimensions())
+        if errors:
+            raise HTTPException(400, "제약 형식 오류: " + "; ".join(errors))
+        saved = [store.save_constraint(rule_run["domain"], c, run["opinion"], "agent-tab", params.get("version"))["id"]
+                 for c in cs]
+        if ctx.knowledge:   # 현장 의견 기록 (다음 의견 정리·개선 에이전트가 검색으로 찾는다). 색인이 없으면 건너뛴다
+            try:
+                from core.retrieval.records import opinion_chunk
+
+                retrieval = ctx.knowledge(rule_run["domain"], ["opinion"])
+                if retrieval:
+                    retrieval["index"].add(f"{rule_run['domain']}:opinion", [opinion_chunk(
+                        run["opinion"], cs, proposal["body"].get("title", ""), _proposal_change(proposal["body"]),
+                        params.get("version"))])
+            except Exception:  # noqa: BLE001 - 색인은 부가 기능 (저장은 이미 끝났다)
+                pass
+        store.finish_opinion_run(oid, {**body, "constraints": cs, "saved": saved})
+        return {"saved": saved, "constraints": cs}
 
     # --- 의견 정리 단독 실행 ---
     @app.post("/agent-tab/opinion")
