@@ -209,7 +209,7 @@ def test_supervisor_agent_runs_alone_and_replays(client):
     assert res.status_code == 202
     sid = res.json()["id"]
     t = wait_long(client, f"/agent-tab/timeline/supervisor/{sid}")
-    assert t["status"] == "done" and t["graph"] == "supervisor_agent" and t["output"].startswith("추천 1건")
+    assert t["status"] == "done" and t["graph"] == "supervisor_team" and t["output"].startswith("추천 1건")
     rec = t["recommendations"][0]
     assert rec["proposal_id"] == "P1" and rec["title"].startswith("경계 지역만") and rec["confidence"] == "중간"
     assert rec["primary"]["assignment_rate"][1] > rec["primary"]["assignment_rate"][0]
@@ -221,6 +221,12 @@ def test_supervisor_agent_runs_alone_and_replays(client):
     assert [e["name"] for e in own if e["type"] == "tool"] == ["run_analysis", "run_proposals", "simulate"]
     assert any(e["type"] == "check" and e["label"] == "판단 보고서 검사" and e["ok"] for e in own)
     assert t["usage"]["calls"] > 4                                     # 부른 에이전트의 호출 포함
+    # 대화 형식: 호출 번호마다 누가 누구에게 무엇을 (저장된 원본에서)
+    msgs = t["messages"]
+    assert [msgs[r]["to"] for r in ("c1", "c2", "c3")] == ["analysis_agent", "proposal_agent", "engine"]
+    assert msgs["c1"]["reply"].startswith("발견 ") and msgs["c1"]["report_id"] == "R1"
+    assert msgs["c2"]["reply"].startswith("개선안 3건: P1 ") and msgs["c2"]["batch"] == "B1"
+    assert msgs["c3"]["ask"] == "P1 미리 돌려보기" and msgs["c3"]["metrics"]["assignment_rate"][1] is not None
     assert "도구 호출 3회" in t["note"]
     hist = client.get("/agent-tab/history?agent=supervisor").json()
     assert hist[0]["id"] == sid and "추천 1건" in hist[0]["label"]

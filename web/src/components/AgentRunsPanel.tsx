@@ -40,6 +40,26 @@ function nodeOf(e: TimelineEvent, sub = false): string | null {
 }
 
 
+// Supervisor 팀 그림 (supervisor_team): 진행 줄 → 누가 일했는지. 서버 workflow.agents.flow.TEAM_TOOL_NODE와 같다
+const TEAM_TOOL: Record<string, string> = {
+  run_analysis: "analysis_agent", run_proposals: "proposal_agent", simulate: "engine", sweep: "engine",
+  search_knowledge: "search", submit_judgment: "check",
+};
+const SUB_AGENT: Record<string, { node: string; prefix: string; agent: TabAgent; label: string }> = {
+  analysis_agent: { node: "analysis_agent", prefix: "분석", agent: "analysis", label: "분석 에이전트" },
+  proposal_agent: { node: "proposal_agent", prefix: "개선", agent: "proposals", label: "개선 에이전트" },
+};
+function teamNode(e: TimelineEvent): string | null {
+  if (e.item) return e.item.startsWith("분석") ? "analysis_agent" : e.item.startsWith("개선") ? "proposal_agent" : null;
+  if (e.type === "llm") return "supervisor";
+  if (e.type === "tool") return TEAM_TOOL[e.name ?? ""] ?? "supervisor";
+  if (e.type === "check") return "check";
+  return null;
+}
+const isTeam = (t: AgentTabTimeline) => t.graph === "supervisor_team";
+// 그 줄이 붙을 노드 (팀 그림이면 누가 일했는지, 아니면 에이전트 내부 단계)
+const nodeFor = (t: AgentTabTimeline, e: TimelineEvent) => (isTeam(t) ? teamNode(e) : nodeOf(e, t.agent === "supervisor"));
+
 // 도구·검사는 0.1초 안에 끝나 화면이 상태를 읽는 사이(0.7초)에 지나간다. 새로 들어온 줄에 도구·검사가 있으면
 // 그 노드를 잠깐(FLASH_MS) 실행 중으로 보여 준다. 화면 표시만이고 실행 속도는 그대로다
 const FLASH_MS = 1200;
@@ -54,7 +74,7 @@ function useFlash(t: AgentTabTimeline | null): string | null {
     const fresh = t.events.slice(prev);
     const viaTools = t.agent === "supervisor";
     const hit = [...fresh].reverse().find((e) => e.type === "tool" || e.type === "check" || (viaTools && e.item));
-    const node = hit ? nodeOf(hit, viaTools) : null;
+    const node = hit ? nodeFor(t, hit) : null;
     if (!node) return;
     setFlash(node);
     const timer = setTimeout(() => setFlash(null), FLASH_MS);
@@ -68,7 +88,13 @@ function useFlash(t: AgentTabTimeline | null): string | null {
 function workingNode(t: AgentTabTimeline): string | null {
   if (!t.live) return null;
   const e = t.events[t.events.length - 1];
-  if (!e) return t.agent === "dispatch" ? "next_item" : "ai";
+  if (!e) return t.agent === "dispatch" ? "next_item" : isTeam(t) ? "supervisor" : "ai";
+  if (isTeam(t)) {   // 팀 그림: 부른 에이전트가 일하는 중이면 그 에이전트, 요청을 보냈으면 받는 쪽, 답이 왔으면 Supervisor
+    if (e.item) return teamNode(e);
+    if (e.type === "llm") return TEAM_TOOL[(e.tools ?? [])[0] ?? ""] ?? "supervisor";
+    if (e.type === "tool" || (e.type === "check" && !e.ok)) return "supervisor";
+    return teamNode(e);
+  }
   if (t.agent === "supervisor" && e.item) return "tools";          // Supervisor가 부른 에이전트가 일하는 중
   if (e.type === "llm") return (e.tools ?? []).length || /^\d+번째: (?!글로만)/.test(e.text) ? "tools" : nodeOf(e);
   if (e.type === "tool" || e.type === "item" || e.type === "nudge") return "ai";
@@ -324,7 +350,9 @@ export default function AgentRunsPanel({
           {shown && <Summary t={shown} onOpenReport={onOpenReport} onOpenBatch={onOpenBatch} />}
           {shown && shown.agent === "supervisor" && !shown.live && <SupervisorResult t={shown} adapter={adapter} />}
           {shown && graph && <InnerGraph graph={graph} t={shown} terms={terms} flash={flash} />}
-          {shown && <Timeline t={shown} terms={terms} flash={flash} />}
+          {shown && (shown.agent === "supervisor"
+            ? <SupervisorTimeline t={shown} terms={terms} flash={flash} adapter={adapter} />
+            : <Timeline t={shown} terms={terms} flash={flash} />)}
         </div>
       </div>
     </section>
@@ -379,16 +407,23 @@ function Summary({ t, onOpenReport, onOpenBatch }: {
 }
 
 // 일반 보기: 노드·연결 이름을 쉬운 말로, 노드 종류·id는 숨김. "기술 정보 보기"를 켜면 LangGraph 탭과 같은 원래 표시
-function InnerGraph({ graph, t, terms, flash }: { graph: AgentsGraph; t: AgentTabTimeline; terms: Terms; flash: string | null }) {
+function InnerGraph({ graph, t, terms, flash, title }: {
+  graph: AgentsGraph; t: AgentTabTimeline; terms: Terms; flash: string | null; title?: string;
+}) {
   const [tech, setTech] = useState(false);
+  const [picked, setPicked] = useState<string | null>(null);   // 팀 그림에서 누른 에이전트 (그 내부 그림을 아래에)
   const sub = graph.agents[t.graph];
+  const team = isTeam(t);
   const views = useMemo(() => {
     const counts: Record<string, number> = {};
     const last: Record<string, TimelineEvent> = {};
-    const viaTools = t.agent === "supervisor";
     for (const e of t.events) {
-      const n = nodeOf(e, viaTools);
+      const n = nodeFor(t, e);
       if (!n) continue;
+      if (team && e.item) {      // 부른 에이전트 안의 일은 횟수에 넣지 않는다 (요청 횟수만). 마지막 내용으로만
+        last[n] = e;
+        continue;
+      }
       counts[n] = (counts[n] ?? 0) + 1;
       last[n] = e;
     }
@@ -403,29 +438,53 @@ function InnerGraph({ graph, t, terms, flash }: { graph: AgentsGraph; t: AgentTa
       };
     }
     return out;
-  }, [sub, t.events, t.live, tech, terms, flash]);
-  const plain = useMemo(() => sub && !tech ? {
+  }, [sub, t.events, t.live, tech, terms, flash, team]);
+  // 방금 오간 선: 요청을 보냈으면 Supervisor → 받는 쪽, 답이 왔으면 보낸 쪽 → Supervisor
+  const active = useMemo(() => {
+    const out = new Set<string>();
+    const w = t.live ? flash ?? workingNode(t) : null;
+    if (team && w && w !== "supervisor") out.add(`supervisor->${w}`);
+    const e = t.events[t.events.length - 1];
+    if (team && t.live && e && !e.item && e.type === "tool") out.add(`${TEAM_TOOL[e.name ?? ""] ?? "engine"}->supervisor`);
+    return out;
+  }, [t, flash, team]);
+  const plain = useMemo(() => sub && !tech && !team ? {
     nodes: sub.nodes.map((n) => {
       const p = PLAIN_NODES[n.id];
       return p ? { ...n, label: p.label ?? n.label, description: p.description } : n;
     }),
     edges: sub.edges.map((e) => (e.label && PLAIN_EDGES[e.label] ? { ...e, label: PLAIN_EDGES[e.label] } : e)),
-  } : sub, [sub, tech]);
+  } : sub, [sub, tech, team]);
   if (!sub || !plain) return null;
+  const pickedAgent = picked ? SUB_AGENT[picked] : null;
   return (
     <div className="panel gc-panel">
-      <h3>처리 흐름{" "}
-        <span className="muted small">(지나간 단계에 횟수 표시 · 카드에 마우스를 올리면 설명{t.level ? ` · 하네스 ${t.level}` : ""}{t.live ? " · 실행 중" : ""})</span>
+      <h3>{title ?? (team ? "Supervisor와 에이전트들" : "처리 흐름")}{" "}
+        <span className="muted small">({team ? "Supervisor가 요청하고 각 에이전트·규칙 엔진이 보고한다 · 횟수는 요청 횟수 · 분석·개선 에이전트 카드를 누르면 그 안의 흐름"
+          : "지나간 단계에 횟수 표시"} · 카드에 마우스를 올리면 설명{t.level ? ` · 하네스 ${t.level}` : ""}{t.live ? " · 실행 중" : ""})</span>
         <label className="small gc-tech-toggle" title="노드 종류·id와 원래 이름을 보여 준다 (LangGraph 탭과 같은 표시)">
           <input type="checkbox" checked={tech} onChange={(e) => setTech(e.target.checked)} /> 기술 정보 보기
         </label>
       </h3>
       <GraphCanvas ariaLabel="에이전트 내부 그래프" nodes={plain.nodes} edges={plain.edges} views={views} showIds={tech}
-        height={300} nodeWidth={150} nodeHeight={tech ? 66 : 56} minFitZoom={0.55} padding={0.2} />
+        activeEdges={active} height={team ? 340 : 300} nodeWidth={150} nodeHeight={tech ? 66 : 56} minFitZoom={0.55} padding={0.2}
+        onNodeClick={team ? (id) => setPicked(SUB_AGENT[id] ? (picked === id ? null : id) : null) : undefined} />
       <p className="muted small gc-legend">
-        실선: 항상 이어지는 단계 · 점선: 상황에 따라 고르는 갈림길(선 이름이 조건) · 아래로 도는 선: 앞 단계로 되돌아감(마우스를 올리면 이름)
-        {t.live ? " · 파랗게 채운 카드: 지금 실행 중인 단계 · 굵게 움직이는 선: 방금 지나간 길" : ""}
+        {team
+          ? "Supervisor에서 나가는 선: 요청(분석 요청·개선 요청·미리 돌려보기·검색·판단 보고서) · 돌아오는 선: 보고(마우스를 올리면 이름) · 점선: Supervisor가 그때그때 고르는 요청"
+          : "실선: 항상 이어지는 단계 · 점선: 상황에 따라 고르는 갈림길(선 이름이 조건) · 아래로 도는 선: 앞 단계로 되돌아감(마우스를 올리면 이름)"}
+        {t.live ? (team ? " · 파랗게 채운 카드: 지금 일하는 쪽 · 굵게 움직이는 선: 방금 오간 요청·보고"
+          : " · 파랗게 채운 카드: 지금 실행 중인 단계 · 굵게 움직이는 선: 방금 지나간 길") : ""}
       </p>
+      {pickedAgent && graph.agents[pickedAgent.node] && (() => {
+        // 누른 에이전트의 내부 흐름: Supervisor가 부를 때마다 쌓인 그 에이전트의 진행 줄만 (분석 R1, R2 … 모두)
+        const mine = t.events.filter((e) => e.item?.startsWith(pickedAgent.prefix));
+        const last = t.events[t.events.length - 1];
+        const inner: AgentTabTimeline = { ...t, agent: pickedAgent.agent, graph: pickedAgent.node, events: mine,
+          live: t.live && !!last?.item?.startsWith(pickedAgent.prefix) };
+        return <InnerGraph graph={graph} t={inner} terms={terms} flash={null}
+          title={`${pickedAgent.label} 내부 (Supervisor가 부른 ${new Set(mine.map((e) => e.item)).size}번 모두)`} />;
+      })()}
     </div>
   );
 }
@@ -609,6 +668,117 @@ function OpinionResult({ t }: { t: AgentTabTimeline }) {
         </p>
       ))}
       {err && <p className="critical-text">✕ {err}</p>}
+    </div>
+  );
+}
+
+// Supervisor 진행 기록 (대화 형식): Supervisor → 받는 쪽 요청, 그 쪽의 진행(접힘), 받는 쪽 → Supervisor 보고.
+// 저장된 실행은 서버가 원본에서 만든 messages를, 실행 중에는 진행 줄을 쓴다.
+const TEAM_LABEL: Record<string, string> = {
+  supervisor: "Supervisor", analysis_agent: "분석 에이전트", proposal_agent: "개선 에이전트", engine: "규칙 엔진",
+  search: "문서 검색", check: "보고서 검사",
+};
+
+function SupervisorTimeline({ t, terms, flash, adapter }: {
+  t: AgentTabTimeline; terms: Terms; flash: string | null; adapter: DomainAdapter;
+}) {
+  const ref = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el && t.live) el.scrollTop = el.scrollHeight;
+  }, [t.events.length, t.live]);
+  // 부른 에이전트의 진행: item("분석 R1", "개선 B1") → 줄들. 같은 종류는 부른 순서대로
+  const subs = useMemo(() => {
+    const byItem = new Map<string, TimelineEvent[]>();
+    for (const e of t.events) if (e.item) byItem.set(e.item, [...(byItem.get(e.item) ?? []), e]);
+    return byItem;
+  }, [t.events]);
+  const order = (prefix: string) => [...subs.keys()].filter((k) => k.startsWith(prefix));
+  const headline = adapter.metrics.filter((m) => m.headline || m.primary);
+  const fmt = (k: string, v: number | null) => {
+    const f = adapter.metrics.find((m) => m.key === k)?.format;
+    return v == null ? "–" : f ? fmtMetric(v, f) : v.toFixed(2);
+  };
+  const working = t.live ? flash ?? workingNode(t) : null;
+  const own = t.events.filter((e) => !e.item);
+  const seen: Record<string, number> = {};
+  const rows: JSX.Element[] = [];
+  const subDetails = (to: string, key: string) => {
+    const prefix = to === "analysis_agent" ? "분석" : to === "proposal_agent" ? "개선" : null;
+    if (!prefix) return null;
+    const i = seen[prefix] = (seen[prefix] ?? -1) + 1;
+    const item = order(prefix)[i];
+    const evs = item ? subs.get(item) ?? [] : [];
+    if (!evs.length) return null;
+    return (
+      <li key={`${key}-sub`} className="tl-subgroup">
+        <details open={t.live && working === to}>
+          <summary className="muted small">{TEAM_LABEL[to]} 진행 {evs.length}줄 ({item})</summary>
+          <ol className="agent-timeline">
+            {evs.map((e) => <TimelineRow key={e.seq} e={{ ...e, item: undefined }} terms={terms} showItem={false} nested />)}
+          </ol>
+        </details>
+      </li>
+    );
+  };
+  own.forEach((e, idx) => {
+    const turn = e.turn ? <span className="tl-turn" title={`Supervisor의 ${e.turn}번째 응답`}>{e.turn}번째</span> : <span className="tl-turn" />;
+    if (e.type === "llm") {
+      const asked = e.tools ?? [];
+      if (!asked.length) {
+        rows.push(<li key={e.seq} className="tl-msg">{turn}<span className="tl-kind">Supervisor</span> 도구 없이 글로만 답함<Raw e={e} /></li>);
+        return;
+      }
+      // 실행 중이고 아직 보고가 오지 않은 요청: 받는 쪽이 일하는 중
+      const answered = own.slice(idx + 1).some((x) => x.type === "tool" || x.type === "check");
+      if (t.live && !answered) {
+        asked.forEach((name, j) => {
+          const to = TEAM_TOOL[name] ?? "supervisor";
+          rows.push(<li key={`${e.seq}-p${j}`} className="tl-msg tl-ask">{turn}
+            <span className="tl-kind">Supervisor → {TEAM_LABEL[to]}</span> {terms.tool(name)}
+            <span className="muted"> · {TEAM_LABEL[to]}가 일하는 중…</span></li>);
+          const d = subDetails(to, `${e.seq}-p${j}`);
+          if (d) rows.push(d);
+        });
+      }
+      return;
+    }
+    if (e.type === "tool") {
+      const m = t.messages?.[e.ref ?? ""];
+      const to = m?.to ?? TEAM_TOOL[e.name ?? ""] ?? "supervisor";
+      const ask = m?.ask ?? (terms.args(e.input) || terms.tool(e.name ?? ""));
+      const where = m?.slice ? ` · 구간: ${terms.args(JSON.stringify(m.slice))}` : "";
+      rows.push(<li key={`${e.seq}-a`} className="tl-msg tl-ask">{turn}
+        <span className="tl-kind">Supervisor → {TEAM_LABEL[to]}</span> {ask}{where}</li>);
+      const d = subDetails(to, String(e.seq));
+      if (d) rows.push(d);
+      const metrics = m?.metrics ? headline.filter((h) => m.metrics?.[h.key]).map((h) => {
+        const [b, a] = m.metrics![h.key];
+        return `${h.label} ${fmt(h.key, b)} → ${fmt(h.key, a)}`;
+      }).join(" · ") : "";
+      rows.push(<li key={`${e.seq}-r`} className={"tl-msg tl-reply" + (e.ok === false ? " tl-bad" : "")}><span className="tl-turn" />
+        <span className="tl-kind">{TEAM_LABEL[to]} → Supervisor</span> {m?.reply ?? (e.ok === false ? "오류" : "결과 받음")}
+        {metrics && <span className="tl-io"> · {metrics}</span>}<Raw e={e} /></li>);
+      return;
+    }
+    if (e.type === "check") {
+      const c = terms.check(e);
+      rows.push(<li key={e.seq} className={`tl-msg tl-${c.tone}`}>{turn}
+        <span className="tl-kind">보고서 검사 → Supervisor</span> {c.tone === "ok" ? "✓ 통과" : `✕ 반려: ${c.detail}`}<Raw e={e} /></li>);
+      return;
+    }
+    if (e.type === "end") rows.push(<li key={e.seq} className="tl-end muted"><span className="tl-turn" />{terms.end(e)}</li>);
+  });
+  return (
+    <div className="panel">
+      <h3>진행 기록 <span className="muted small">(Supervisor와 에이전트들이 주고받은 요청·보고 · 각 에이전트의 세부 진행은 접혀 있음{t.live ? " · 실행 중 한 줄씩 쌓임" : ""})</span></h3>
+      {t.events.length === 0 && <p className="muted small">{t.live ? "Supervisor의 첫 판단을 기다리는 중…" : "기록이 없습니다."}</p>}
+      <ol className="agent-timeline" ref={ref}>
+        {rows}
+        {t.live && working === "supervisor" && !flash && own.length > 0 && (
+          <li className="tl-thinking muted"><span className="tl-turn" /><span className="tl-kind">Supervisor</span>생각하는 중…</li>
+        )}
+      </ol>
     </div>
   );
 }

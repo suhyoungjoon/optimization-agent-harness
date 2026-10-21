@@ -150,7 +150,7 @@ export function makeTerms(adapter: DomainAdapter, dims?: Dimensions): Terms {
       const obj = JSON.parse(input);
       if (!obj || typeof obj !== "object" || Array.isArray(obj)) return "";
       return Object.entries(obj).filter(([, v]) => v != null && v !== "")
-        .map(([k, v]) => `${argNames[k] ?? k} ${value(v)}`).join(" · ");
+        .map(([k, v]) => `${argNames[k] ?? fieldLabels[k] ?? k} ${value(v)}`).join(" · ");
     } catch {
       return "";
     }

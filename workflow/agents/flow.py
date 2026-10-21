@@ -361,6 +361,46 @@ def supervisor_agent_graph(ctx: AgentContext):
                             check_label="판단 보고서 검사")
 
 
+# Supervisor 팀 그림 (에이전트 탭): Supervisor가 다른 에이전트·계산 도구와 주고받는 모양. 실행 코드는 그대로이고,
+# 노드 id는 화면이 진행 기록을 노드에 붙일 때 쓴다 (core.improvement.supervisor의 도구 이름 → 노드)
+TEAM_NODES = {
+    "supervisor": {"label": "Supervisor", "kind": "ai",
+                   "description": "다음에 할 일을 정한다: 누구에게 무엇을 요청할지, 결과를 보고 무엇을 새로 알았는지, 언제 보고할지"},
+    "analysis_agent": {"label": "분석 에이전트", "kind": "ai", "agent": True,
+                       "description": "요청받은 관점·질문·구간으로 실행 결과를 분석해 발견(구간·원인 가설)을 보고한다"},
+    "proposal_agent": {"label": "개선 에이전트", "kind": "ai", "agent": True,
+                       "description": "요청받은 발견·초점으로 규칙 개선안을 만들어 보고한다 (코드가 안마다 적용 가능 여부 검사)"},
+    "engine": {"label": "규칙 엔진", "kind": "rule",
+               "description": "개선안을 미리 돌려보고(지표 전후·제약·최소 변경·진단 신호) 파라미터를 훑는다. AI 비용 0"},
+    "search": {"label": "문서 검색", "kind": "tool", "description": "운영 규정·과거 사례·현장 의견을 찾는다 (있을 때)"},
+    "check": {"label": "보고서 검사", "kind": "check",
+              "description": "판단 보고서를 코드가 검사한다: 미리 돌려본 적용 가능한 안만 추천, 근거 수치는 인용한 결과에 있어야 함"},
+}
+TEAM_TOOL_NODE = {"run_analysis": "analysis_agent", "run_proposals": "proposal_agent", "simulate": "engine",
+                  "sweep": "engine", "search_knowledge": "search", "submit_judgment": "check"}
+TEAM_ASK = {"analysis_agent": "분석 요청", "proposal_agent": "개선 요청", "engine": "미리 돌려보기·훑기",
+            "search": "검색", "check": "판단 보고서"}
+TEAM_REPLY = {"analysis_agent": "발견 보고", "proposal_agent": "개선안 보고", "engine": "지표·진단 신호",
+              "search": "검색 결과"}
+
+
+class _TeamState(TypedDict, total=False):
+    step: str
+
+
+def supervisor_team_graph():
+    """그림 전용 (실행하지 않는다)."""
+    g = StateGraph(_TeamState)
+    for node, meta in TEAM_NODES.items():
+        g.add_node(node, lambda s: {}, metadata=meta)
+    g.add_edge(START, "supervisor")
+    g.add_conditional_edges("supervisor", lambda s: "", {TEAM_ASK[n]: n for n in TEAM_ASK})
+    for node, label in TEAM_REPLY.items():
+        g.add_conditional_edges(node, lambda s: "", {label: "supervisor"})
+    g.add_conditional_edges("check", lambda s: "", {"통과": END, "반려 → 고쳐 오기": "supervisor"})
+    return g.compile()
+
+
 def _supervisor_event(ctx: AgentContext):
     """supervise()의 진행(core.llm.events 형식) → 상위 그래프 화면의 내부 진행 기록 (supervisor_agent 노드)."""
     def emit(e: dict) -> None:
@@ -971,6 +1011,7 @@ def describe_all(levels: dict[str, Level], level: str, perspectives: list[dict] 
         n.get("agent") for n in describe(flow)["nodes"] if n["id"] == "check_end") else {}
     if mode == "supervisor":
         agents["supervisor_agent"] = describe(supervisor_agent_graph(ctx))
+        agents["supervisor_team"] = describe(supervisor_team_graph())   # 에이전트 탭: Supervisor와 다른 에이전트가 주고받는 그림
     return {"top": describe(flow), "end_check": "supervisor" if "check_end" in agents else "fixed",
             "mode": mode or "fixed",
             "agents": {"dispatch_agent": describe(build_dispatch_agent(ctx, levels[level])),

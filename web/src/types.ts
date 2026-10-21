@@ -651,6 +651,7 @@ export interface AgentTabTimeline {
   constraints?: unknown[];
   problems?: string[];
   saved?: string[];                         // 의견 정리: 사람이 확정해 저장한 제약 id
+  messages?: Record<string, TeamMessage>;   // Supervisor: 호출 번호 → 누가 누구에게 무엇을 (저장된 실행만)
   item_labels?: Record<string, string>;   // 관점별 분석: 관점 id → 이름
   // Supervisor (M18): 판단 보고서와 추천안 (코드가 돌린 미리 돌려보기 요약)
   judgment?: Omit<JudgmentView, "recommendation" | "diagnosis"> | null;
@@ -684,3 +685,9 @@ export interface ProposalOutcome {
 }
 // AI 응답 캐시 (서버 전체, 켜고 끄기)
 export interface LlmCacheState { enabled: boolean; demo: boolean; source: string }
+// Supervisor 대화 한 쌍 (에이전트 탭): Supervisor가 보낸 요청과 받은 보고
+export interface TeamMessage {
+  ref: string; tool: string; to: string; ok: boolean; ask?: string; reply: string;
+  slice?: Record<string, string[]> | null; change?: Record<string, unknown> | null;
+  report_id?: string; batch?: string; metrics?: Record<string, [number | null, number | null]>; worsened?: string[];
+}
