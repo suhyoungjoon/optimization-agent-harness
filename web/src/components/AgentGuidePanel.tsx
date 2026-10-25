@@ -140,6 +140,20 @@ const AGENT_HARNESS: { name: string; note?: string; cells: Record<(typeof LAYERS
   } },
 ];
 
+// 문서 검색 (RAG, M15-C): 숫자는 집계 도구가, 문장으로 된 지식(규정·사례·의견)은 검색 도구가 맡는다
+const RAG_KINDS: [string, string, string][] = [
+  ["가상 운영 규정", "출동 반경·관할 · 자격·인증 · 근무시간 · 안전, 4분야 × 5조항 (가상 문서, 실제 규정 아님)", "레포에 커밋된 문서"],
+  ["과거 사례", "이전 회차의 발견 → 개선안 → 미리 돌려보기 → 승인·반려와 그 사유", "사람이 승인·반려할 때마다 쌓임"],
+  ["현장 의견", "사람이 남긴 의견 한 줄과 그걸 정리해 확정한 제약", "의견 정리 결과를 확정할 때마다 쌓임"],
+];
+const RAG_USERS: [string, string][] = [
+  ["배정", "쓰지 않음"],
+  ["분석", "과거 사례 (사례가 있을 때만, 관점별 분석에는 아직 없음)"],
+  ["개선", "규정 · 사례 · 의견"],
+  ["의견 정리", "규정 · 의견"],
+  ["Supervisor", "규정 · 사례 · 의견 (직접 검색하고, 부른 개선 에이전트도 검색)"],
+];
+
 const FLAG_NAMES: Record<string, string> = { spec: "규칙 문서", tools: "조회 도구", validate_loop: "검증 루프", guardrail: "가드레일" };
 
 // LangGraph 하위 그래프 (에이전트마다 내부를 노드와 연결로)
@@ -261,6 +275,39 @@ export default function AgentGuidePanel({ harness }: { harness?: HarnessInfo | n
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div className="panel">
+        <h3>문서 검색 (RAG)</h3>
+        <p className="small">
+          숫자는 지금처럼 <strong>집계 도구</strong>가 맡고, 문장으로 된 지식(규정 · 과거 사례 · 현장 의견)은 <strong>검색 도구</strong>가 맡는다.
+          문서를 미리 프롬프트에 넣지 않고, 에이전트가 필요할 때 "운영 규정·사례 문서 찾기"를 부른다.
+        </p>
+        <h4>무엇을 찾는가</h4>
+        <table className="guide-table">
+          <thead><tr><th>종류</th><th>내용</th><th>어디서 오나</th></tr></thead>
+          <tbody>{RAG_KINDS.map(([k, v, w]) => <tr key={k}><td><strong>{k}</strong></td><td>{v}</td><td className="muted">{w}</td></tr>)}</tbody>
+        </table>
+        <h4>어떻게 찾는가</h4>
+        <ul className="small">
+          <li><strong>키워드 검색</strong>(BM25)과 <strong>뜻으로 찾는 검색</strong>(임베딩 벡터, Azure <code>text-embedding-3-small</code>)을 함께 돌려 순위를 합친다(RRF).
+            임베딩을 쓸 수 없으면 키워드 검색만 쓴다.</li>
+          <li>조항 하나 = 조각 하나. 분야 · 관련 파라미터 · 구간으로 좁혀 찾을 수 있다. 문서를 고치면 바뀐 조각만 다시 색인한다.</li>
+        </ul>
+        <h4>누가 쓰는가</h4>
+        <dl className="guide-io guide-safe">
+          {RAG_USERS.map(([k, v]) => <div key={k} className="guide-safe-row"><dt>{k}</dt><dd>{v}</dd></div>)}
+        </dl>
+        <h4>코드가 지키는 것</h4>
+        <ul className="small">
+          <li>근거로 인용한 문서(예: 규정 <code>DIST-01</code>)는 <strong>그 실행에서 검색 결과로 받은 것만</strong> 인정한다. 아니면 개선안은 "적용 불가", 의견 정리는 사람에게 다시 묻는다.</li>
+          <li>문서는 숫자 근거가 되지 않는다. 지표 숫자의 근거는 여전히 집계·미리 돌려보기 결과만 인정한다.</li>
+          <li>쓴 조각과 해시, 인용한 조각, 검색 방식이 결과에 남아 같은 조건으로 다시 확인할 수 있다.</li>
+        </ul>
+        <p className="muted small">
+          실험(실험 보고서 6.14절): 같은 분석으로 개선안을 만들 때 검색을 켜면 <strong>규정을 어기는 개선안이 0건</strong>이었다(끄면 묶음당 1.4~1.8건).
+          대신 규정 한도 안에서만 제안해 개선폭이 작아지고, 한 번에 20~40초 늘었다.
+        </p>
       </div>
 
       <div className="panel">
