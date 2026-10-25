@@ -619,3 +619,7 @@ input.approver { width: 9em; }
 .guide-mode { display: flex; gap: 6px; margin: 6px 0 8px; }
 @media (max-width: 640px) { .guide-table { display: block; overflow-x: auto; } }
 .guide-table th:first-child, .guide-table td:first-child { white-space: nowrap; }
+.guide-table-wrap { overflow-x: auto; }
+.guide-matrix { min-width: 860px; }
+.guide-matrix th[scope="row"] { white-space: nowrap; background: var(--surface-2, transparent); }
+.guide-matrix td { font-size: 12px; }

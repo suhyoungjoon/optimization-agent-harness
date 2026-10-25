@@ -97,6 +97,49 @@ const LEVELS: { level: string; adds: string; does: string; nodes: string }[] = [
   { level: "L4", adds: "가드레일", does: "위반이 남은 결정은 막고, 승인이 필요한 결정은 사람 확인 대기로 돌린다", nodes: "+ 위험 결정 확인" },
   { level: "L5", adds: "관측성", does: "AI 응답·도구·검사 단계를 모두 기록해 나중에 그대로 다시 본다", nodes: "+ 과정 저장" },
 ];
+// 다른 에이전트의 하네스: 같은 다섯 층(L1~L5)이 에이전트마다 어떻게 들어가 있는가. 배정은 레벨로 켜고 끄고, 나머지는 늘 켜져 있다
+const LAYERS = ["컨텍스트", "도구", "검증 루프", "가드레일", "관측성"] as const;
+const LAYER_LEVEL: Record<(typeof LAYERS)[number], string> = {
+  컨텍스트: "L1", 도구: "L2", "검증 루프": "L3", 가드레일: "L4", 관측성: "L5",
+};
+const AGENT_HARNESS: { name: string; note?: string; cells: Record<(typeof LAYERS)[number], string> }[] = [
+  { name: "배정", note: "레벨로 켜고 끔", cells: {
+    컨텍스트: "업무 규칙 문서 (필수 조건·우선순위)",
+    도구: "지시서·작업자·일정·이동 시간 조회, 배정 가능 여부 확인",
+    "검증 루프": "규칙 위반 검사 → 사유를 알려 다시 결정 (최대 2번)",
+    가드레일: "위반 결정 차단, 승인 필요 결정은 대기",
+    관측성: "지시서마다 AI 응답·도구·검사 단계 기록 (L5)",
+  } },
+  { name: "분석", note: "늘 켜짐", cells: {
+    컨텍스트: "차원·지표 설명, 관점 질문, 사람의 이전 판정(기억)",
+    도구: "집계 도구 (요약·묶어 세기·목록·시간대 수요·가동 현황)",
+    "검증 루프": "근거 검사: 숫자가 인용한 집계 결과에 없으면 한 번 고쳐 오게",
+    가드레일: "그래도 근거 없는 발견은 '근거 부족'으로 빼 둠, 없는 구간 값은 지움",
+    관측성: "도구 호출 번호(c1, c2 …)·진행 기록·사용량을 리포트에 저장",
+  } },
+  { name: "개선", note: "늘 켜짐", cells: {
+    컨텍스트: "분석 리포트, 규칙 설정값·바꿀 수 있는 범위, 업무 규칙 문서, 제약, 반려 기억",
+    도구: "설정값·설명서 보기, 설정을 바꿔 미리 돌려보기, 규정·사례 검색",
+    "검증 루프": "제출한 안마다 코드 검사 (바꿀 수 있는 값·범위·분류, 규정 인용)",
+    가드레일: "통과 못 한 안은 '적용 불가', 제약 어긴 안은 순위 뒤로, 승인 없이는 반영 안 함",
+    관측성: "도구 호출·미리 돌려보기 횟수·진행 기록을 개선안 묶음에 저장",
+  } },
+  { name: "의견 정리", note: "늘 켜짐", cells: {
+    컨텍스트: "의견 한 줄, 그 개선안의 변경, 이미 있는 제약",
+    도구: "설정값 보기, 규정·의견 검색",
+    "검증 루프": "제약 형식 검사 → 한 번 고쳐 오게, 안 되면 사람에게 다시 묻기",
+    가드레일: "한도 숫자는 의견에 있는 것만, 사람이 확정해야 저장",
+    관측성: "실행 기록·정리한 제약·진행 기록 저장",
+  } },
+  { name: "Supervisor", note: "켜고 끔", cells: {
+    컨텍스트: "실행 결과 요약, 핵심 지표·목표, 제약, 이전 회차의 판단과 결과",
+    도구: "분석·개선 에이전트, 미리 돌려보기(진단 신호)·훑기, 문서 검색",
+    "검증 루프": "판단 보고서 검사 → 한 번 고쳐 오게, 안 되면 '해결 불가'",
+    가드레일: "미리 돌려본 적용 가능한 안만 추천, 호출 상한(40·3·4)·예산, 규칙 변경 도구 없음",
+    관측성: "시도 기록·에이전트와 주고받은 요청·보고를 저장",
+  } },
+];
+
 const FLAG_NAMES: Record<string, string> = { spec: "규칙 문서", tools: "조회 도구", validate_loop: "검증 루프", guardrail: "가드레일" };
 
 // LangGraph 하위 그래프 (에이전트마다 내부를 노드와 연결로)
@@ -174,7 +217,8 @@ export default function AgentGuidePanel({ harness }: { harness?: HarnessInfo | n
       </div>
 
       <div className="panel">
-        <h3>하네스: 배정 에이전트에 붙이는 장치</h3>
+        <h3>하네스: 에이전트에 붙이는 장치</h3>
+        <h4>배정 에이전트: 레벨 L0~L5로 하나씩 더하며 비교</h4>
         <p className="small">
           같은 AI 모델이라도 무엇을 주고 어떻게 검사하느냐(하네스)에 따라 결과가 달라진다. 배정 에이전트를 레벨 L0~L5로 하나씩 장치를 더해 가며
           규칙 방식과 비교한다. 레벨은 코드 분기가 아니라 설정 파일(<code>configs/harness_levels.yaml</code>)의 켜고 끄는 값이다.
@@ -195,8 +239,28 @@ export default function AgentGuidePanel({ harness }: { harness?: HarnessInfo | n
             })}
           </tbody>
         </table>
-        <p className="muted small">분석 · 개선 · 의견 정리 · Supervisor는 레벨과 상관없이 늘 도구를 쓰고, 제출물을 코드가 검사하며, 아래 공통 안전장치가 붙는다.
-          어느 레벨이든 최종 결정은 사후 채점을 위해 코드가 다시 검사한다.</p>
+        <p className="muted small">어느 레벨이든 최종 결정은 사후 채점을 위해 코드가 다시 검사한다 (결과에는 반영하지 않음).</p>
+
+        <h4>다른 에이전트에도 같은 다섯 층이 들어가 있다</h4>
+        <p className="small">
+          분석·개선·의견 정리·Supervisor는 레벨로 나누지 않고 다섯 층이 늘 켜져 있다. 층마다 무엇을 주고, 무엇으로 찾아보게 하고,
+          무엇을 코드가 검사·차단하고, 무엇을 남기는지가 에이전트에 맞게 다르다. 모든 에이전트에는 아래 공통 안전장치(반복·도구 실패·예산)도 붙는다.
+        </p>
+        <div className="guide-table-wrap">
+          <table className="guide-table guide-matrix">
+            <thead>
+              <tr><th>층</th>{AGENT_HARNESS.map((a) => <th key={a.name}>{a.name}{a.note && <span className="muted small"> ({a.note})</span>}</th>)}</tr>
+            </thead>
+            <tbody>
+              {LAYERS.map((layer) => (
+                <tr key={layer}>
+                  <th scope="row">{layer}<span className="muted small"> {LAYER_LEVEL[layer]}</span></th>
+                  {AGENT_HARNESS.map((a) => <td key={a.name}>{a.cells[layer]}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="panel">
