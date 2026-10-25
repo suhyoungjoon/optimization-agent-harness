@@ -14,14 +14,16 @@ import type { CompareSummary, Dataset, DecisionRecord, DemoCatalogEntry, DomainI
 const WorkflowPanel = lazy(() => import("./components/WorkflowPanel"));
 const AgentsPanel = lazy(() => import("./components/AgentsPanel"));
 const AgentRunsPanel = lazy(() => import("./components/AgentRunsPanel"));
+const AgentGuidePanel = lazy(() => import("./components/AgentGuidePanel"));
 
-type Tab = "domain" | "compare" | "trace" | "analysis" | "improve" | "agentRuns" | "workflow" | "agents";
+type Tab = "domain" | "compare" | "trace" | "analysis" | "improve" | "guide" | "agentRuns" | "workflow" | "agents";
 const TABS: { id: Tab; term: TermKey; milestone?: string }[] = [
   { id: "domain", term: "tabDomain" },
   { id: "compare", term: "tabCompare" },
   { id: "trace", term: "tabTrace" },
   { id: "analysis", term: "tabAnalysis" },
   { id: "improve", term: "tabImprove" },
+  { id: "guide", term: "tabGuide" },
   { id: "agentRuns", term: "tabAgentRuns" },
   { id: "workflow", term: "tabWorkflow" },
   { id: "agents", term: "tabAgents" },
@@ -325,6 +327,11 @@ export default function App() {
           <Suspense fallback={<p className="muted">불러오는 중…</p>}>
             <WorkflowPanel domain={domain} adapter={adapter} harness={harness} seed={seed} faults={faults} level={level}
             onAdopt={adoptWorkflow} />
+          </Suspense>
+        )}
+        {tab === "guide" && (
+          <Suspense fallback={<p className="muted">에이전트 소개 불러오는 중…</p>}>
+            <AgentGuidePanel harness={harness} />
           </Suspense>
         )}
         {domain && adapter && tab === "agentRuns" && (
