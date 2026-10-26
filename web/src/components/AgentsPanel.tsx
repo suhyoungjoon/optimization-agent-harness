@@ -8,6 +8,8 @@ import { constraintText } from "./ImprovementPanel";
 import { TERMS, tip } from "../terms";
 import GraphCanvas, { type NodeView } from "./GraphCanvas";
 import { usePoll } from "./usePoll";
+import { useStoredId } from "./useStoredId";
+import { opinionChips } from "./opinionHelp";
 import { StepBar, type StepAction } from "./WorkflowPanel";
 
 // LangGraph agents (M10, 가로 그래프 M11): 배정·분석·개선 제안 에이전트의 내부까지 LangGraph 하위 그래프로 만든 별도 탭.
@@ -51,7 +53,7 @@ export default function AgentsPanel({
   // 실제 AI 이름: 서버 설정의 제공사·모델 (값 "claude"는 API 계약상 이름이고 제공사는 서버 설정이 정한다)
   const realAi = `${PROVIDER_LABEL[harness?.llm.provider ?? "anthropic"] ?? harness?.llm.provider} ${harness?.llm.model ?? ""}`.trim();
   const [graph, setGraph] = useState<AgentsGraph | null>(null);
-  const [flowId, setFlowId] = useState<string | null>(null);
+  const [flowId, setFlowId] = useStoredId("oah.agents.flowId", (id) => api.agentsGet(id));   // 탭을 옮겨도 이어서
   const [run, setRun] = useState<AgentsRun | null>(null);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const lastI = useRef(-1);
@@ -231,6 +233,7 @@ export default function AgentsPanel({
       <StepBar run={run} nextLabel={run?.next[0] ? topLabel(run.next[0]) : null}
         currentLabel={run?.current ? topLabel(run.current) : null} note={note} setNote={setNote} onStep={step}
         approval={run?.approval ?? null}
+        opinionChips={run?.approval && !run.approval.kind ? opinionChips(run.approval.opinion_hints, adapter) : undefined}
         idleText="입력을 고르고 [에이전트 준비]를 누르면 첫 단계 앞에서 멈춥니다. 에이전트 하나가 끝날 때마다 멈춥니다."
         doneText="그래프의 노드를 누르면 그 단계의 결과와 에이전트 내부를 다시 볼 수 있습니다." />
       )}
@@ -306,6 +309,43 @@ function StepResult({ run, node, description }: { run: AgentsRun | null; node: s
 }
 
 // 고른 에이전트의 내부 그래프(하위 그래프): 노드별 지나간 횟수, 지금 노드, 방금 지나간 연결
+// 실행 중 지금 일하는 노드. 진행 기록은 일이 끝난 뒤에 쌓여서(AI 판단 줄은 응답이 와야 생김) 마지막 줄의 노드를
+// 강조하면 한 단계 늦게 보인다 (AI가 생각하는 동안 '도구 사용'이 강조됨). 마지막 줄의 다음 차례를 본다
+const SUBMIT_LIKE = /^(submit_|choose_next_step)/;
+function workingNode(mine: AgentEvent[], dispatch: boolean): string | null {
+  const e = mine[mine.length - 1];
+  if (!e) return dispatch ? "next_item" : "ai";
+  if (/^(분석|개선) [RB]\d+ · /.test(e.text)) return "tools";      // Supervisor가 부른 에이전트가 일하는 중
+  if (e.node === "ai") {
+    const m = /^\d+번째: (.+)$/.exec(e.text);
+    const names = m && m[1] !== "글로만 답함" ? m[1].split(", ") : [];
+    if (!names.length) return "nudge";
+    if (names.every((n) => SUBMIT_LIKE.test(n))) return dispatch ? "submit" : "check";
+    return "tools";
+  }
+  if (["tools", "next_item", "retry", "nudge"].includes(e.node)) return "ai";
+  if (e.node === "check" && e.text.startsWith("✕")) return "ai";             // 반려 → 고쳐 오게
+  return e.node;
+}
+
+// 도구·검사는 0.1초 안에 끝나 화면이 상태를 읽는 사이에 지나간다. 새로 들어온 줄에 있으면 1.2초 보여 준다 (표시만)
+const FLASH_MS = 1200;
+function useFlash(mine: AgentEvent[], live: boolean): string | null {
+  const [flash, setFlash] = useState<string | null>(null);
+  const seen = useRef(mine.length);
+  useEffect(() => {
+    const prev = seen.current;
+    seen.current = mine.length;
+    if (!live || mine.length <= prev) return;
+    const hit = [...mine.slice(prev)].reverse().find((e) => ["tools", "check", "validate", "guardrail", "submit"].includes(e.node));
+    if (!hit) return;
+    setFlash(hit.node);
+    const timer = setTimeout(() => setFlash(null), FLASH_MS);
+    return () => clearTimeout(timer);
+  }, [mine.length, live]); // eslint-disable-line react-hooks/exhaustive-deps
+  return live ? flash : null;
+}
+
 function AgentInside({ graph, agent, run, events, live }: {
   graph: AgentsGraph | null;
   agent: string;
@@ -315,23 +355,27 @@ function AgentInside({ graph, agent, run, events, live }: {
 }) {
   // 미리 돌려보기는 배정 에이전트 하위 그래프를 다시 쓴다
   const sub = graph?.agents[agent === "simulate" ? "dispatch_agent" : agent];
-  if (!sub) return null;
   const mine = events.filter((e) => e.agent === agent);
+  const flash = useFlash(mine, live);
+  if (!sub) return null;
   const last = mine[mine.length - 1];
   const prev = mine[mine.length - 2];
+  const dispatchLike = agent === "dispatch_agent" || agent === "simulate";
+  const working = live ? flash ?? workingNode(mine, dispatchLike) : null;
   const counts = run?.counts[agent] ?? {};
   const views: Record<string, NodeView> = {};
   for (const n of sub.nodes) {
     const visits = counts[n.id] ?? 0;
     views[n.id] = {
-      state: live && last?.node === n.id ? "running" : visits ? "done" : "idle",
+      state: working === n.id ? "running" : visits ? "done" : "idle",
       badge: visits ? `${visits}회` : undefined,
       summary: [...mine].reverse().find((e) => e.node === n.id)?.text,
     };
   }
   const active = new Set<string>();
-  if (last && prev) active.add(`${prev.node}->${last.node}`);
-  if (last && !prev) active.add(`__start__->${last.node}`);
+  if (last && working && working !== last.node) active.add(`${last.node}->${working}`);   // 지금 넘어가는 길
+  else if (last && prev) active.add(`${prev.node}->${last.node}`);
+  else if (last) active.add(`__start__->${last.node}`);
   const dispatch = agent === "dispatch_agent" || agent === "simulate";
   return (
     <div className="panel gc-panel">
@@ -341,12 +385,12 @@ function AgentInside({ graph, agent, run, events, live }: {
       </h2>
       <p className="muted small">
         {dispatch
-          ? "지시서마다 이 그래프를 한 바퀴 돈다. 레벨을 올리면 조회 도구 → 자동 검사·다시 시도 → 위험 결정 막기 → 과정 저장 노드가 붙는다."
+          ? "지시서마다 이 그래프를 한 바퀴 돈다. 레벨을 올리면 도구 사용 → 규칙 위반 검사·다시 시도 → 위험 결정 확인 → 과정 저장 노드가 붙는다."
           : agent === "analysis_agent" && graph?.perspectives
-          ? "관점별 분석: 관점 노드들이 동시에 돈다(fan-out). 관점 노드 하나가 그 관점의 도구·질문만 가진 분석 에이전트(AI 응답 ⇄ 도구 → 근거 검사)다. 합치기(fan-in)는 같은 구간·사유의 발견을 하나로 묶고 관점마다 다른 해석은 나란히 남긴다."
+          ? "관점별 분석: 관점 노드들이 동시에 돈다(fan-out). 관점 노드 하나가 그 관점의 도구·질문만 가진 분석 에이전트(AI 판단 ⇄ 도구 → 근거 검사)다. 합치기(fan-in)는 같은 구간·사유의 발견을 하나로 묶고 관점마다 다른 해석은 나란히 남긴다."
           : agent === "supervisor_agent"
           ? "Supervisor가 다음 행동을 스스로 고른다: 도구 노드에서 분석 에이전트·개선 에이전트를 부르거나(그 진행은 '분석 R1 · …'처럼 보인다), 미리 돌려보기(진단 신호 포함)·파라미터 훑기를 한다. 판단 보고서는 코드가 검사한다(미리 돌려본 적용 가능한 안만 추천, 근거 수치는 인용한 결과에 있어야 함). 호출 상한 전체 40·분석 3·개선 4, 예산 상한."
-          : "AI 응답 ⇄ 도구를 오가다 제출하면 검사한다. 분석·개선 제안 에이전트가 같은 틀(build_tool_agent)을 쓴다."}
+          : "AI 판단 ⇄ 도구 사용을 오가다 제출하면 검사한다. 분석·개선 제안 에이전트가 같은 틀(build_tool_agent)을 쓴다."}
       </p>
       <GraphCanvas ariaLabel={`${AGENT_NAMES[agent] ?? agent} 내부 그래프`} nodes={sub.nodes} edges={sub.edges}
         views={views} activeEdges={active} height={360} nodeWidth={150} nodeHeight={70} minFitZoom={0.6} padding={0.24} />

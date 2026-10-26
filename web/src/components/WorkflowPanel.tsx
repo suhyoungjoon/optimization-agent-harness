@@ -4,6 +4,8 @@ import type { DomainAdapter } from "../domains/types";
 import type { DomainInfo, HarnessInfo, WorkflowGraph, WorkflowNode, WorkflowRun } from "../types";
 import { TERMS, tip } from "../terms";
 import { usePoll } from "./usePoll";
+import { OpinionHelp, type OpinionChip } from "./opinionHelp";
+import { useStoredId } from "./useStoredId";
 
 // Agent workflow (LangGraph, M9): 다른 탭에서 하나씩 누르던 단계를 LangGraph 그래프 하나로 묶어,
 // 사람이 [다음 실행]을 누를 때마다 한 단계(에이전트)씩 넘어간다. 그림은 서버에서 컴파일된 그래프 그대로 그린다.
@@ -35,7 +37,7 @@ export default function WorkflowPanel({
 }) {
   const [graph, setGraph] = useState<WorkflowGraph | null>(null);
   const [form, setForm] = useState({ seed, faults: faults.length ? faults : domain.faults.map((f) => f.id), items: 10, level });
-  const [flowId, setFlowId] = useState<string | null>(null);
+  const [flowId, setFlowId] = useStoredId("oah.workflow.flowId", (id) => api.workflowGet(id));   // 탭을 옮겨도 이어서
   const [latest, setLatest] = useState<WorkflowRun | null>(null);
   const [tick, setTick] = useState(0);
   const [note, setNote] = useState("");
@@ -214,6 +216,7 @@ export function StepBar({
   idleText = "입력을 고르고 [워크플로우 준비]를 누르면 첫 단계 앞에서 멈춥니다.",
   doneText = "결과는 각 단계의 [탭에서 보기]로 자세히 봅니다.",
   approval,
+  opinionChips,
 }: {
   run: Pick<WorkflowRun, "status" | "steps" | "waiting" | "error" | "current"> | null;   // M9·M10 공통
   nextLabel: string | null;
@@ -226,6 +229,7 @@ export function StepBar({
   // agents 탭 (M15-B): 회차·순위·최소 변경 추천과 의견 입력. 없으면 승인·반려만
   approval?: { title: string; round?: number; rank?: number | null; reasons?: string[]; opinion_error?: string;
     minimal_change?: { path: string; current: number; recommended: number; proposed: number } | null } | null;
+  opinionChips?: OpinionChip[];   // 의견 보내기 도움 (agents 탭): 이 안에 맞춘 추천 + 예시
 }) {
   if (!run) {
     return <div className="verdict wf-bar"><span className="muted">{idleText}</span></div>;
@@ -255,6 +259,7 @@ export function StepBar({
           <button onClick={() => onStep("reject")}>반려</button>
           <button onClick={() => onStep("opinion")} disabled={!note.trim()}
             title="한 줄 의견을 의견 정리 에이전트가 제약 형식으로 바꾸고, 그 제약으로 다시 제안받습니다">의견 보내기</button>
+          {opinionChips && <OpinionHelp chips={opinionChips} onPick={setNote} />}
         </div>
       );
     }

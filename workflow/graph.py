@@ -110,6 +110,18 @@ def _run_line(state: FlowState, name: str, run: dict) -> str:
     return f"{name}: " + " · ".join(items)
 
 
+def _cache_note(usage: dict | None) -> str:
+    """저장된 AI 응답(캐시)을 쓴 호출 수. 같은 조건으로 다시 돌리면 0.1초 만에 같은 결과가 나오는 이유를 보인다."""
+    u = usage or {}
+    cached, calls = u.get("cached_calls"), u.get("llm_calls", u.get("calls"))
+    return f" · 캐시 {cached}/{calls} (저장된 응답, 비용 0)" if cached else ""
+
+
+def _failure_line(f: dict | None) -> list[str]:
+    """표준 실패 상태(반복·도구 실패·예산 초과·해결 불가) → 결과 줄."""
+    return [f"✕ {f['label']}: {f.get('reason') or ''}".rstrip(": ")] if f else []
+
+
 def _better(m: dict, d: float) -> bool:
     return d > 0 if m.get("better", "up") == "up" else d < 0
 
@@ -145,10 +157,11 @@ def build(api: Api, checkpointer=None):
         run = api.wait(f"/runs/{run_id}", lambda r: r["status"] in ("done", "error"))
         if run["status"] == "error":
             raise RuntimeError(f"AI 실행 실패: {(run.get('meta') or {}).get('error')}")
-        cost = ((run.get("meta") or {}).get("usage") or {}).get("cost_usd")
+        usage = (run.get("meta") or {}).get("usage") or {}
+        cost = usage.get("cost_usd")
         lines = [_run_line(state, f"AI 방식 ({state['level']})", run)]
         if cost is not None:
-            lines.append(f"AI 비용 ${cost:.4f}" + (" (저장된 결과 재생)" if run.get("replayed") else ""))
+            lines.append(f"AI 비용 ${cost:.4f}" + (" (저장된 결과 재생)" if run.get("replayed") else "") + _cache_note(usage))
         return {"ai_run_id": run_id, **_step("ai_agent", lines, run_id=run_id)}
 
     def compare(state: FlowState):
@@ -179,6 +192,12 @@ def build(api: Api, checkpointer=None):
         if score.get("total"):
             lines[0] += f" · 심어둔 문제 {score['total']}개 중 {score['detected']}개 찾음"
         lines += [f"{f['id']} {f['title']}" for f in findings[:5]]
+        body = report.get("body") or {}
+        lines += _failure_line(body.get("failure"))       # 반복·도구 실패·예산 초과로 멈췄으면 그 사유
+        usage = body.get("usage") or {}
+        if usage:
+            lines.append(f"AI 호출 {usage.get('llm_calls', usage.get('calls', 0))}회 · 모델 {usage.get('model')}"
+                         + ("" if usage.get("cost_usd") is None else f" · 비용 ${usage['cost_usd']:.4f}") + _cache_note(usage))
         return {"report_id": created["id"], **_step("analysis_agent", lines, report_id=created["id"])}
 
     def proposal_agent(state: FlowState):
@@ -192,6 +211,12 @@ def build(api: Api, checkpointer=None):
         lines = [f"제안 {len(props)}건 · 미리 돌려볼 제안 {len(usable)}건"
                  + (f" · 적용 불가 {len(props) - len(usable)}건" if len(props) > len(usable) else "")]
         lines += [p["body"].get("title", p["id"]) for p in usable]
+        meta = batch.get("meta") or {}
+        lines += _failure_line(meta.get("failure"))       # 제안이 0건이면 왜인지 (도구 실패 등)
+        usage = meta.get("usage") or {}
+        if usage:
+            lines.append(f"AI 호출 {usage.get('llm_calls', usage.get('calls', 0))}회 · 모델 {usage.get('model')}"
+                         + ("" if usage.get("cost_usd") is None else f" · 비용 ${usage['cost_usd']:.4f}") + _cache_note(usage))
         return {"batch_id": created["id"], "queue": [p["id"] for p in usable],
                 **_step("proposal_agent", lines, batch_id=created["id"])}
 

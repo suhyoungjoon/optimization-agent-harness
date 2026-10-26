@@ -2,6 +2,7 @@ import type { DomainAdapter, Scope } from "../types";
 import DispatchDataMap from "./DispatchDataMap";
 import DispatchMap, { stageName } from "./DispatchMap";
 import { VALUE_LABELS as LABELS, hhmm } from "./districtMap";
+import { josa } from "../../components/opinionHelp";
 
 export const dispatchAdapter: DomainAdapter = {
   ResultView: DispatchMap,
@@ -59,6 +60,20 @@ export const dispatchAdapter: DomainAdapter = {
     // worker_stats 정렬 기준 (값으로 나온다)
     busy_min: "작업 시간", jobs: "작업 건수", utilization: "가동률", available_min: "가능 시간",
   },
+  // 의견 보내기 도움: 의견 정리 에이전트가 그대로 제약으로 바꿀 수 있게 한도 숫자가 든 문장
+  opinionExamples: ["관할 밖 4km 초과 출동 불가", "경계 지역은 관할 밖 3km까지만", "정시 배정 비율이 1%p 넘게 떨어지면 안 됨",
+                    "희망시각에서 60분 넘게 벗어나 배정하지 말 것"],
+  opinionText: (h) => {
+    if (h.type !== "param") return null;
+    const where = whenText(h.when);
+    const head = where ? `${where}${josa(where, "은", "는")} ` : "";
+    if (h.base === "matching.area_extension_km")
+      return h.bound === "max" ? `${head}관할 밖 ${h.value}km 초과 출동 불가` : `${head}관할 밖 출동 거리는 ${h.value}km 이상 유지`;
+    if (h.base === "matching.time_window_min")
+      return h.bound === "max" ? `${head}희망시각에서 ${h.value}분 넘게 벗어나 배정하지 말 것`
+        : `${head}희망시각 허용 오차는 ${h.value}분 이상 유지`;
+    return null;
+  },
   reasonNames: {
     NO_SKILL: "기술 보유자 없음",
     NO_CERT: "자격 보유자 없음",
@@ -85,3 +100,14 @@ export const dispatchAdapter: DomainAdapter = {
     return [...sample, ...perDay, { id: "all", label: `전체 ${itemIds.length}건`, items: null }];
   },
 };
+
+// 구간 조건(when) → 쉬운 말 (예: {area_zone: [boundary]} → "경계 지역", {hour: ["10","16"]} → "10·16시")
+function whenText(when?: Record<string, string[]> | null): string {
+  if (!when) return "";
+  return Object.entries(when).map(([dim, vals]) => {
+    const vs = (Array.isArray(vals) ? vals : [vals]).map(String);
+    if (dim === "hour") return `${vs.map((v) => Number(v)).join("·")}시`;
+    if (dim === "branch") return `${vs.join("·")}지점`;
+    return vs.map((v) => LABELS[v] ?? v).join("·");
+  }).join(" ");
+}

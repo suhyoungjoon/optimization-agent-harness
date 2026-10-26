@@ -6,7 +6,7 @@
                                   └ 의견 → [의견 정리 에이전트] → 제약 → 다시 제안 (형식이 틀리면 사람에게 다시 묻기)
     종료 판정이 "다음 회차"면 배정 에이전트부터 다시 (M15-B). 순위·종료 기준은 configs/proposals.yaml·workflow.yaml.
 
-M9(workflow/graph.py)는 기존 API를 노드로 감쌌다면, 여기서는 에이전트 내부(AI 응답·도구·검사·재시도)까지
+M9(workflow/graph.py)는 기존 API를 노드로 감쌌다면, 여기서는 에이전트 내부(AI 판단·도구·검사·재시도)까지
 LangGraph 노드와 연결이다. 도구·검사·검증·시뮬레이션·승인 반영은 코어 함수를 그대로 부른다 (코어는 그대로).
 상태(체크포인트)에는 화면에 보일 가벼운 값만, 무거운 객체는 AgentContext.data에 둔다.
 """
@@ -32,6 +32,7 @@ from core.improvement.changes import apply_params, apply_spec, params_errors, sp
 from core.improvement.constraints import constraint_errors, constraint_violations
 from core.improvement.loop import NEXT_STEPS, allowed_steps, load_loop_config, loop_report, termination
 from core.improvement.memory import _proposal_change, proposal_memory_text
+from core.improvement.opinion_hints import opinion_hints
 from core.improvement.ranking import load_ranking_config, metric_specs, minimal_change, rank_proposals
 from core.improvement.simulate import simulate_params
 from core.improvement.supervisor import END_REASONS, judgment_tool
@@ -74,14 +75,14 @@ class AgentsState(TypedDict, total=False):
 NODES: dict[str, dict] = {
     "prepare": {"label": "데이터 준비", "kind": "rule", "description": "데이터를 만들고 처리할 건수를 고른 뒤 규칙 방식 기준선을 계산한다"},
     "dispatch_agent": {"label": "배정 에이전트", "kind": "ai", "agent": True,
-                       "description": "LangGraph 하위 그래프: 지시서마다 AI 응답 ⇄ 조회 도구 → 자동 검사 → 다시 시도 → 위험 결정 막기 (레벨에 따라 모양이 바뀜)"},
+                       "description": "LangGraph 하위 그래프: 지시서마다 AI 판단 ⇄ 도구 사용 → 규칙 위반 검사 → 다시 시도 → 위험 결정 확인 (레벨에 따라 모양이 바뀜)"},
     "evaluate": {"label": "평가", "kind": "rule", "description": "AI 결정을 규칙 위반·지표로 채점하고 규칙 방식과 비교한다"},
     "rule_full": {"label": "규칙 방식 전체 실행", "kind": "rule", "description": "분석할 재료로 전체 기간을 규칙 방식으로 배정한다"},
     "analysis_agent": {"label": "분석 에이전트", "kind": "ai", "agent": True,
-                       "description": "LangGraph 하위 그래프: AI 응답 ⇄ 집계 도구 → 근거 검사 (근거 없는 숫자는 고쳐 오게). "
+                       "description": "LangGraph 하위 그래프: AI 판단 ⇄ 집계 도구 → 근거 검사 (근거 없는 숫자는 고쳐 오게). "
                                       "관점별 분석이면 관점마다 따로(병렬) 돌리고 합친다"},
     "proposal_agent": {"label": "개선 제안 에이전트", "kind": "ai", "agent": True,
-                       "description": "LangGraph 하위 그래프: AI 응답 ⇄ 규칙 조회·시험 계산 도구 → 바꿀 수 있는 범위 검사"},
+                       "description": "LangGraph 하위 그래프: AI 판단 ⇄ 규칙 조회·시험 계산 도구 → 바꿀 수 있는 범위 검사"},
     "supervisor_agent": {"label": "Supervisor 지휘", "kind": "ai", "agent": True,
                          "description": "M18: 분석 에이전트·개선 에이전트·미리 돌려보기·파라미터 훑기·문서 검색을 도구로 부르며 "
                                         "다음 행동을 스스로 정하고, 판단 보고서(추천안·원인 가설·시도 기록·사람에게 묻는 것)를 낸다. "
@@ -117,6 +118,20 @@ def _charge(d: dict, cost) -> None:
     """회차 AI 비용 합 (단가를 모르면 None으로 남긴다)."""
     if cost is not None:
         d["round_cost"] = (d.get("round_cost") or 0.0) + cost
+
+
+def _cache_note(usage) -> str:
+    """저장된 AI 응답(캐시)을 쓴 호출 수 (" · 캐시 3/5"). 없으면 빈 문자열. usage: core.llm.client.Usage 또는 사용량 dict."""
+    if usage is None:
+        return ""
+    calls = getattr(usage, "calls", None) if not isinstance(usage, dict) else usage.get("calls")
+    cached = getattr(usage, "cached_calls", None) if not isinstance(usage, dict) else usage.get("cached_calls")
+    return f" · 캐시 {cached}/{calls} (저장된 응답, 비용 0)" if cached else ""
+
+
+def _failure_lines(*failures) -> list[str]:
+    """표준 실패 상태(core.llm.control) → 단계 결과 줄. 실패가 없으면 빈 목록."""
+    return [f"✕ {f['label']}: {f.get('reason') or ''}".rstrip(": ") for f in failures if f]
 
 
 def _constraint_text(c: dict) -> str:
@@ -485,7 +500,7 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None, e
         return _step("dispatch_agent", [
             f"{state.get('round', 1)}회차 · {len(out['decisions'])}건 결정 · 다시 시도한 건 {retried}건 · 하네스 레벨 {state['level']}",
             f"AI 호출 {sum(int(r.metrics.get('llm_calls', 0)) for r in out['decisions'])}회"
-            + ("" if cost is None else f" · 비용 ${cost:.4f}") + f" · 모델 {llm.model}"])
+            + ("" if cost is None else f" · 비용 ${cost:.4f}") + f" · 모델 {llm.model}" + _cache_note(out["usage"])])
 
     def evaluate(state: AgentsState):
         pack, sub = d["pack"], d["sub_instance"]
@@ -523,10 +538,12 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None, e
                                                for v in per.values()))
         lines += [f"{f['id']} {f['title']}" + (f" ({'·'.join(f['perspective_names'])})" if f.get("perspective_names") else "")
                   for f in kept[:5]]
+        lines += _failure_lines(report.get("failure"),
+                                *[v.get("failure") for v in (report.get("perspectives") or {}).values()] if perspectives else [])
         cost = report["usage"].get("cost_usd")
         _charge(d, cost)
         if cost is not None:
-            lines.append(f"비용 ${cost:.4f} · 모델 {report['usage'].get('model')}")
+            lines.append(f"비용 ${cost:.4f} · 모델 {report['usage'].get('model')}" + _cache_note(report["usage"]))
         return _step("analysis_agent", lines, detected=s["detected"], total=s["total"])
 
     def proposal_agent(state: AgentsState):
@@ -575,6 +592,8 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None, e
             lines.append(f"입력에 넣은 것: 제약 {len(d['constraints'])}개 · 반려·의견 기억 {len(d['rejections'])}건")
         lines += [proposals[i]["body"].get("title", "") for i in usable]
         lines += [f"✕ {p['body'].get('title', '')}: {p['errors'][0]}" for p in proposals if p["errors"]]
+        lines += _failure_lines(out.get("failure"))       # 반복·도구 실패·예산 초과로 멈췄으면 그 사유 (제안이 0건일 때 이유)
+        lines.append(f"AI 호출 {out.get('llm_calls', 0)}회 · 모델 {llm.model}" + _cache_note(out["usage"]))
         return {"queue": usable, **_step("proposal_agent", lines)}
 
     def previous_text() -> str:
@@ -648,8 +667,10 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None, e
                       for p in proposals]
             lines += [f"사람에게 묻는 것: {q}" for q in judgment.get("questions_for_human") or []]
         total = sum(x for x in costs if x is not None)
-        lines.append(f"비용 ${total:.4f} (추정 포함) · 예산 ${out['budget']['spent_usd']:.2f}/{out['budget']['max_usd']}"
-                     if costs else "비용 미확인")
+        cached = sum(int((u or {}).get("cached_calls") or 0) for u in [out["usage"], *out["sub_usage"]])
+        calls = sum(int((u or {}).get("calls") or 0) for u in [out["usage"], *out["sub_usage"]])
+        lines.append((f"비용 ${total:.4f} (추정 포함) · 예산 ${out['budget']['spent_usd']:.2f}/{out['budget']['max_usd']}"
+                      if costs else "비용 미확인") + _cache_note({"calls": calls, "cached_calls": cached}))
         d.setdefault("judgments", [])
         if len(d["judgments"]) < state.get("round", 1):
             d["judgments"].append(judgment or None)
@@ -745,7 +766,10 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None, e
         ask = {"proposal": state["proposal"], "title": p["body"].get("title"), "round": state.get("round", 1),
                "rank": rank.get("rank"), "reasons": rank.get("reasons") or [],
                "minimal_change": sim.get("minimal_change"),
-               "question": "이 제안을 반영할까요? (승인 · 반려 · 의견 한 줄)"}
+               "question": "이 제안을 반영할까요? (승인 · 반려 · 의견 한 줄)",
+               # 의견 추천 재료 (코드 계산, AI 없음): 이 안의 변경값·미리 돌려본 결과에서 쓸 만한 한도
+               "opinion_hints": opinion_hints(d["params"], p["body"], sim, d["pack"].dimensions())
+               if p["body"].get("kind") == "params" else []}
         if sup_mode and p.get("recommendation"):   # 판단 보고서 (M18-c): 이 추천의 근거와 보고서 전체
             j = (d.get("judgment") or {}).get("judgment") or {}
             ask["judgment"] = {"recommendation": p["recommendation"], "summary": j.get("summary"),
@@ -784,7 +808,8 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None, e
         _charge(d, out["usage"].cost_usd(llm.model, ctx.llm_config))
         problems = list(out.get("problems") or [])
         if out.get("stop") != "submitted" and not problems:
-            problems = ["의견 정리 에이전트가 제출하지 않음"]
+            f = out.get("failure")
+            problems = [f"{f['label']}: {f.get('reason') or ''}".rstrip(": ") if f else "의견 정리 에이전트가 제출하지 않음"]
         if problems:
             return {"opinion_error": "; ".join(problems),
                     **_step("opinion_agent", [f"✕ 제약으로 정리하지 못함: {problems[0]}", "사람에게 다시 묻는다"])}

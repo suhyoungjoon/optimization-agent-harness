@@ -95,3 +95,14 @@ def test_fixed_mode_is_unchanged_by_default(client):  # noqa: F811
         assert snap["next"] == [node]
         snap = step(client, snap["id"])
     assert snap["loop"]["judgment"] is None
+
+
+def test_human_review_offers_opinion_hints(client):  # noqa: F811
+    """사람 검토 질문에 의견 추천 재료 (코드 계산): 이 안의 변경값 사이 한도, 나빠진 지표 한도."""
+    snap = start(client, "fixed")
+    while snap["waiting"] != "approval":
+        snap = step(client, snap["id"])
+    hints = snap["approval"]["opinion_hints"]
+    p = next(h for h in hints if h["type"] == "param")
+    assert p["base"] == "matching.area_extension_km" and p["bound"] == "max" and p["current"] < p["value"] < p["proposed"]
+    assert p["when"] == {"area_zone": ["boundary"]}

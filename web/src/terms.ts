@@ -39,8 +39,8 @@ export const TERMS = {
   harness: t("하네스 레벨", "하네스 레벨 (configs/harness_levels.yaml)"),
   spec: t("업무 규칙 문서", "도메인 명세 (domain-spec.md)"),
   tools: t("조회 기능", "도구 (tools)"),
-  validateLoop: t("자동 검사", "검증 루프 (validate_loop)"),
-  guardrail: t("위험 결정 막기", "가드레일 (guardrail)"),
+  validateLoop: t("규칙 위반 검사", "검증 루프 (validate_loop)"),
+  guardrail: t("위험 결정 확인", "가드레일 (guardrail)"),
   trace: t("과정 기록", "트레이스 (trace)"),
   llm: t("AI 호출", "LLM 호출"),
   // 결과

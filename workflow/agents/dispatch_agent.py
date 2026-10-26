@@ -1,9 +1,9 @@
 """배정 에이전트를 LangGraph 하위 그래프로. 하네스 레벨이 그래프 모양(노드·연결)을 정한다.
 
-    다음 지시서 → AI 응답 ─◇ 도구 호출 → 조회 도구 → AI 응답            (tools: L2~)
-                         ├◇ 제출 → 결정 읽기 → 자동 검사 ─◇ 위반 → 다시 시도 → AI 응답   (validate_loop: L3~)
-                         │                              └◇ 통과 → 위험 결정 막기 → 기록      (guardrail: L4~)
-                         └◇ 응답만 함 → 재촉 → AI 응답
+    다음 지시서 → AI 판단 ─◇ 도구 호출 → 도구 사용 → AI 판단            (tools: L2~)
+                         ├◇ 제출 → 결정 받기 → 규칙 위반 검사 ─◇ 위반 → 다시 시도 → AI 판단   (validate_loop: L3~)
+                         │                                  └◇ 통과 → 위험 결정 확인 → 기록      (guardrail: L4~)
+                         └◇ 응답만 함 → 재요청 → AI 판단
     기록 → 과정 저장 (trace=full: L5) → 다음 지시서
 
 프롬프트·도구·결정 형식·검증·가드레일은 코어(HarnessRunner, validator_loop, guardrail)를 그대로 쓴다.
@@ -215,19 +215,19 @@ def build_dispatch_agent(ctx: AgentContext, level: Level, llm=None, spec_text: s
     meta = lambda label, kind: {"label": label, "kind": kind}   # noqa: E731
     # 흐름 순서대로 넣는다 (그림이 이 순서로 나온다)
     g.add_node("next_item", next_item, metadata=meta("다음 지시서", "tool"))
-    g.add_node("ai", ai, metadata=meta("AI 응답", "ai"))
+    g.add_node("ai", ai, metadata=meta("AI 판단", "ai"))
     if level.tools:
-        g.add_node("tools", tools_node, metadata=meta("조회 도구", "tool"))
-    g.add_node("submit", submit, metadata=meta("결정 읽기", "tool"))
+        g.add_node("tools", tools_node, metadata=meta("도구 사용", "tool"))
+    g.add_node("submit", submit, metadata=meta("결정 받기", "tool"))
     if level.validate_loop:
-        g.add_node("validate", validate, metadata=meta("자동 검사", "check"))
+        g.add_node("validate", validate, metadata=meta("규칙 위반 검사", "check"))
         g.add_node("retry", retry, metadata=meta("다시 시도", "check"))
     if level.guardrail:
-        g.add_node("guardrail", guard, metadata=meta("위험 결정 막기", "check"))
+        g.add_node("guardrail", guard, metadata=meta("위험 결정 확인", "check"))
     g.add_node("record", record_node, metadata=meta("기록", "tool"))
     if level.trace == "full":
         g.add_node("trace", trace, metadata=meta("과정 저장", "tool"))
-    g.add_node("nudge", nudge, metadata=meta("재촉", "tool"))
+    g.add_node("nudge", nudge, metadata=meta("재요청", "tool"))
     g.add_node("fail", fail, metadata=meta("실패 기록", "tool"))
 
     g.add_edge(START, "next_item")

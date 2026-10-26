@@ -219,7 +219,7 @@ def test_rehearsal_story_opinion_constraint_round_two_report(client, tmp_path):
     assert "구간 area_zone=boundary" in lines(snap, "confirm_constraints")[-1]
     snap = run_until(client, snap, waiting)
     assert snap["approval"]["title"].endswith("(제약 반영)") and snap["approval"]["rank"] == 1
-    assert "제약 1개 · 반려·의견 기억 2건" in lines(snap, "proposal_agent")[-2]
+    assert any("제약 1개 · 반려·의견 기억 2건" in x for x in lines(snap, "proposal_agent"))
     # 문서 검색 (M15-C): 개선 제안 에이전트가 규정을 찾아 인용, 쓴 조각과 인용이 기록된다
     ret = snap["loop"]["retrieval"]
     assert ret["mode"] == "keyword" and ret["cited"] == ["DIST-01", "DIST-03"]
