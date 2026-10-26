@@ -109,3 +109,14 @@ def test_without_langgraph_reports_reason(client, monkeypatch):
     monkeypatch.setattr(workflow_api, "_unavailable", lambda: "LangGraph가 설치되어 있지 않음")
     assert client.get("/workflow/graph").json() == {"available": False, "reason": "LangGraph가 설치되어 있지 않음"}
     assert client.post("/workflow/runs", json={"domain": "dispatch"}).status_code == 501
+
+
+def test_step_lines_show_failure_and_cache_hits():
+    """실패 사유와 캐시 적중을 단계 결과에 보인다 (Agent workflow·LangGraph agents 탭, 2026-10-26)."""
+    from workflow.graph import _cache_note, _failure_line
+
+    assert _cache_note({"llm_calls": 5, "cached_calls": 5}) == " · 캐시 5/5 (저장된 응답, 비용 0)"
+    assert _cache_note({"calls": 3, "cached_calls": 0}) == "" and _cache_note(None) == ""
+    assert _failure_line({"status": "tool_failure", "label": "도구 실패", "reason": "x가 AI 응답 3번 연속으로 실패"}) == \
+        ["✕ 도구 실패: x가 AI 응답 3번 연속으로 실패"]
+    assert _failure_line(None) == []

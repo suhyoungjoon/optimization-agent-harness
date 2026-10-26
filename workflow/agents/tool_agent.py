@@ -53,7 +53,7 @@ def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, to
     같은 도구·같은 인자 연속 반복, 같은 도구 연속 오류, 예산 초과면 멈춘다 (stop repeated | tool_failure | budget)."""
     budget = budget if budget is not None else ctx.data.get("budget") or Budget.from_config()
     guard = RepeatGuard()
-    inner_labels = {"ai": "AI", "tools": "도구", "check": check_label, "nudge": "재촉"}
+    inner_labels = {"ai": "AI 판단", "tools": "도구", "check": check_label, "nudge": "재요청"}
 
     def emit(node: str, text: str) -> None:
         if node_name:
@@ -154,10 +154,10 @@ def build_tool_agent(ctx: AgentContext, agent: str, *, llm=None, system: str, to
                 "messages": state["messages"] + [{"role": "user", "content": f"{submit_name} 도구로 결과를 제출하라."}]}
 
     g = StateGraph(ToolAgentState)
-    g.add_node("ai", ai, metadata={"label": "AI 응답", "kind": "ai"})
-    g.add_node("tools", run_tools, metadata={"label": "도구 실행", "kind": "tool"})
+    g.add_node("ai", ai, metadata={"label": "AI 판단", "kind": "ai"})
+    g.add_node("tools", run_tools, metadata={"label": "도구 사용", "kind": "tool"})
     g.add_node("check", run_check, metadata={"label": check_label, "kind": "check"})
-    g.add_node("nudge", nudge, metadata={"label": "재촉", "kind": "tool"})
+    g.add_node("nudge", nudge, metadata={"label": "재요청", "kind": "tool"})
     g.add_edge(START, "ai")
     g.add_conditional_edges("ai", after_ai, {TOOL_CALL: "tools", SUBMIT: "check", TEXT_ONLY: "nudge", REFUSED: END})
     g.add_conditional_edges("tools", after_tools, {TO_AI: "ai", SUBMIT: "check", REFUSED: END})
