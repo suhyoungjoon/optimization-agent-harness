@@ -190,3 +190,47 @@ export function makeTerms(adapter: DomainAdapter, dims?: Dimensions): Terms {
   };
   return { tool, args, aiAsked, decision, brief, check, end };
 }
+
+// 진행 기록 줄 옆에 붙이는 실제 코드 호출 (짧은 키워드). 쉬운 말 설명과 함께 "코드에서는 무엇이 불렸는지"를 보인다.
+// 검사 이름은 저장된 기록의 라벨 기준 (core·workflow의 실제 함수)
+const CHECK_CODE: Record<string, string> = {
+  "자동 검사": "pack.validate()", "다시 시도": "retry", "위험 결정 막기": "guardrail.apply()",
+  "근거 검사": "grounding_problems()", "개선안 검사": "params_errors()", "바꿀 수 있는 범위 검사": "params_errors()",
+  "제약 형식 검사": "constraint_errors()", "판단 보고서 검사": "judgment_problems()", "제출 검사": "check_submission()",
+  "허용 단계 검사": "allowed_steps()", "AI 호출": "llm.create()",
+};
+
+function argValues(input: string | undefined): string {
+  if (!input) return "";
+  try {
+    const obj = JSON.parse(input);
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return "…";
+    const short = (v: unknown): string => {
+      if (v == null) return "";
+      if (typeof v === "string") return v.length > 18 ? `${v.slice(0, 17)}…` : v;
+      if (typeof v === "number" || typeof v === "boolean") return String(v);
+      if (Array.isArray(v)) return v.length <= 3 && v.every((x) => typeof x !== "object") ? `[${v.join(",")}]` : `[${v.length}]`;
+      return "{…}";
+    };
+    const vals = Object.entries(obj).filter(([, v]) => v != null && v !== "");
+    const shown = vals.slice(0, 3).map(([k, v]) => (typeof v === "number" || typeof v === "boolean" ? `${k}=${short(v)}` : short(v)));
+    return shown.join(", ") + (vals.length > 3 ? ", …" : "");
+  } catch {
+    return "…";   // 잘린 JSON (원본은 '자세히')
+  }
+}
+
+export function codeOf(e: TimelineEvent, count = 1): string {
+  const times = count > 1 ? ` ×${count}` : "";
+  if (e.type === "llm") return "llm.create()";
+  if (e.type === "tool") {
+    const name = (e.name ?? e.text).trim().split(/\s/)[0];
+    return count > 1 ? `${name}(…)${times}` : `${name}(${argValues(e.input)})`;
+  }
+  if (e.type === "check") return CHECK_CODE[e.label ?? ""] ?? "check()";
+  if (e.type === "decision") return `record(${e.status ?? ""})`;
+  if (e.type === "nudge") return "nudge";
+  if (e.type === "item") return `next_item(${e.item ?? ""})`;
+  if (e.type === "end") return `stop=${(e as { stop?: string }).stop ?? ""}`;
+  return "";
+}

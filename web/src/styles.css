@@ -629,3 +629,12 @@ input.approver { width: 9em; }
 .opinion-chip { font-size: 12px; border: 1px solid var(--border); border-radius: 12px; padding: 2px 10px; background: var(--surface); cursor: pointer; }
 .opinion-chip.hint { border-color: var(--series-1); }
 .opinion-chip:hover { background: var(--surface-2, rgba(42, 120, 214, 0.08)); }
+/* 진행 기록: 실제 코드 호출(오른쪽), 지시서 접기 */
+.agent-timeline .tl-code { float: right; margin-left: 10px; max-width: 42%; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: 11px; color: var(--text-secondary); background: none; }
+.agent-timeline .tl-segment { padding: 0; }
+.agent-timeline .tl-segment > details > summary { cursor: pointer; padding: 4px 0; list-style: none; }
+.agent-timeline .tl-segment > details > summary::-webkit-details-marker { display: none; }
+.agent-timeline .tl-segment > details[open] > summary strong::after { content: ""; }
+.agent-timeline .tl-segment-rows { max-height: none; overflow: visible; padding-left: 16px; border-left: 2px solid var(--border); margin-bottom: 4px; }
+.tl-fold-all { float: right; font-weight: normal; }
