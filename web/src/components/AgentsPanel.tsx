@@ -8,6 +8,7 @@ import { constraintText } from "./ImprovementPanel";
 import { TERMS, tip } from "../terms";
 import GraphCanvas, { type NodeView } from "./GraphCanvas";
 import { usePoll } from "./usePoll";
+import { useStoredId } from "./useStoredId";
 import { StepBar, type StepAction } from "./WorkflowPanel";
 
 // LangGraph agents (M10, 가로 그래프 M11): 배정·분석·개선 제안 에이전트의 내부까지 LangGraph 하위 그래프로 만든 별도 탭.
@@ -51,7 +52,7 @@ export default function AgentsPanel({
   // 실제 AI 이름: 서버 설정의 제공사·모델 (값 "claude"는 API 계약상 이름이고 제공사는 서버 설정이 정한다)
   const realAi = `${PROVIDER_LABEL[harness?.llm.provider ?? "anthropic"] ?? harness?.llm.provider} ${harness?.llm.model ?? ""}`.trim();
   const [graph, setGraph] = useState<AgentsGraph | null>(null);
-  const [flowId, setFlowId] = useState<string | null>(null);
+  const [flowId, setFlowId] = useStoredId("oah.agents.flowId", (id) => api.agentsGet(id));   // 탭을 옮겨도 이어서
   const [run, setRun] = useState<AgentsRun | null>(null);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const lastI = useRef(-1);
