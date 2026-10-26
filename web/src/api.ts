@@ -1,7 +1,7 @@
 import type {
   CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DomainDefinition, DecisionRecord, DomainInfo, FindingLabel, HarnessInfo, Memory, HistoryRow, Proposal, ProposalBatch, Report, Run,
   SpecEstimate, TraceRecord, WorkflowGraph, WorkflowRun, AgentsGraph, AgentsRun, SweepAxis, SweepResult, Sensitivity, ChangeCard, SavedConstraint,
-  AgentTabInfo, AgentTabSources, AgentTabHistoryRow, AgentTabTimeline, TabAgent, ProposalOutcome, AgentsMode, LlmCacheState,
+  AgentTabInfo, AgentTabSources, AgentTabHistoryRow, AgentTabTimeline, TabAgent, ProposalOutcome, AgentsMode, LlmCacheState, OpinionHint,
 } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -36,6 +36,7 @@ export const api = {
   llmCache: () => request<LlmCacheState>("/llm/cache"),
   setLlmCache: (enabled: boolean) =>
     request<LlmCacheState>("/llm/cache", { method: "POST", body: JSON.stringify({ enabled }) }),
+  proposalOpinionHints: (id: string) => request<{ hints: OpinionHint[] }>(`/proposals/${id}/opinion-hints`),
   agentTabOpinionSave: (id: string, constraints?: unknown[]) =>
     request<{ saved: string[]; constraints: unknown[] }>(`/agent-tab/opinion/${id}/save`, { method: "POST",
       body: JSON.stringify(constraints ? { constraints } : {}) }),

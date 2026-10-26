@@ -24,6 +24,7 @@ from core.improvement.changes import apply_params, apply_spec, params_errors
 from core.improvement.history import change_card, change_record
 from core.improvement.constraints import constraint_errors, constraint_violations
 from core.improvement.memory import analysis_memory_text, collect_memory, proposal_memory_text
+from core.improvement.opinion_hints import opinion_hints
 from core.improvement.proposer import finding_slices, propose
 from core.improvement.ranking import load_ranking_config, metric_specs, minimal_change, rank_proposals
 from core.improvement.simulate import simulate_params
@@ -454,6 +455,21 @@ def register(app: FastAPI, ctx: Context) -> None:
                 "proposal": {"plan": candidate["plan"], "outcome": candidate["outcome"]}, "delta": delta,
                 "seconds": round(time.monotonic() - started, 2),
                 "note": "참고용: 가상 고객 반응으로 만든 실적. AI에게 보여 주지 않고 승인 조건·순위·검사에 쓰지 않는다"}
+
+    @app.get("/proposals/{proposal_id}/opinion-hints")
+    def proposal_opinion_hints(proposal_id: str):
+        """의견 추천 재료 (에이전트 탭 의견 정리): 이 안의 변경값과 미리 돌려본 결과에서 쓸 만한 한도. AI 없음.
+        미리 돌려본 적이 없는 설정값 안은 여기서 규칙 엔진으로 한 번 돌려 본다 (저장하지 않음)."""
+        p = proposal_or_404(proposal_id)
+        if p["kind"] != "params":
+            return {"hints": []}
+        report = store.get_report(p["report_id"])
+        _run, _dataset, pack, instance, _truth, _decisions = _run_context(store, report["run_id"])
+        params = load_params(pack)
+        sim = p.get("simulation")
+        if not sim and not params_errors(params, p["body"], pack.dimensions()):
+            sim = simulate_params(lambda q: load_pack(pack.name, q), instance, params, apply_params(params, p["body"]))
+        return {"hints": opinion_hints(params, p["body"], sim, pack.dimensions())}
 
     @app.post("/proposals/{proposal_id}/simulate")
     def simulate(proposal_id: str, req: SimulateRequest):

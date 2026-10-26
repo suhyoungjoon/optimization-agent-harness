@@ -279,3 +279,16 @@ def test_opinion_constraints_can_be_confirmed_and_saved(client):
     # 다음 개선안 요청이 저장된 제약을 쓴다
     b2 = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': rep['id'], 'use_saved_constraints': True}).json()['id']}")
     assert b2["meta"]["saved_constraints"] == res.json()["saved"]
+
+
+def test_opinion_hints_api_for_a_proposal(client):
+    ds = client.post("/domains/dispatch/datasets", json={"seed": 42, "faults": FAULTS}).json()
+    rule = client.post("/runs", json={"dataset_id": ds["id"], "agent": "rule"}).json()
+    rep = wait(client, f"/analysis/{client.post('/analysis', json={'run_id': rule['run_id']}).json()['id']}")
+    batch = wait(client, f"/proposals/batches/{client.post('/proposals', json={'report_id': rep['id']}).json()['id']}")
+    params_prop = next(p for p in batch["proposals"] if p["kind"] == "params" and p["status"] == "proposed")
+    hints = client.get(f"/proposals/{params_prop['id']}/opinion-hints").json()["hints"]
+    assert hints and hints[0]["type"] == "param" and hints[0]["value"] is not None
+    assert any(h["type"] == "metric" for h in hints)          # 미리 돌려본 적 없으면 여기서 돌려 나빠진 지표도
+    spec = next(p for p in batch["proposals"] if p["kind"] == "spec")
+    assert client.get(f"/proposals/{spec['id']}/opinion-hints").json() == {"hints": []}

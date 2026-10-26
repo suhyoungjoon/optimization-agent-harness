@@ -524,6 +524,7 @@ export interface AgentsRun extends Omit<WorkflowRun, "ids" | "inputs" | "approva
     opinion_error?: string; minimal_change?: { path: string; current: number; recommended: number; proposed: number } | null;
     kind?: "confirm_constraints"; opinion?: string; constraints?: Constraint[]; error?: string;   // 제약 확인 (M15 후속)
     judgment?: JudgmentView;   // Supervisor 모드 (M18): 이 추천의 근거와 판단 보고서
+    opinion_hints?: OpinionHint[];   // 의견 추천 재료 (코드 계산)
   } | null;
   events: AgentEvent[];
   counts: Record<string, Record<string, number>>;
@@ -690,4 +691,13 @@ export interface TeamMessage {
   ref: string; tool: string; to: string; ok: boolean; ask?: string; reply: string;
   slice?: Record<string, string[]> | null; change?: Record<string, unknown> | null;
   report_id?: string; batch?: string; metrics?: Record<string, [number | null, number | null]>; worsened?: string[];
+}
+// 의견 추천 재료 (사람 검토의 의견 보내기): 서버가 개선안 변경값·미리 돌려본 결과에서 고른 한도. 문장은 화면이 만든다
+export interface OpinionHint {
+  type: "param" | "metric";
+  bound: "max" | "min" | "max_drop" | "max_rise";
+  value: number;
+  path?: string; base?: string; index?: number | null; current?: number; proposed?: number;
+  when?: Record<string, string[]> | null;
+  metric?: string; label?: string; format?: string; unit?: string; better?: string; worse_by?: number;
 }

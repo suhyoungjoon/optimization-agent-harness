@@ -9,6 +9,7 @@ import { TERMS, tip } from "../terms";
 import GraphCanvas, { type NodeView } from "./GraphCanvas";
 import { usePoll } from "./usePoll";
 import { useStoredId } from "./useStoredId";
+import { opinionChips } from "./opinionHelp";
 import { StepBar, type StepAction } from "./WorkflowPanel";
 
 // LangGraph agents (M10, 가로 그래프 M11): 배정·분석·개선 제안 에이전트의 내부까지 LangGraph 하위 그래프로 만든 별도 탭.
@@ -232,6 +233,7 @@ export default function AgentsPanel({
       <StepBar run={run} nextLabel={run?.next[0] ? topLabel(run.next[0]) : null}
         currentLabel={run?.current ? topLabel(run.current) : null} note={note} setNote={setNote} onStep={step}
         approval={run?.approval ?? null}
+        opinionChips={run?.approval && !run.approval.kind ? opinionChips(run.approval.opinion_hints, adapter) : undefined}
         idleText="입력을 고르고 [에이전트 준비]를 누르면 첫 단계 앞에서 멈춥니다. 에이전트 하나가 끝날 때마다 멈춥니다."
         doneText="그래프의 노드를 누르면 그 단계의 결과와 에이전트 내부를 다시 볼 수 있습니다." />
       )}

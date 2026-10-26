@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type {
-  AgentsGraph, AgentTabHistoryRow, AgentTabInfo, AgentTabSources, AgentTabTimeline, Constraint, DomainInfo, LlmCacheState, TabAgent,
+  AgentsGraph, AgentTabHistoryRow, AgentTabInfo, AgentTabSources, AgentTabTimeline, Constraint, DomainInfo, LlmCacheState,
+  OpinionHint, TabAgent,
   TimelineEvent,
 } from "../types";
 import type { DomainAdapter } from "../domains/types";
@@ -9,6 +10,7 @@ import GraphCanvas, { type NodeView } from "./GraphCanvas";
 import { PLAIN_EDGES, PLAIN_NODES, makeTerms, type Terms } from "./agentTerms";
 import { fmtMetric } from "./MetricsPanel";
 import { constraintText } from "./ImprovementPanel";
+import { OpinionHelp, opinionChips } from "./opinionHelp";
 import { usePoll } from "./usePoll";
 
 // 에이전트 탭 (M16): 핵심 에이전트를 하나씩 실행하고, 그 처리 흐름(턴 → 도구 → 하네스 검사)을 한 화면에서 본다.
@@ -139,6 +141,7 @@ export default function AgentRunsPanel({
   const [proposalId, setProposalId] = useState("");
   const [opinion, setOpinion] = useState("관할 밖 4km 초과 출동 불가");
   const [cache, setCache] = useState<LlmCacheState | null>(null);   // AI 응답 캐시 (서버 전체)
+  const [hints, setHints] = useState<OpinionHint[]>([]);            // 의견 추천 재료 (고른 개선안 기준, 코드 계산)
 
   const refreshSources = () => api.agentTabSources().then((s) => {
     setSources(s);
@@ -148,6 +151,10 @@ export default function AgentRunsPanel({
   }).catch(() => undefined);
   useEffect(() => { api.agentTabInfo().then(setInfo).catch((e) => setError(String(e.message ?? e))); refreshSources(); }, []);
   useEffect(() => { api.llmCache().then(setCache).catch(() => setCache(null)); }, []);
+  useEffect(() => {
+    if (agent !== "opinion" || !proposalId) { setHints([]); return; }
+    api.proposalOpinionHints(proposalId).then((r) => setHints(r.hints)).catch(() => setHints([]));
+  }, [agent, proposalId]);
   const toggleCache = (enabled: boolean) => api.setLlmCache(enabled).then(setCache).catch((e) => setError(String(e.message ?? e)));
   useEffect(() => { api.agentTabHistory(agent).then(setHistory).catch(() => setHistory([])); }, [agent, current?.id]);
   const graphLevel = agent === "dispatch" ? level : "L5";
@@ -294,6 +301,7 @@ export default function AgentRunsPanel({
                 </label>
                 {!sources?.proposals.length && <p className="muted small">개선안이 없습니다. 개선 에이전트를 먼저 실행하세요.</p>}
                 <label>의견 한 줄 <input value={opinion} onChange={(e) => setOpinion(e.target.value)} /></label>
+                <OpinionHelp chips={opinionChips(hints, adapter)} onPick={setOpinion} />
               </>
             )}
           </div>

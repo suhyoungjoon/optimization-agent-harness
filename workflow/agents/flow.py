@@ -32,6 +32,7 @@ from core.improvement.changes import apply_params, apply_spec, params_errors, sp
 from core.improvement.constraints import constraint_errors, constraint_violations
 from core.improvement.loop import NEXT_STEPS, allowed_steps, load_loop_config, loop_report, termination
 from core.improvement.memory import _proposal_change, proposal_memory_text
+from core.improvement.opinion_hints import opinion_hints
 from core.improvement.ranking import load_ranking_config, metric_specs, minimal_change, rank_proposals
 from core.improvement.simulate import simulate_params
 from core.improvement.supervisor import END_REASONS, judgment_tool
@@ -765,7 +766,10 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None, e
         ask = {"proposal": state["proposal"], "title": p["body"].get("title"), "round": state.get("round", 1),
                "rank": rank.get("rank"), "reasons": rank.get("reasons") or [],
                "minimal_change": sim.get("minimal_change"),
-               "question": "이 제안을 반영할까요? (승인 · 반려 · 의견 한 줄)"}
+               "question": "이 제안을 반영할까요? (승인 · 반려 · 의견 한 줄)",
+               # 의견 추천 재료 (코드 계산, AI 없음): 이 안의 변경값·미리 돌려본 결과에서 쓸 만한 한도
+               "opinion_hints": opinion_hints(d["params"], p["body"], sim, d["pack"].dimensions())
+               if p["body"].get("kind") == "params" else []}
         if sup_mode and p.get("recommendation"):   # 판단 보고서 (M18-c): 이 추천의 근거와 보고서 전체
             j = (d.get("judgment") or {}).get("judgment") or {}
             ask["judgment"] = {"recommendation": p["recommendation"], "summary": j.get("summary"),

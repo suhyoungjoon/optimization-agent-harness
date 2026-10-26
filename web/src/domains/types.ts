@@ -67,4 +67,7 @@ export interface DomainAdapter {
   decisionText?: (decision: Record<string, unknown>) => string; // [M8 추가] 결정 한 줄 요약 (결정 과정 탭). 없으면 필드 값을 나열
   toolNames?: Record<string, string>;   // 도메인 도구 이름 → 쉬운 말 (에이전트 탭). 없으면 도구 이름 그대로
   argNames?: Record<string, string>;    // 도메인 도구 입력 이름·선택값 → 쉬운 말 (예: order_id → 지시서)
+  // 의견 보내기 도움 (사람 검토): 고정 예시와, 추천 재료(설정값 한도)를 쉬운 문장으로. 없으면 일반 문장
+  opinionExamples?: string[];
+  opinionText?: (hint: import("../types").OpinionHint) => string | null;
 }
