@@ -86,8 +86,8 @@ button.primary { background: var(--series-1); color: #fff; border-color: transpa
 button.primary:not(:disabled):hover { background: var(--series-1); filter: brightness(1.1); }
 input[type="number"] { width: 80px; }
 
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
-.tabs button { border: none; border-radius: 6px 6px 0 0; background: none; padding: 8px 14px; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; overflow-x: auto; }
+.tabs button { border: none; border-radius: 6px 6px 0 0; background: none; padding: 8px 14px; white-space: nowrap; flex-shrink: 0; }
 .tabs button[aria-selected="true"] { border-bottom: 2px solid var(--series-1); font-weight: 600; }
 .badge { font-size: 11px; margin-left: 6px; color: var(--text-muted); }
 
@@ -586,3 +586,40 @@ input.approver { width: 9em; }
 .agent-timeline .tl-reply.tl-bad .tl-kind { color: var(--critical); }
 .agent-timeline .tl-subgroup { border-bottom: none; padding-left: 46px; }
 .agent-timeline .tl-subgroup .agent-timeline { max-height: none; }
+
+/* 에이전트 소개 탭 */
+.agent-guide { display: flex; flex-direction: column; gap: 12px; }
+.guide-intro p { max-width: 70ch; }
+.guide-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-top: 8px; }
+.guide-role { border-left: 4px solid var(--axis); padding: 6px 10px; background: var(--surface-2, transparent); border-radius: 4px; font-size: 13px; }
+.guide-role strong { display: block; }
+.guide-role.ai, .guide-step.ai { border-left-color: var(--series-1); }
+.guide-role.code, .guide-step.code { border-left-color: var(--warning); }
+.guide-role.human, .guide-step.human { border-left-color: var(--series-3); }
+.guide-flow { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 4px 0 8px; }
+.guide-step { border: 1px solid var(--border); border-left: 4px solid var(--axis); border-radius: 6px; padding: 6px 10px; font-weight: 600; font-size: 13px; }
+.guide-arrow { margin-left: 8px; color: var(--text-secondary); font-weight: normal; }
+.guide-notes li { margin: 2px 0; }
+.guide-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.guide-card header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.guide-card h3 { margin: 0; }
+.guide-card h3 .badge { margin-left: 6px; }
+.guide-card h4 { margin: 10px 0 2px; font-size: 13px; }
+.guide-card ul { margin: 0; padding-left: 18px; }
+.guide-role-line { font-weight: 600; margin: 6px 0; }
+.guide-io { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 6px 0; font-size: 13px; }
+.guide-io dt { color: var(--text-secondary); }
+.guide-io dd { margin: 0; }
+.guide-safe { display: block; }
+.guide-safe-row { display: grid; grid-template-columns: minmax(110px, max-content) 1fr; gap: 10px; padding: 3px 0; border-bottom: 1px solid var(--border); }
+.guide-tools { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.guide-chip { font-size: 12px; border: 1px solid var(--border); border-radius: 10px; padding: 1px 8px; color: var(--text-secondary); }
+.guide-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 6px 0; }
+.guide-table th, .guide-table td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.guide-mode { display: flex; gap: 6px; margin: 6px 0 8px; }
+@media (max-width: 640px) { .guide-table { display: block; overflow-x: auto; } }
+.guide-table th:first-child, .guide-table td:first-child { white-space: nowrap; }
+.guide-table-wrap { overflow-x: auto; }
+.guide-matrix { min-width: 860px; }
+.guide-matrix th[scope="row"] { white-space: nowrap; background: var(--surface-2, transparent); }
+.guide-matrix td { font-size: 12px; }
