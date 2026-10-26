@@ -7,7 +7,7 @@ import type {
 } from "../types";
 import type { DomainAdapter } from "../domains/types";
 import GraphCanvas, { type NodeView } from "./GraphCanvas";
-import { PLAIN_EDGES, PLAIN_NODES, makeTerms, type Terms } from "./agentTerms";
+import { PLAIN_EDGES, PLAIN_NODES, codeOf, makeTerms, type Terms } from "./agentTerms";
 import { fmtMetric } from "./MetricsPanel";
 import { constraintText } from "./ImprovementPanel";
 import { OpinionHelp, opinionChips } from "./opinionHelp";
@@ -497,6 +497,42 @@ function InnerGraph({ graph, t, terms, flash, title }: {
   );
 }
 
+interface Segment { item: string; events: TimelineEvent[] }
+function splitByItem(events: TimelineEvent[]): Segment[] {
+  const out: Segment[] = [];
+  for (const e of events) {
+    if (e.type === "item" || !out.length) out.push({ item: e.item ?? "", events: e.type === "item" ? [] : [e] });
+    else out[out.length - 1].events.push(e);
+  }
+  return out;
+}
+
+// 지시서 하나: 접힌 머리줄에 요약 (응답·도구 횟수, 검사, 결정), 펼치면 단계마다 한 줄
+function ItemSegment({ seg, terms, open }: { seg: Segment; terms: Terms; open: boolean }) {
+  const ev = seg.events;
+  const llm = ev.filter((e) => e.type === "llm").length;
+  const tools = ev.filter((e) => e.type === "tool").length;
+  const checks = ev.filter((e) => e.type === "check").map((e) => terms.check(e));
+  const bad = checks.filter((c) => c.tone === "bad").length;
+  const retry = checks.filter((c) => c.tone === "info").length;
+  const decision = [...ev].reverse().find((e) => e.type === "decision");
+  return (
+    <li className="tl-segment">
+      <details open={open}>
+        <summary>
+          <strong>▸ {seg.item}</strong>
+          <span className="muted small"> · 응답 {llm}번 · 도구 {tools}번 · 검사 {checks.length - bad - retry ? `✓${checks.length - bad - retry}` : ""}
+            {retry ? ` ↻${retry}` : ""}{bad ? ` ✕${bad}` : ""}</span>
+          {decision && <span className="small"> · {terms.decision({ ...decision, item: undefined })}</span>}
+        </summary>
+        <ol className="agent-timeline tl-segment-rows">
+          {groupRepeats(ev).map(({ e, group }) => <TimelineRow key={e.seq} e={e} group={group} terms={terms} showItem={false} />)}
+        </ol>
+      </details>
+    </li>
+  );
+}
+
 function Timeline({ t, terms, flash }: { t: AgentTabTimeline; terms: Terms; flash: string | null }) {
   const ref = useRef<HTMLOListElement>(null);
   useEffect(() => {
@@ -513,13 +549,31 @@ function Timeline({ t, terms, flash }: { t: AgentTabTimeline; terms: Terms; flas
     return () => clearInterval(id);
   }, [t.live]);
   const waited = last?.at != null ? Math.max(0, Math.round(now - last.at)) : null;
+  // 배정은 지시서마다 접는다 (항목 머리줄 ▸ 기준). 펼치면 그 지시서 안의 단계가 한 줄씩
+  const segments = useMemo(() => (t.agent === "dispatch" ? splitByItem(t.events) : null), [t.agent, t.events]);
+  const [fold, setFold] = useState<{ open: boolean; v: number }>({ open: false, v: 0 });   // 모두 펼치기·접기 (v가 바뀌면 다시 그림)
   return (
     <div className="panel">
-      <h3>진행 기록 <span className="muted small">(AI 판단 → 도구 사용 → 검사 · {t.total_events}줄{t.live ? " · 실행 중 한 줄씩 쌓임" : ""})</span></h3>
+      <h3>진행 기록 <span className="muted small">(AI 판단 → 도구 사용 → 검사 · {t.total_events}줄 · 오른쪽은 실제로 불린 코드
+        {segments ? ` · 지시서 ${segments.length}건, 누르면 펼침` : ""}{t.live ? " · 실행 중 한 줄씩 쌓임" : ""})</span>
+        {segments && segments.length > 1 && (
+          <span className="tl-fold-all">
+            <button className="link-button small" onClick={() => setFold({ open: true, v: fold.v + 1 })}>모두 펼치기</button>{" "}
+            <button className="link-button small" onClick={() => setFold({ open: false, v: fold.v + 1 })}>모두 접기</button>
+          </span>
+        )}
+      </h3>
       {t.events.length === 0 && <p className="muted small">{t.live ? "첫 응답을 기다리는 중…" : "기록이 없습니다."}</p>}
       <ol className="agent-timeline" ref={ref}>
-        {t.events.map((e) => <TimelineRow key={e.seq} e={e} terms={terms} showItem={t.agent !== "dispatch"} itemLabels={t.item_labels}
-          nested={t.agent === "supervisor" && !!e.item} />)}
+        {segments
+          ? segments.map((seg, i) => (
+            <ItemSegment key={`${seg.item}-${fold.v}`} seg={seg} terms={terms}
+              open={fold.v ? fold.open : t.live && i === segments.length - 1} />
+          ))
+          : groupRepeats(t.events).map(({ e, group }) => (
+            <TimelineRow key={e.seq} e={e} group={group} terms={terms} showItem={t.agent !== "dispatch"} itemLabels={t.item_labels}
+              nested={t.agent === "supervisor" && !!e.item} />
+          ))}
         {working === "ai" && !flash && t.events.length > 0 && (
           <li className="tl-thinking muted"><span className="tl-turn" /><span className="tl-kind">AI 판단</span>
             AI가 생각하는 중…{waited != null ? ` ${waited}초` : ""}</li>
@@ -544,25 +598,30 @@ function Raw({ e }: { e: TimelineEvent }) {
   );
 }
 
-function TimelineRow({ e, terms, showItem, itemLabels, nested = false }: {
+function TimelineRow({ e, terms, showItem, itemLabels, nested = false, group }: {
   e: TimelineEvent; terms: Terms; showItem: boolean; itemLabels?: Record<string, string>;
   nested?: boolean;   // Supervisor가 부른 에이전트의 줄: 들여 써서 Supervisor 자신의 턴과 나눈다
+  group?: TimelineEvent[];   // 연달아 같은 도구를 부른 줄들 (×N으로 한 줄)
 }) {
   const n = nested ? " tl-sub" : "";
-  if (e.type === "item") return <li className="tl-item">▸ {e.item}</li>;
+  const count = group?.length ?? 1;
+  const code = <code className="tl-code" title="실제로 불린 코드">{codeOf(e, count)}</code>;
+  if (e.type === "item") return <li className="tl-item">{code}▸ {e.item}</li>;
   const turn = e.turn ? <span className="tl-turn" title={`AI의 ${e.turn}번째 응답`}>{e.turn}번째</span> : <span className="tl-turn" />;
   // 배정은 항목 머리줄(▸)로 나뉘므로 줄마다 항목을 붙이지 않는다. 관점별 분석은 관점을 붙인다
   const where = showItem && e.item && e.type !== "decision" ? <span className="muted small"> [{itemLabels?.[e.item] ?? e.item}]</span> : null;
   if (e.type === "llm") {
-    return <li className={"tl-llm" + n}>{turn}<span className="tl-kind">AI 판단</span> {terms.aiAsked(e)}{where}<Raw e={e} /></li>;
+    return <li className={"tl-llm" + n}>{code}{turn}<span className="tl-kind">AI 판단</span> {terms.aiAsked(e)}{where}<Raw e={e} /></li>;
   }
   if (e.type === "tool") {
     const args = terms.args(e.input);
+    const bad = (group ?? [e]).filter((x) => x.ok === false).length;
     return (
-      <li className={(e.ok === false ? "tl-tool tl-bad" : "tl-tool") + n}>
-        {turn}<span className="tl-kind">도구 사용</span> {terms.tool(e.name ?? e.text)}
-        {args ? <span className="tl-io"> ({args})</span> : null}
-        <span className="tl-io"> → {e.ok === false ? "오류" : "결과 받음"}</span>{where}<Raw e={e} />
+      <li className={(bad ? "tl-tool tl-bad" : "tl-tool") + n}>
+        {code}{turn}<span className="tl-kind">도구 사용</span> {terms.tool(e.name ?? e.text)}{count > 1 ? ` ×${count}` : ""}
+        {args ? <span className="tl-io"> ({args}{count > 1 ? ` 외 ${count - 1}건` : ""})</span> : null}
+        <span className="tl-io"> → {bad ? `오류${count > 1 ? ` ${bad}건` : ""}` : "결과 받음"}</span>{where}
+        {count > 1 ? <GroupRaw group={group!} /> : <Raw e={e} />}
       </li>
     );
   }
@@ -570,17 +629,45 @@ function TimelineRow({ e, terms, showItem, itemLabels, nested = false }: {
     const c = terms.check(e);
     return (
       <li className={`tl-check tl-${c.tone}${n}`}>
-        {turn}<span className="tl-kind">{c.tone === "ok" ? "✓" : c.tone === "bad" ? "✕" : "↻"} {c.label}</span>{" "}
+        {code}{turn}<span className="tl-kind">{c.tone === "ok" ? "✓" : c.tone === "bad" ? "✕" : "↻"} {c.label}</span>{" "}
         {c.detail}{where}<Raw e={e} />
       </li>
     );
   }
-  if (e.type === "decision") return <li className="tl-decision"><span className="tl-turn" /><span className="tl-kind">결정</span> {terms.decision(e)}</li>;
+  if (e.type === "decision") return <li className="tl-decision">{code}<span className="tl-turn" /><span className="tl-kind">결정</span> {terms.decision(e)}</li>;
   if (e.type === "nudge") {
-    return <li className={"tl-check tl-info" + n}>{turn}<span className="tl-kind">↻ 재요청</span> AI가 글로만 답해서 결과를 제출하라고 다시 요청함<Raw e={e} /></li>;
+    return <li className={"tl-check tl-info" + n}>{code}{turn}<span className="tl-kind">↻ 재요청</span> AI가 글로만 답해서 결과를 제출하라고 다시 요청함<Raw e={e} /></li>;
   }
-  if (e.type === "end") return <li className={"tl-end muted" + n}><span className="tl-turn" />{terms.end(e)}{where}</li>;
+  if (e.type === "end") return <li className={"tl-end muted" + n}>{code}<span className="tl-turn" />{terms.end(e)}{where}</li>;
   return <li className="tl-end muted"><span className="tl-turn" />{e.text}</li>;
+}
+
+// 묶인 도구 호출들의 원본 (호출마다 입력·결과)
+function GroupRaw({ group }: { group: TimelineEvent[] }) {
+  return (
+    <details className="tl-raw">
+      <summary>자세히</summary>
+      {group.map((e) => (
+        <div key={e.seq}><code>{e.name}</code>{e.ref ? <span className="muted"> {e.ref}</span> : null}
+          {e.input ? <> 입력 <code>{e.input}</code></> : null}{e.output ? <> → <code>{e.output}</code></> : null}</div>
+      ))}
+    </details>
+  );
+}
+
+// 연달아 같은 도구를 부른 줄(같은 응답·같은 항목)을 하나로 묶는다. 단계 순서는 그대로
+function groupRepeats(events: TimelineEvent[]): { e: TimelineEvent; group?: TimelineEvent[] }[] {
+  const out: { e: TimelineEvent; group?: TimelineEvent[] }[] = [];
+  for (const e of events) {
+    const prev = out[out.length - 1];
+    if (prev && e.type === "tool" && prev.e.type === "tool" && prev.e.name === e.name && prev.e.turn === e.turn
+        && prev.e.item === e.item) {
+      prev.group = [...(prev.group ?? [prev.e]), e];
+    } else {
+      out.push({ e });
+    }
+  }
+  return out;
 }
 
 // Supervisor (M18) 판단 보고서: 추천안(코드가 돌린 미리 돌려보기 요약), 사람에게 묻는 것, 원인 가설·시도 기록
@@ -723,7 +810,8 @@ function SupervisorTimeline({ t, terms, flash, adapter }: {
         <details open={t.live && working === to}>
           <summary className="muted small">{TEAM_LABEL[to]} 진행 {evs.length}줄 ({item})</summary>
           <ol className="agent-timeline">
-            {evs.map((e) => <TimelineRow key={e.seq} e={{ ...e, item: undefined }} terms={terms} showItem={false} nested />)}
+            {groupRepeats(evs.map((e) => ({ ...e, item: undefined }))).map(({ e, group }) =>
+              <TimelineRow key={e.seq} e={e} group={group} terms={terms} showItem={false} nested />)}
           </ol>
         </details>
       </li>
@@ -742,7 +830,7 @@ function SupervisorTimeline({ t, terms, flash, adapter }: {
       if (t.live && !answered) {
         asked.forEach((name, j) => {
           const to = TEAM_TOOL[name] ?? "supervisor";
-          rows.push(<li key={`${e.seq}-p${j}`} className="tl-msg tl-ask">{turn}
+          rows.push(<li key={`${e.seq}-p${j}`} className="tl-msg tl-ask"><code className="tl-code">{name}(…)</code>{turn}
             <span className="tl-kind">Supervisor → {TEAM_LABEL[to]}</span> {terms.tool(name)}
             <span className="muted"> · {TEAM_LABEL[to]}가 일하는 중…</span></li>);
           const d = subDetails(to, `${e.seq}-p${j}`);
@@ -756,7 +844,7 @@ function SupervisorTimeline({ t, terms, flash, adapter }: {
       const to = m?.to ?? TEAM_TOOL[e.name ?? ""] ?? "supervisor";
       const ask = m?.ask ?? (terms.args(e.input) || terms.tool(e.name ?? ""));
       const where = m?.slice ? ` · 구간: ${terms.args(JSON.stringify(m.slice))}` : "";
-      rows.push(<li key={`${e.seq}-a`} className="tl-msg tl-ask">{turn}
+      rows.push(<li key={`${e.seq}-a`} className="tl-msg tl-ask"><code className="tl-code">{codeOf(e)}</code>{turn}
         <span className="tl-kind">Supervisor → {TEAM_LABEL[to]}</span> {ask}{where}</li>);
       const d = subDetails(to, String(e.seq));
       if (d) rows.push(d);
@@ -771,11 +859,11 @@ function SupervisorTimeline({ t, terms, flash, adapter }: {
     }
     if (e.type === "check") {
       const c = terms.check(e);
-      rows.push(<li key={e.seq} className={`tl-msg tl-${c.tone}`}>{turn}
+      rows.push(<li key={e.seq} className={`tl-msg tl-${c.tone}`}><code className="tl-code">{codeOf(e)}</code>{turn}
         <span className="tl-kind">보고서 검사 → Supervisor</span> {c.tone === "ok" ? "✓ 통과" : `✕ 반려: ${c.detail}`}<Raw e={e} /></li>);
       return;
     }
-    if (e.type === "end") rows.push(<li key={e.seq} className="tl-end muted"><span className="tl-turn" />{terms.end(e)}</li>);
+    if (e.type === "end") rows.push(<li key={e.seq} className="tl-end muted"><code className="tl-code">{codeOf(e)}</code><span className="tl-turn" />{terms.end(e)}</li>);
   });
   return (
     <div className="panel">
