@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../api";
+import { api, isGone } from "../api";
 import type {
   AgentsGraph, AgentTabHistoryRow, AgentTabInfo, AgentTabSources, AgentTabTimeline, Constraint, DomainInfo, LlmCacheState,
   OpinionHint, TabAgent,
@@ -154,8 +154,6 @@ export default function AgentRunsPanel({
   }).catch(() => undefined);
   useEffect(() => { api.agentTabInfo().then(setInfo).catch((e) => setError(String(e.message ?? e))); refreshSources(); }, []);
   useEffect(() => { api.llmCache().then(setCache).catch(() => setCache(null)); }, []);
-  // 기억해 둔 실행이 서버에 없으면(서버를 다시 띄워 사라짐) 처음 화면으로
-  useEffect(() => { if (current) api.agentTabTimeline(current.agent, current.id).catch(() => setCurrent(null)); }, []);
   useEffect(() => {
     if (agent !== "opinion" || !proposalId) { setHints([]); return; }
     api.proposalOpinionHints(proposalId).then((r) => setHints(r.hints)).catch(() => setHints([]));
@@ -168,7 +166,10 @@ export default function AgentRunsPanel({
     [graphLevel, graphMode]);
 
   const timeline = usePoll<AgentTabTimeline>(
-    current ? () => api.agentTabTimeline(current.agent, current.id) : null,
+    current ? () => api.agentTabTimeline(current.agent, current.id).catch((e) => {
+      if (isGone(e)) setCurrent(null);   // 기억한 실행이 서버에 없으면 처음 화면으로
+      throw e;
+    }) : null,
     (t) => !t.live && t.status !== "running",
     [current?.agent, current?.id], 700,
   );

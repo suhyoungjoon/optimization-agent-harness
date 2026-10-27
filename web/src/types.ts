@@ -494,6 +494,7 @@ export interface WorkflowRun {
   steps: WorkflowStep[];
   ids: Partial<Record<"dataset_id" | "rule_run_id" | "ai_run_id" | "full_rule_run_id" | "report_id" | "batch_id" | "proposal_id", string>>;
   inputs: { domain?: string; seed?: number; faults?: string[]; items?: number; level?: string; scope?: string[] };
+  progress?: { run_id: string; done: number | null; total: number | null } | null;   // AI 방식 실행 단계가 도는 중이면 몇 건째
 }
 
 // --- LangGraph agents (M10) ---

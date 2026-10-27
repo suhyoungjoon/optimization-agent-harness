@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../api";
+import { api, isGone } from "../api";
 import type { DomainAdapter } from "../domains/types";
 import type { AgentEvent, AgentsGraph, AgentsLoop, AgentsMode, AgentsRun, Constraint, DomainInfo, HarnessInfo, JudgmentView } from "../types";
 import type { MetricSpec } from "../domains/types";
@@ -76,7 +76,11 @@ export default function AgentsPanel({
     api.agentsGraph(runLevel, domain.name, runPerspectives, runEndCheck, runMode).then(setGraph).catch((e) => setError(String(e)));
   }, [runLevel, runPerspectives, runEndCheck, runMode, domain.name]);
 
-  const polled = usePoll<AgentsRun>(flowId ? () => api.agentsGet(flowId, lastI.current) : null,
+  const gone = (e: unknown) => {   // 서버를 다시 띄워 실행이 없으면 계속 묻지 않고 처음 화면으로
+    if (isGone(e)) { setFlowId(null); setRun(null); setEvents([]); lastI.current = -1; setError("서버를 다시 띄워 진행 중이던 실행이 사라졌습니다. 처음부터 다시 시작하세요."); }
+    throw e;
+  };
+  const polled = usePoll<AgentsRun>(flowId ? () => api.agentsGet(flowId, lastI.current).catch(gone) : null,
     (r) => r.status !== "running", [flowId, tick], 300);
   useEffect(() => {
     if (!polled || polled.id !== flowId) return;

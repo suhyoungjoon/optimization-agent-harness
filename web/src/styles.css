@@ -639,3 +639,7 @@ input.approver { width: 9em; }
 .agent-timeline .tl-segment > details[open] > summary strong::after { content: ""; }
 .agent-timeline .tl-segment-rows { max-height: none; overflow: visible; padding-left: 16px; border-left: 2px solid var(--border); margin-bottom: 4px; }
 .tl-fold-all { float: right; font-weight: normal; }
+
+/* 워크플로우 AI 방식 실행 진행 건수 */
+.wf-progress { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; font-variant-numeric: tabular-nums; }
+.wf-progress progress { width: 120px; height: 8px; }

@@ -120,3 +120,27 @@ def test_step_lines_show_failure_and_cache_hits():
     assert _failure_line({"status": "tool_failure", "label": "도구 실패", "reason": "x가 AI 응답 3번 연속으로 실패"}) == \
         ["✕ 도구 실패: x가 AI 응답 3번 연속으로 실패"]
     assert _failure_line(None) == []
+
+
+def test_ai_step_reports_item_progress_while_running(tmp_path):
+    """AI 방식 실행 단계는 도는 동안 몇 건째인지 내준다 (화면의 진행 표시). 끝나면 없어진다."""
+    build(tmp_path / "bundle")
+    try:
+        c = TestClient(create_app(serve_web=False, llm_factory=forbidden_llm, demo_bundle=tmp_path / "bundle",
+                                  demo_work_root=tmp_path / "work", replay_seconds=1.5))
+        snap = start(c)
+        for _ in range(2):
+            snap = step(c, snap["id"])
+        assert snap["next"] == ["ai_agent"] and snap["progress"] is None
+        c.post(f"/workflow/runs/{snap['id']}/step", json={"action": "next"})
+        seen = []
+        deadline = time.time() + 60
+        while (s := c.get(f"/workflow/runs/{snap['id']}").json())["status"] == "running":
+            assert time.time() < deadline
+            if s["progress"]:
+                seen.append(s["progress"])
+            time.sleep(0.05)
+        assert seen and seen[-1]["total"] == 10 and seen[-1]["run_id"]
+        assert s["progress"] is None and s["steps"][-1]["node"] == "ai_agent"
+    finally:
+        set_domain_files_root(None)

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, isGone } from "../api";
 import type { DomainAdapter } from "../domains/types";
 import type { DomainInfo, HarnessInfo, WorkflowGraph, WorkflowNode, WorkflowRun } from "../types";
 import { TERMS, tip } from "../terms";
@@ -48,7 +48,11 @@ export default function WorkflowPanel({
     api.workflowGraph().then(setGraph).catch((e) => setError(String(e)));
   }, []);
 
-  const polled = usePoll<WorkflowRun>(flowId ? () => api.workflowGet(flowId) : null, (r) => r.status !== "running", [flowId, tick], 400);
+  const gone = (e: unknown) => {   // 서버를 다시 띄워 실행이 없으면 계속 묻지 않고 처음 화면으로
+    if (isGone(e)) { setFlowId(null); setLatest(null); setError("서버를 다시 띄워 진행 중이던 실행이 사라졌습니다. 처음부터 다시 시작하세요."); }
+    throw e;
+  };
+  const polled = usePoll<WorkflowRun>(flowId ? () => api.workflowGet(flowId).catch(gone) : null, (r) => r.status !== "running", [flowId, tick], 400);
   useEffect(() => {
     if (polled && polled.id === flowId) setLatest(polled);
   }, [polled]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -156,6 +160,7 @@ export default function WorkflowPanel({
                       )}
                     </div>
                     {steps.length === 0 && <p className="muted small">{n.description}</p>}
+                    {st === "running" && run?.progress?.total ? <p className="small"><ItemProgress done={run.progress.done ?? 0} total={run.progress.total} /></p> : null}
                     {steps.map((s, k) => (
                       <ul key={k} className="wf-lines small">
                         {steps.length > 1 && <li className="muted">{k + 1}회차</li>}
@@ -207,6 +212,15 @@ g.add_edge("review_agent", "simulate")`}</pre>
 
 export type StepAction = "next" | "approve" | "reject" | "opinion" | "confirm";
 
+// AI 방식 실행 단계의 진행 건수 (예: 23/50건)
+function ItemProgress({ done, total }: { done: number; total: number }) {
+  return (
+    <span className="wf-progress" title="AI가 배정을 끝낸 건수">
+      <progress max={total} value={done} /> {done}/{total}건
+    </span>
+  );
+}
+
 export function StepBar({
   run,
   nextLabel,
@@ -219,7 +233,7 @@ export function StepBar({
   approval,
   opinionChips,
 }: {
-  run: Pick<WorkflowRun, "status" | "steps" | "waiting" | "error" | "current"> | null;   // M9·M10 공통
+  run: Pick<WorkflowRun, "status" | "steps" | "waiting" | "error" | "current"> & { progress?: WorkflowRun["progress"] } | null;   // M9·M10 공통
   nextLabel: string | null;
   currentLabel: string | null;
   note: string;
@@ -236,7 +250,13 @@ export function StepBar({
     return <div className="verdict wf-bar"><span className="muted">{idleText}</span></div>;
   }
   if (run.status === "running") {
-    return <div className="verdict wf-bar" role="status"><span>실행 중: <strong>{currentLabel ?? nextLabel}</strong>…</span></div>;
+    const p = run.progress;
+    return (
+      <div className="verdict wf-bar" role="status">
+        <span>실행 중: <strong>{currentLabel ?? nextLabel}</strong>…</span>
+        {p?.total ? <ItemProgress done={p.done ?? 0} total={p.total} /> : null}
+      </div>
+    );
   }
   if (run.status === "done") {
     return <div className="verdict wf-bar" role="status"><span className="good-text">✓ 끝 ({run.steps.length}단계)</span><span className="muted">{doneText}</span></div>;

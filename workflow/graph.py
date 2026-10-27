@@ -24,6 +24,7 @@ class Api:
                  timeout_seconds: float = 3600):
         self.get, self.post = get, post
         self.poll_seconds, self.timeout_seconds = poll_seconds, timeout_seconds
+        self.live: dict[str, str] = {}   # 워크플로우 실행 id → 지금 기다리는 AI 실행 id (화면의 진행 건수용)
 
     def wait(self, path: str, finished: Callable[[dict], bool]) -> dict:
         """백그라운드 작업(AI 실행·분석·개선안 생성)이 끝날 때까지 기다린다."""
@@ -150,11 +151,16 @@ def build(api: Api, checkpointer=None):
         return {"rule_run_id": run["run_id"], **_step("rule_agent", [_run_line(state, "규칙 방식", run)],
                                                       run_id=run["run_id"])}
 
-    def ai_agent(state: FlowState):
+    def ai_agent(state: FlowState, config):
         res = api.post("/runs", {"dataset_id": state["dataset_id"], "agent": "ai", "level": state["level"],
                                  "scope": state["scope"]})
         run_id = res["runs"][0]["run_id"]
-        run = api.wait(f"/runs/{run_id}", lambda r: r["status"] in ("done", "error"))
+        flow_id = config["configurable"]["thread_id"]
+        api.live[flow_id] = run_id
+        try:
+            run = api.wait(f"/runs/{run_id}", lambda r: r["status"] in ("done", "error"))
+        finally:
+            api.live.pop(flow_id, None)
         if run["status"] == "error":
             raise RuntimeError(f"AI 실행 실패: {(run.get('meta') or {}).get('error')}")
         usage = (run.get("meta") or {}).get("usage") or {}

@@ -4,6 +4,9 @@ import type {
   AgentTabInfo, AgentTabSources, AgentTabHistoryRow, AgentTabTimeline, TabAgent, ProposalOutcome, AgentsMode, LlmCacheState, OpinionHint,
 } from "./types";
 
+// 서버에 그 실행이 없음 (서버를 다시 띄워 메모리의 실행이 사라짐)
+export const isGone = (e: unknown) => (e as { status?: number })?.status === 404;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
@@ -11,7 +14,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail ?? `${res.status} ${res.statusText}`);
+    throw Object.assign(new Error(body.detail ?? `${res.status} ${res.statusText}`), { status: res.status });
   }
   return res.json() as Promise<T>;
 }
