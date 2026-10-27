@@ -554,7 +554,7 @@ function Timeline({ t, terms, flash }: { t: AgentTabTimeline; terms: Terms; flas
   const [fold, setFold] = useState<{ open: boolean; v: number }>({ open: false, v: 0 });   // 모두 펼치기·접기 (v가 바뀌면 다시 그림)
   return (
     <div className="panel">
-      <h3>진행 기록 <span className="muted small">(AI 판단 → 도구 사용 → 검사 · {t.total_events}줄 · 오른쪽은 실제로 불린 코드
+      <h3>진행 기록 <span className="muted small">(AI 판단 → 도구 사용 → 검사 · {t.total_events}줄 · 이름 옆 회색 글씨는 실제로 불린 코드
         {segments ? ` · 지시서 ${segments.length}건, 누르면 펼침` : ""}{t.live ? " · 실행 중 한 줄씩 쌓임" : ""})</span>
         {segments && segments.length > 1 && (
           <span className="tl-fold-all">
@@ -606,21 +606,19 @@ function TimelineRow({ e, terms, showItem, itemLabels, nested = false, group }: 
   const n = nested ? " tl-sub" : "";
   const count = group?.length ?? 1;
   const code = <code className="tl-code" title="실제로 불린 코드">{codeOf(e, count)}</code>;
-  if (e.type === "item") return <li className="tl-item">{code}▸ {e.item}</li>;
+  if (e.type === "item") return <li className="tl-item">▸ {e.item} {code}</li>;
   const turn = e.turn ? <span className="tl-turn" title={`AI의 ${e.turn}번째 응답`}>{e.turn}번째</span> : <span className="tl-turn" />;
   // 배정은 항목 머리줄(▸)로 나뉘므로 줄마다 항목을 붙이지 않는다. 관점별 분석은 관점을 붙인다
   const where = showItem && e.item && e.type !== "decision" ? <span className="muted small"> [{itemLabels?.[e.item] ?? e.item}]</span> : null;
   if (e.type === "llm") {
-    return <li className={"tl-llm" + n}>{code}{turn}<span className="tl-kind">AI 판단</span> {terms.aiAsked(e)}{where}<Raw e={e} /></li>;
+    return <li className={"tl-llm" + n}>{turn}<span className="tl-kind">AI 판단</span>{code}{terms.aiAsked(e)}{where}<Raw e={e} /></li>;
   }
   if (e.type === "tool") {
-    const args = terms.args(e.input);
     const bad = (group ?? [e]).filter((x) => x.ok === false).length;
     return (
       <li className={(bad ? "tl-tool tl-bad" : "tl-tool") + n}>
-        {code}{turn}<span className="tl-kind">도구 사용</span> {terms.tool(e.name ?? e.text)}{count > 1 ? ` ×${count}` : ""}
-        {args ? <span className="tl-io"> ({args}{count > 1 ? ` 외 ${count - 1}건` : ""})</span> : null}
-        <span className="tl-io"> → {bad ? `오류${count > 1 ? ` ${bad}건` : ""}` : "결과 받음"}</span>{where}
+        {turn}<span className="tl-kind">도구 사용</span> {terms.tool(e.name ?? e.text)}{code}
+        {bad ? <span className="tl-io">→ 오류{count > 1 ? ` ${bad}건` : ""}</span> : null}{where}
         {count > 1 ? <GroupRaw group={group!} /> : <Raw e={e} />}
       </li>
     );
@@ -629,16 +627,16 @@ function TimelineRow({ e, terms, showItem, itemLabels, nested = false, group }: 
     const c = terms.check(e);
     return (
       <li className={`tl-check tl-${c.tone}${n}`}>
-        {code}{turn}<span className="tl-kind">{c.tone === "ok" ? "✓" : c.tone === "bad" ? "✕" : "↻"} {c.label}</span>{" "}
+        {turn}<span className="tl-kind">{c.tone === "ok" ? "✓" : c.tone === "bad" ? "✕" : "↻"} {c.label}</span>{code}
         {c.detail}{where}<Raw e={e} />
       </li>
     );
   }
-  if (e.type === "decision") return <li className="tl-decision">{code}<span className="tl-turn" /><span className="tl-kind">결정</span> {terms.decision(e)}</li>;
+  if (e.type === "decision") return <li className="tl-decision"><span className="tl-turn" /><span className="tl-kind">결정</span>{code}{terms.decision(e)}</li>;
   if (e.type === "nudge") {
-    return <li className={"tl-check tl-info" + n}>{code}{turn}<span className="tl-kind">↻ 재요청</span> AI가 글로만 답해서 결과를 제출하라고 다시 요청함<Raw e={e} /></li>;
+    return <li className={"tl-check tl-info" + n}>{turn}<span className="tl-kind">↻ 재요청</span>{code}AI가 글로만 답해서 결과를 제출하라고 다시 요청함<Raw e={e} /></li>;
   }
-  if (e.type === "end") return <li className={"tl-end muted" + n}>{code}<span className="tl-turn" />{terms.end(e)}{where}</li>;
+  if (e.type === "end") return <li className={"tl-end muted" + n}><span className="tl-turn" />{terms.end(e)}{code}{where}</li>;
   return <li className="tl-end muted"><span className="tl-turn" />{e.text}</li>;
 }
 
@@ -830,8 +828,8 @@ function SupervisorTimeline({ t, terms, flash, adapter }: {
       if (t.live && !answered) {
         asked.forEach((name, j) => {
           const to = TEAM_TOOL[name] ?? "supervisor";
-          rows.push(<li key={`${e.seq}-p${j}`} className="tl-msg tl-ask"><code className="tl-code">{name}(…)</code>{turn}
-            <span className="tl-kind">Supervisor → {TEAM_LABEL[to]}</span> {terms.tool(name)}
+          rows.push(<li key={`${e.seq}-p${j}`} className="tl-msg tl-ask">{turn}
+            <span className="tl-kind">Supervisor → {TEAM_LABEL[to]}</span> {terms.tool(name)}<code className="tl-code">{name}(…)</code>
             <span className="muted"> · {TEAM_LABEL[to]}가 일하는 중…</span></li>);
           const d = subDetails(to, `${e.seq}-p${j}`);
           if (d) rows.push(d);
@@ -844,8 +842,8 @@ function SupervisorTimeline({ t, terms, flash, adapter }: {
       const to = m?.to ?? TEAM_TOOL[e.name ?? ""] ?? "supervisor";
       const ask = m?.ask ?? (terms.args(e.input) || terms.tool(e.name ?? ""));
       const where = m?.slice ? ` · 구간: ${terms.args(JSON.stringify(m.slice))}` : "";
-      rows.push(<li key={`${e.seq}-a`} className="tl-msg tl-ask"><code className="tl-code">{codeOf(e)}</code>{turn}
-        <span className="tl-kind">Supervisor → {TEAM_LABEL[to]}</span> {ask}{where}</li>);
+      rows.push(<li key={`${e.seq}-a`} className="tl-msg tl-ask">{turn}
+        <span className="tl-kind">Supervisor → {TEAM_LABEL[to]}</span><code className="tl-code">{codeOf(e)}</code>{ask}{where}</li>);
       const d = subDetails(to, String(e.seq));
       if (d) rows.push(d);
       const metrics = m?.metrics ? headline.filter((h) => m.metrics?.[h.key]).map((h) => {
@@ -859,11 +857,11 @@ function SupervisorTimeline({ t, terms, flash, adapter }: {
     }
     if (e.type === "check") {
       const c = terms.check(e);
-      rows.push(<li key={e.seq} className={`tl-msg tl-${c.tone}`}><code className="tl-code">{codeOf(e)}</code>{turn}
-        <span className="tl-kind">보고서 검사 → Supervisor</span> {c.tone === "ok" ? "✓ 통과" : `✕ 반려: ${c.detail}`}<Raw e={e} /></li>);
+      rows.push(<li key={e.seq} className={`tl-msg tl-${c.tone}`}>{turn}
+        <span className="tl-kind">보고서 검사 → Supervisor</span><code className="tl-code">{codeOf(e)}</code>{c.tone === "ok" ? "✓ 통과" : `✕ 반려: ${c.detail}`}<Raw e={e} /></li>);
       return;
     }
-    if (e.type === "end") rows.push(<li key={e.seq} className="tl-end muted"><code className="tl-code">{codeOf(e)}</code><span className="tl-turn" />{terms.end(e)}</li>);
+    if (e.type === "end") rows.push(<li key={e.seq} className="tl-end muted"><span className="tl-turn" />{terms.end(e)}<code className="tl-code">{codeOf(e)}</code></li>);
   });
   return (
     <div className="panel">

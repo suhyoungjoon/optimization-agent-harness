@@ -629,9 +629,10 @@ input.approver { width: 9em; }
 .opinion-chip { font-size: 12px; border: 1px solid var(--border); border-radius: 12px; padding: 2px 10px; background: var(--surface); cursor: pointer; }
 .opinion-chip.hint { border-color: var(--series-1); }
 .opinion-chip:hover { background: var(--surface-2, rgba(42, 120, 214, 0.08)); }
-/* 진행 기록: 실제 코드 호출(오른쪽), 지시서 접기 */
-.agent-timeline .tl-code { float: right; margin-left: 10px; max-width: 42%; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; font-size: 11px; color: var(--text-secondary); background: none; }
+/* 진행 기록: 실제 코드 호출(한글 이름 바로 뒤), 지시서 접기 */
+.agent-timeline .tl-code { display: inline-block; vertical-align: bottom; margin: 0 6px; max-width: 60%; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-secondary); padding: 0 5px; border-radius: 4px;
+  background: var(--surface-2, rgba(42, 120, 214, 0.08)); }
 .agent-timeline .tl-segment { padding: 0; }
 .agent-timeline .tl-segment > details > summary { cursor: pointer; padding: 4px 0; list-style: none; }
 .agent-timeline .tl-segment > details > summary::-webkit-details-marker { display: none; }
