@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../api";
+import { api, isGone } from "../api";
 import type {
   AgentsGraph, AgentTabHistoryRow, AgentTabInfo, AgentTabSources, AgentTabTimeline, Constraint, DomainInfo, LlmCacheState,
   OpinionHint, TabAgent,
@@ -7,6 +7,7 @@ import type {
 } from "../types";
 import type { DomainAdapter } from "../domains/types";
 import GraphCanvas, { type NodeView } from "./GraphCanvas";
+import { useSessionState } from "./useStoredId";
 import { PLAIN_EDGES, PLAIN_NODES, codeOf, makeTerms, type Terms } from "./agentTerms";
 import { fmtMetric } from "./MetricsPanel";
 import { constraintText } from "./ImprovementPanel";
@@ -122,32 +123,34 @@ export default function AgentRunsPanel({
   onOpenReport?: (reportId: string) => void;   // 분석 리포트를 문제 찾기 탭에서 연다
   onOpenBatch?: (batchId: string) => void;     // 개선안 묶음을 개선 제안 탭에서 연다
 }) {
-  const [agent, setAgent] = useState<TabAgent>("dispatch");
+  const [agent, setAgent] = useSessionState<TabAgent>("agentTab.agent", "dispatch");
   const [info, setInfo] = useState<AgentTabInfo | null>(null);
   const [sources, setSources] = useState<AgentTabSources | null>(null);
   const [history, setHistory] = useState<AgentTabHistoryRow[]>([]);
   const [graph, setGraph] = useState<AgentsGraph | null>(null);
-  const [current, setCurrent] = useState<{ agent: TabAgent; id: string } | null>(null);
+  const [current, setCurrent] = useSessionState<{ agent: TabAgent; id: string } | null>("agentTab.current", null);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 입력
-  const [items, setItems] = useState(10);
-  const [level, setLevel] = useState("L5");
-  const [ruleRun, setRuleRun] = useState("");
-  const [perspectives, setPerspectives] = useState(false);
-  const [reportId, setReportId] = useState("");
-  const [useSaved, setUseSaved] = useState(true);
-  const [proposalId, setProposalId] = useState("");
-  const [opinion, setOpinion] = useState("관할 밖 4km 초과 출동 불가");
+  const [items, setItems] = useSessionState("agentTab.items", 10);
+  const [level, setLevel] = useSessionState("agentTab.level", "L5");
+  const [ruleRun, setRuleRun] = useSessionState("agentTab.ruleRun", "");
+  const [perspectives, setPerspectives] = useSessionState("agentTab.perspectives", false);
+  const [reportId, setReportId] = useSessionState("agentTab.reportId", "");
+  const [useSaved, setUseSaved] = useSessionState("agentTab.useSaved", true);
+  const [proposalId, setProposalId] = useSessionState("agentTab.proposalId", "");
+  const [opinion, setOpinion] = useSessionState("agentTab.opinion", "관할 밖 4km 초과 출동 불가");
   const [cache, setCache] = useState<LlmCacheState | null>(null);   // AI 응답 캐시 (서버 전체)
   const [hints, setHints] = useState<OpinionHint[]>([]);            // 의견 추천 재료 (고른 개선안 기준, 코드 계산)
 
   const refreshSources = () => api.agentTabSources().then((s) => {
     setSources(s);
-    setRuleRun((v) => v || s.rule_runs[0]?.id || "");
-    setReportId((v) => v || s.reports[0]?.id || "");
-    setProposalId((v) => v || s.proposals[0]?.id || "");
+    // 기억해 둔 값이 목록에 없으면(지워졌거나 서버가 바뀜) 첫 항목으로
+    const keep = (v: string, rows: { id: string }[]) => (rows.some((r) => r.id === v) ? v : rows[0]?.id || "");
+    setRuleRun((v) => keep(v, s.rule_runs));
+    setReportId((v) => keep(v, s.reports));
+    setProposalId((v) => keep(v, s.proposals));
   }).catch(() => undefined);
   useEffect(() => { api.agentTabInfo().then(setInfo).catch((e) => setError(String(e.message ?? e))); refreshSources(); }, []);
   useEffect(() => { api.llmCache().then(setCache).catch(() => setCache(null)); }, []);
@@ -163,7 +166,10 @@ export default function AgentRunsPanel({
     [graphLevel, graphMode]);
 
   const timeline = usePoll<AgentTabTimeline>(
-    current ? () => api.agentTabTimeline(current.agent, current.id) : null,
+    current ? () => api.agentTabTimeline(current.agent, current.id).catch((e) => {
+      if (isGone(e)) setCurrent(null);   // 기억한 실행이 서버에 없으면 처음 화면으로
+      throw e;
+    }) : null,
     (t) => !t.live && t.status !== "running",
     [current?.agent, current?.id], 700,
   );

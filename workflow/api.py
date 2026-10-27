@@ -55,12 +55,24 @@ class Flows:
                 raise RuntimeError(f"{method} {path} → {res.status_code}: {detail}")
             return res.json()
 
-        self.graph = build(Api(lambda p: call("GET", p), lambda p, b: call("POST", p, b)))
+        self.api = Api(lambda p: call("GET", p), lambda p, b: call("POST", p, b))
+        self.graph = build(self.api)
         self.runs = GraphRuns(Command)
+
+    def progress(self, flow_id: str) -> dict | None:
+        """AI 방식 실행 단계가 도는 중이면 몇 건째인지 (없으면 None)."""
+        run_id = self.api.live.get(flow_id)
+        if not run_id:
+            return None
+        try:
+            p = self.api.get(f"/runs/{run_id}").get("progress") or {}
+        except RuntimeError:
+            return None
+        return {"run_id": run_id, "done": p.get("done"), "total": p.get("total")}
 
     def snapshot(self, flow_id: str) -> dict:
         snap, values = self.runs.base_snapshot(flow_id)
-        return {**snap, "steps": values.get("log", []),
+        return {**snap, "steps": values.get("log", []), "progress": self.progress(flow_id),
                 "ids": {k: values.get(k) for k in ("dataset_id", "rule_run_id", "ai_run_id", "full_rule_run_id",
                                                     "report_id", "batch_id", "proposal_id") if values.get(k)},
                 "inputs": {k: values.get(k) for k in ("domain", "seed", "faults", "items", "level", "scope")}}
