@@ -614,13 +614,11 @@ function TimelineRow({ e, terms, showItem, itemLabels, nested = false, group }: 
     return <li className={"tl-llm" + n}>{turn}<span className="tl-kind">AI 판단</span>{code}{terms.aiAsked(e)}{where}<Raw e={e} /></li>;
   }
   if (e.type === "tool") {
-    const args = terms.args(e.input);
     const bad = (group ?? [e]).filter((x) => x.ok === false).length;
     return (
       <li className={(bad ? "tl-tool tl-bad" : "tl-tool") + n}>
         {turn}<span className="tl-kind">도구 사용</span> {terms.tool(e.name ?? e.text)}{code}
-        {args ? <span className="tl-io"> ({args}{count > 1 ? ` 외 ${count - 1}건` : ""})</span> : null}
-        <span className="tl-io"> → {bad ? `오류${count > 1 ? ` ${bad}건` : ""}` : "결과 받음"}</span>{where}
+        {bad ? <span className="tl-io">→ 오류{count > 1 ? ` ${bad}건` : ""}</span> : null}{where}
         {count > 1 ? <GroupRaw group={group!} /> : <Raw e={e} />}
       </li>
     );
