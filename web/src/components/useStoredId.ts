@@ -25,3 +25,23 @@ export function useStoredId(key: string, check: (id: string) => Promise<unknown>
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return [id, setId];
 }
+
+// 화면 상태(고른 에이전트·입력값·보고 있던 실행)를 브라우저 탭(sessionStorage)에 기억한다. 다른 탭으로 갔다 와도 그대로
+export function useSessionState<T>(key: string, initial: T): [T, (v: T | ((prev: T) => T)) => void] {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const raw = sessionStorage.getItem(key);
+      return raw == null ? initial : (JSON.parse(raw) as T);
+    } catch {
+      return initial;
+    }
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // 저장소를 쓸 수 없으면 이 화면 동안만 기억한다
+    }
+  }, [key, value]);
+  return [value, setValue];
+}
