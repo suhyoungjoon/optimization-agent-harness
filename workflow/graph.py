@@ -62,7 +62,7 @@ class FlowState(TypedDict, total=False):
 
 # 노드 설명: 그래프 그림과 화면이 이 값을 그대로 쓴다. kind: rule(규칙 계산) / ai(AI 에이전트) / human(사람)
 NODES: dict[str, dict] = {
-    "generate_data": {"label": "데이터 생성", "kind": "rule", "tab": "compare",
+    "generate_data": {"label": "데이터 생성", "kind": "rule",   # 만든 데이터만으로는 다른 탭에 볼 결과가 없다 (탭에서 보기 없음)
                       "description": "데이터 번호와 심어둔 문제로 지시서·작업자 데이터를 만들고 처리할 건수를 고른다"},
     "rule_agent": {"label": "규칙 방식 실행", "kind": "rule", "tab": "compare",
                    "description": "규칙 설정값대로 배정한다 (기준선, 비용 없음)"},
