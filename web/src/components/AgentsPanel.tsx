@@ -8,7 +8,7 @@ import { constraintText } from "./ImprovementPanel";
 import { TERMS, tip } from "../terms";
 import GraphCanvas, { type NodeView } from "./GraphCanvas";
 import { usePoll } from "./usePoll";
-import { useStoredId } from "./useStoredId";
+import { useSessionState, useStoredId } from "./useStoredId";
 import { opinionChips } from "./opinionHelp";
 import { StepBar, type StepAction } from "./WorkflowPanel";
 
@@ -44,7 +44,7 @@ export default function AgentsPanel({
   faults: string[];
   level: string;
 }) {
-  const [form, setForm] = useState({
+  const [form, setForm] = useSessionState("oah.agents.form", {   // 입력값도 탭을 옮겨도 그대로
     seed, faults: faults.length ? faults : domain.faults.map((f) => f.id), items: 10, level,
     llm: "fake" as "fake" | "claude", pace: 0.2, perspectives: false,
     end_check: "fixed" as "fixed" | "supervisor", use_saved_constraints: true,

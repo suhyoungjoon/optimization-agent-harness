@@ -7,6 +7,7 @@ import DomainPanel from "./components/DomainPanel";
 import ImprovementPanel from "./components/ImprovementPanel";
 import TracePanel from "./components/TracePanel";
 import { adapters } from "./domains";
+import type { Scope } from "./domains/types";
 import { CORE_REASON_NAMES, TERMS, tip, type TermKey } from "./terms";
 import type { CompareSummary, Dataset, DecisionRecord, DemoCatalogEntry, DomainInfo, HarnessInfo, Run, WorkflowRun } from "./types";
 
@@ -82,9 +83,11 @@ export default function App() {
     () => ({ ...reasonDetails, ...CORE_REASON_NAMES, ...(adapter?.reasonNames ?? {}) }),
     [reasonDetails, adapter],
   );
+  // 워크플로우에서 이어받은 범위(앞 N건)가 기본 범위 목록에 없으면 목록에 더한다
+  const [extraScope, setExtraScope] = useState<Scope | null>(null);
   const scopes = useMemo(
-    () => (dataset && adapter ? adapter.scopes(dataset.instance, dataset.item_ids ?? []) : []),
-    [dataset, adapter],
+    () => (dataset && adapter ? [...adapter.scopes(dataset.instance, dataset.item_ids ?? []), ...(extraScope ? [extraScope] : [])] : []),
+    [dataset, adapter, extraScope],
   );
   const scope = scopes.find((s) => s.id === scopeId) ?? null;
   const scopeItems = scope?.items ?? null;
@@ -126,6 +129,7 @@ export default function App() {
       const ds = await api.createDataset(domain.name, seed, faults);
       const full = await api.dataset(domain.name, ds.id);
       setDataset(full);
+      setExtraScope(null);
       const options = adapter.scopes(full.instance, full.item_ids ?? []);
       // 기본 범위: 1일차 (실험 범위 결정), 없으면 첫 번째
       setScopeId((options.find((s) => s.items && s.items.length > 10) ?? options[0])?.id ?? "");
@@ -205,7 +209,11 @@ export default function App() {
       setDataset(full);
       const scopeKey = JSON.stringify(flow.inputs.scope ?? null);
       const options = adapter.scopes(full.instance, full.item_ids ?? []);
-      setScopeId((options.find((s) => JSON.stringify(s.items) === scopeKey) ?? options[0])?.id ?? "");
+      const matched = options.find((s) => JSON.stringify(s.items) === scopeKey);
+      const wf = flow.inputs.scope;
+      const extra = !matched && wf?.length ? { id: `wf-${wf.length}`, label: `워크플로우 범위: 앞 ${wf.length}건`, items: wf } : null;
+      setExtraScope(extra);
+      setScopeId((matched ?? extra ?? options[0])?.id ?? "");
       if (flow.inputs.level) setLevel(flow.inputs.level);
       for (const id of [flow.ids.rule_run_id, flow.ids.ai_run_id, flow.ids.full_rule_run_id]) {
         if (!id) continue;

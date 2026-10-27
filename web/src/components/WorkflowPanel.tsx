@@ -5,7 +5,7 @@ import type { DomainInfo, HarnessInfo, WorkflowGraph, WorkflowNode, WorkflowRun 
 import { TERMS, tip } from "../terms";
 import { usePoll } from "./usePoll";
 import { OpinionHelp, type OpinionChip } from "./opinionHelp";
-import { useStoredId } from "./useStoredId";
+import { useSessionState, useStoredId } from "./useStoredId";
 
 // Agent workflow (LangGraph, M9): 다른 탭에서 하나씩 누르던 단계를 LangGraph 그래프 하나로 묶어,
 // 사람이 [다음 실행]을 누를 때마다 한 단계(에이전트)씩 넘어간다. 그림은 서버에서 컴파일된 그래프 그대로 그린다.
@@ -36,7 +36,8 @@ export default function WorkflowPanel({
   onAdopt: (run: WorkflowRun, tab: string) => void;
 }) {
   const [graph, setGraph] = useState<WorkflowGraph | null>(null);
-  const [form, setForm] = useState({ seed, faults: faults.length ? faults : domain.faults.map((f) => f.id), items: 10, level });
+  const [form, setForm] = useSessionState("oah.workflow.form",   // 입력값도 탭을 옮겨도 그대로
+    { seed, faults: faults.length ? faults : domain.faults.map((f) => f.id), items: 10, level });
   const [flowId, setFlowId] = useStoredId("oah.workflow.flowId", (id) => api.workflowGet(id));   // 탭을 옮겨도 이어서
   const [latest, setLatest] = useState<WorkflowRun | null>(null);
   const [tick, setTick] = useState(0);
