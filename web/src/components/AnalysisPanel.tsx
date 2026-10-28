@@ -405,6 +405,11 @@ function FindingCard({
         {finding.hypothesis && (
           <p className="muted">추정 원인{finding.alternatives?.length ? ` (${finding.perspective_names?.[0]})` : ""}: {plain.render(finding.hypothesis)}</p>
         )}
+        {finding.concepts_removed && (
+          <p className="muted small" title="이 데이터에 없는 개념(예: 차량·요일)으로 원인을 설명해 뺐습니다. 한 번 고쳐 오게 한 뒤에도 남은 경우입니다">
+            데이터에 없는 개념이 들어 있어 뺀 문장: {Object.values(finding.concepts_removed).join(" / ")}
+          </p>
+        )}
         {(finding.alternatives ?? []).map((a) => (
           <div key={a.perspective} className="alternative" title="같은 구간을 다른 관점에서 본 해석입니다. 어느 해석이 맞는지는 사람이 판단합니다">
             <strong>{a.perspective_name}</strong>: {plain.text(a.title)}

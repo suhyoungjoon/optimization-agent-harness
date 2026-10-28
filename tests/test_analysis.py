@@ -333,10 +333,29 @@ def test_plain_language_rule_and_names_go_to_the_analyst():
     system = analysis_system(dims)
     assert "업무를 모르는 사람도 읽는다" in system and "impact" in system
     assert "CAPACITY: 일정이 꽉 참" in system and "B: 강남지점" in system and "area_zone: 관할 경계 여부" in system
-    assert analysis_system({}).count("이름표") == 0                     # 이름이 없는 도메인은 이름표 없음
+    assert "이름표 (코드" not in analysis_system({})                     # 이름이 없는 도메인은 이름표 없음
     item = report_submit_tool(dims, ["worker_utilization"])["input_schema"]["properties"]["findings"]["items"]
     assert "impact" in item["properties"] and "impact" not in item["required"]
     calls = {"t1": {"ref": "c1", "name": "aggregate", "input": {}, "output": {"rows": [{"failed": 27, "fail_rate": 0.267}]}}}
     ok = {"title": "강남지점 CATV", "description": "27건, 26.7%", "impact": "고객 방문이 미뤄진다", "cited_calls": ["c1"]}
     assert grounding_problems(ok, calls) == []
     assert grounding_problems({**ok, "impact": "하루 40건이 밀린다"}, calls)
+
+
+def test_causes_must_stay_within_the_data():
+    """추정 원인·현장 영향에 데이터에 없는 개념(도메인 not_in_data)을 쓰면 고쳐 오게 하고, 그래도 남으면 그 문장만 뺀다."""
+    from core.analysis.agent import analysis_system, concept_problems, finalize_findings, submission_problems
+
+    dims = get_pack().dimensions()
+    assert "이 데이터에 없는 개념" in analysis_system(dims) and "차량" in analysis_system(dims)
+    assert "작업자(가능시간, 기술, 자격, 지점)" in analysis_system(dims)
+    calls = {"t1": {"ref": "c1", "name": "aggregate", "input": {}, "output": {"rows": [{"failed": 27}]}}}
+    f = {"title": "강남지점 CATV", "description": "실패 27건", "cited_calls": ["c1"], "slice": {"branch": ["B"]},
+         "hypothesis": "CATV 차량 슬롯이 요일마다 부족하다", "impact": "고객이 기다린다"}
+    assert concept_problems(f, dims) and "요일" in concept_problems(f, dims)[0] and "차량" in concept_problems(f, dims)[0]
+    assert any("데이터에 없는 개념" in p for p in submission_problems({"findings": [f]}, calls, dims))
+    assert concept_problems({**f, "hypothesis": "CATV 기술 보유자의 일정이 꽉 찬다"}, dims) == []
+    assert concept_problems(f, {}) == []                                     # 선언이 없으면 검사하지 않는다
+    kept, dropped = finalize_findings([f], calls, dims)
+    assert not dropped and "hypothesis" not in kept[0] and kept[0]["impact"] == "고객이 기다린다"
+    assert kept[0]["concepts_removed"] == {"hypothesis": "CATV 차량 슬롯이 요일마다 부족하다"}

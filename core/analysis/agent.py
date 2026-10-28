@@ -30,14 +30,46 @@ SYSTEM = """너는 최적화 결과 분석가다. 주어진 실행 결과에서 
 PLAIN_RULE = """
 - 리포트는 이 업무를 모르는 사람도 읽는다. 제목·설명·추정 원인·summary 문장에는 코드(차원 값·사유 코드) 대신 아래 이름을 쓴다. slice와 reason_codes 칸에는 코드를 그대로 쓴다.
 - 비율은 %로 쓴다 (도구 결과의 0.538은 53.8%). 수치는 그대로 인용 결과에 있어야 한다.
-- 발견마다 impact에 그 패턴 때문에 현장에서 생기는 일을 한 문장으로 쓴다 (누가 무엇을 못 받거나 기다리게 되는지). 새 수치를 만들지 않는다."""
+- 발견마다 impact에 그 패턴 때문에 현장에서 생기는 일을 한 문장으로 쓴다 (누가 무엇을 못 받거나 기다리게 되는지). 새 수치를 만들지 않는다.
+- 설명·추정 원인·현장 영향은 이 데이터에 있는 것으로만 쓴다: 차원(이름표), 자원과 그 속성, 사유 코드의 뜻, 지표, 도구 결과에 나온 값. 데이터에 없는 요인은 원인으로 쓰지 않는다. 데이터만으로 원인을 더 좁힐 수 없으면 "데이터로는 여기까지 확인됨"이라고 쓴다."""
 
 
 def _names_text(dimensions: dict) -> str:
     """차원 이름과 도메인이 선언한 쉬운 이름(dimensions.yaml names) → 프롬프트 이름표. 없으면 빈 문자열."""
     rows = [f"{k}: {v['label']}" for k, v in (dimensions.get("dimensions") or {}).items() if v.get("label")]
     rows += [f"{k}: {v}" for k, v in (dimensions.get("names") or {}).items()]
-    return "\n이름표 (코드: 쉬운 이름):\n" + "\n".join(f"  {r}" for r in rows) if rows else ""
+    text = "\n이름표 (코드: 쉬운 이름):\n" + "\n".join(f"  {r}" for r in rows) if rows else ""
+    traits = [f"{r.get('label', k)}({', '.join(t.get('label', n) for n, t in (r.get('traits') or {}).items())})"
+              for k, r in (dimensions.get("resources") or {}).items()]
+    if traits:
+        text += "\n데이터에 있는 자원과 속성: " + ", ".join(traits)
+    if dimensions.get("not_in_data"):
+        text += "\n이 데이터에 없는 개념 (원인·현장 영향에 쓰지 않는다): " + ", ".join(dimensions["not_in_data"])
+    return text
+
+
+# 원인 설명에 데이터에 없는 개념을 쓰면 안 된다 (도메인이 dimensions.yaml not_in_data로 선언)
+CONCEPT_FIELDS = ("description", "hypothesis", "impact")
+
+
+def concept_problems(finding: dict, dimensions: dict) -> list[str]:
+    """설명·추정 원인·현장 영향에 데이터에 없는 개념이 있으면 문제 목록. 도메인이 선언하지 않았으면 검사하지 않는다."""
+    words = (dimensions or {}).get("not_in_data") or []
+    found = sorted({w for w in words for k in CONCEPT_FIELDS if w in str(finding.get(k) or "")})
+    if not found:
+        return []
+    return [f"데이터에 없는 개념 {', '.join(found)} — 이 데이터에 있는 것(차원·자원 속성·사유·지표·도구 결과)으로만 "
+            "설명하거나, 더 좁힐 수 없으면 '데이터로는 여기까지 확인됨'으로 쓴다"]
+
+
+def strip_concepts(finding: dict, dimensions: dict) -> dict:
+    """고쳐 온 뒤에도 데이터에 없는 개념이 남은 추정 원인·현장 영향은 뺀다 (발견의 수치·구간은 맞을 수 있어 발견은 남긴다).
+    뺀 문장은 concepts_removed에 남긴다. 설명은 빼지 않는다 (수치 근거가 있는 본문)."""
+    words = (dimensions or {}).get("not_in_data") or []
+    removed = {k: finding[k] for k in ("hypothesis", "impact") if finding.get(k) and any(w in finding[k] for w in words)}
+    if not removed:
+        return finding
+    return {**{k: v for k, v in finding.items() if k not in removed}, "concepts_removed": removed}
 
 
 def _slice_schema(dimensions: dict) -> dict:
@@ -179,7 +211,7 @@ def submission_problems(submission: dict, calls: dict, dimensions: dict) -> list
     for i, f in enumerate(submission.get("findings") or []):
         issues += [f"findings[{i}] '{f.get('title', '')}': {p}"
                    for p in grounding_problems(f, calls) + slice_problems(f, dimensions)
-                   + resource_problems(f, calls, dimensions)]
+                   + resource_problems(f, calls, dimensions) + concept_problems(f, dimensions)]
     return issues
 
 
@@ -193,7 +225,7 @@ def finalize_findings(findings: list[dict], calls: dict, dimensions: dict) -> tu
             # 지우지 않고 '근거 부족'으로 남긴다 (M18-a: Supervisor가 본다, 사람 화면은 접어 둔다)
             dropped.append({"finding": f, "problems": problems, "status": "insufficient_evidence"})
         else:
-            kept.append({**strip_bad_resources(strip_bad_slice(f, dimensions), calls, dimensions),
+            kept.append({**strip_concepts(strip_bad_resources(strip_bad_slice(f, dimensions), calls, dimensions), dimensions),
                          "cited_calls": cited_call_ids(f, calls),
                          "id": f"F{len(kept) + 1}"})
     return kept, dropped
