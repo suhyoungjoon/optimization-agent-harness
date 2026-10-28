@@ -169,6 +169,7 @@ export interface Finding {
   reason_codes?: string[];
   metric?: { name: string; direction: "low" | "high" };
   hypothesis?: string;
+  impact?: string;      // 현장에서 생기는 일 한 문장 (쉬운 말, 이후 분석부터)
   cited_calls: string[];
   // 관점별 분석 (M12-b): 이 발견을 찾은 관점과, 같은 발견에 대한 다른 관점의 해석
   perspectives?: string[];

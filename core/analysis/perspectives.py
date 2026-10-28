@@ -108,7 +108,7 @@ def merge_findings(by_perspective: dict[str, list[dict]], names: dict[str, str],
             group["perspectives"].append(pid)
             group["perspective_names"].append(names.get(pid, pid))
             group["alternatives"].append({"perspective": pid, "perspective_name": names.get(pid, pid),
-                                          **{k: body.get(k) for k in ("title", "description", "hypothesis", "resources")},
+                                          **{k: body.get(k) for k in ("title", "description", "hypothesis", "impact", "resources")},
                                           "cited_calls": list(body.get("cited_calls") or [])})
             group["cited_calls"] += [c for c in body.get("cited_calls") or [] if c not in group["cited_calls"]]
     ids = [f"F{i + 1}" for i in range(len(groups))]

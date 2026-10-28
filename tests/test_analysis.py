@@ -322,3 +322,21 @@ def test_report_schema_lists_declared_dimensions():
     assert set(slice_schema["properties"]) == set(dims["dimensions"]) and slice_schema["additionalProperties"] is False
     assert slice_schema["properties"]["branch"]["items"]["enum"] == ["A", "B", "C"]
     assert "enum" not in slice_schema["properties"]["hour"]["items"]
+
+
+def test_plain_language_rule_and_names_go_to_the_analyst():
+    """리포트는 업무를 모르는 사람도 읽는다: 쉬운 말 규칙과 이름표(차원 이름 + 도메인 names)가 프롬프트에 붙고,
+    현장 영향(impact) 칸이 있으며 그 안의 수치도 근거 검사를 받는다."""
+    from core.analysis.agent import analysis_system, grounding_problems, report_submit_tool
+
+    dims = get_pack().dimensions()
+    system = analysis_system(dims)
+    assert "업무를 모르는 사람도 읽는다" in system and "impact" in system
+    assert "CAPACITY: 일정이 꽉 참" in system and "B: 강남지점" in system and "area_zone: 관할 경계 여부" in system
+    assert analysis_system({}).count("이름표") == 0                     # 이름이 없는 도메인은 이름표 없음
+    item = report_submit_tool(dims, ["worker_utilization"])["input_schema"]["properties"]["findings"]["items"]
+    assert "impact" in item["properties"] and "impact" not in item["required"]
+    calls = {"t1": {"ref": "c1", "name": "aggregate", "input": {}, "output": {"rows": [{"failed": 27, "fail_rate": 0.267}]}}}
+    ok = {"title": "강남지점 CATV", "description": "27건, 26.7%", "impact": "고객 방문이 미뤄진다", "cited_calls": ["c1"]}
+    assert grounding_problems(ok, calls) == []
+    assert grounding_problems({**ok, "impact": "하루 40건이 밀린다"}, calls)

@@ -352,6 +352,7 @@ function FindingCard({
         )}
       </header>
       {summary && <p className="finding-summary" title="AI 문장이 아니라 분석한 결과에서 코드가 직접 센 숫자입니다">{plain.render(summary)}</p>}
+      {finding.impact && <p className="finding-impact" title="AI가 쓴 현장 영향 (새 수치 없이)">현장 영향: {plain.render(finding.impact)}</p>}
       <div className="chips">
         {(finding.perspective_names ?? []).map((name) => (
           <span key={name} className="chip chip-perspective" title="이 발견을 찾은 관점">관점: {name}</span>

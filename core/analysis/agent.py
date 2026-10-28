@@ -26,6 +26,19 @@ SYSTEM = """너는 최적화 결과 분석가다. 주어진 실행 결과에서 
 - 실패가 아니라 자원 쪽 패턴(예: 활용률이 낮은 자원)이면 metric에 지표 이름과 방향을 적는다.
 - 끝나면 submit_report 도구로 제출한다."""
 
+# 리포트는 업무를 모르는 사람도 읽는다 (사람 검토자·발표). 구간(slice)·사유 코드 칸은 코드 그대로, 문장만 쉬운 말로
+PLAIN_RULE = """
+- 리포트는 이 업무를 모르는 사람도 읽는다. 제목·설명·추정 원인·summary 문장에는 코드(차원 값·사유 코드) 대신 아래 이름을 쓴다. slice와 reason_codes 칸에는 코드를 그대로 쓴다.
+- 비율은 %로 쓴다 (도구 결과의 0.538은 53.8%). 수치는 그대로 인용 결과에 있어야 한다.
+- 발견마다 impact에 그 패턴 때문에 현장에서 생기는 일을 한 문장으로 쓴다 (누가 무엇을 못 받거나 기다리게 되는지). 새 수치를 만들지 않는다."""
+
+
+def _names_text(dimensions: dict) -> str:
+    """차원 이름과 도메인이 선언한 쉬운 이름(dimensions.yaml names) → 프롬프트 이름표. 없으면 빈 문자열."""
+    rows = [f"{k}: {v['label']}" for k, v in (dimensions.get("dimensions") or {}).items() if v.get("label")]
+    rows += [f"{k}: {v}" for k, v in (dimensions.get("names") or {}).items()]
+    return "\n이름표 (코드: 쉬운 이름):\n" + "\n".join(f"  {r}" for r in rows) if rows else ""
+
 
 def _slice_schema(dimensions: dict) -> dict:
     """구간 칸: 선언된 차원만 (값 목록이 선언된 차원은 그 값만). 판정은 slice_problems가 하고 이것은 안내다."""
@@ -64,6 +77,7 @@ def report_submit_tool(dimensions: dict, metric_names: list[str]) -> dict:
                             "name": {"type": "string", "enum": metric_names},
                             "direction": {"type": "string", "enum": ["low", "high"]}}},
                         "hypothesis": {"type": "string", "description": "원인 가설"},
+                        "impact": {"type": "string", "description": "현장에서 생기는 일 한 문장 (쉬운 말, 새 수치 없이)"},
                         "cited_calls": {"type": "array", "items": {"type": "string"},
                                         "description": "근거가 된 도구 결과의 호출 번호 (call_ref, 예: c3)"},
                     },
@@ -84,9 +98,11 @@ RESOURCES_RULE = ("\n- 특정 자원(선언된 자원 종류)에 대한 패턴�
 
 
 def analysis_system(dimensions: dict) -> str:
-    """분석 시스템 프롬프트. 도메인이 자원을 선언했을 때만 자원 칸 안내를 붙인다 (없으면 이전과 같다)."""
-    return SYSTEM.replace("\n- 끝나면 submit_report", RESOURCES_RULE + "\n- 끝나면 submit_report") \
-        if (dimensions or {}).get("resources") else SYSTEM
+    """분석 시스템 프롬프트. 도메인이 자원을 선언했을 때만 자원 칸 안내를 붙인다.
+    쉬운 말 규칙과 이름표(차원 이름 + 도메인의 names)는 항상 붙인다."""
+    dimensions = dimensions or {}
+    rules = (RESOURCES_RULE if dimensions.get("resources") else "") + PLAIN_RULE
+    return SYSTEM.replace("\n- 끝나면 submit_report", rules + "\n- 끝나면 submit_report") + _names_text(dimensions)
 
 
 def cited_call_ids(finding: dict, calls: dict) -> list[str]:
@@ -102,7 +118,7 @@ def grounding_problems(finding: dict, calls: dict) -> list[str]:
         return ["인용한 도구 호출이 없거나 존재하지 않는 호출 번호" + (f" (인용할 수 있는 호출: {listing})" if listing else "")]
     sources = [n for c in cited for n in numbers_in(calls[c]["output"]) + numbers_in(calls[c]["input"])]
     sources += numbers_in(finding.get("slice") or {})
-    bad = unsupported_numbers(f"{finding.get('title', '')} {finding.get('description', '')}", sources)
+    bad = unsupported_numbers(f"{finding.get('title', '')} {finding.get('description', '')} {finding.get('impact', '')}", sources)
     return [f"근거 없는 수치 {', '.join(bad)}"] if bad else []
 
 

@@ -647,3 +647,4 @@ input.approver { width: 9em; }
 .finding-summary { margin: 4px 0 6px; font-weight: 600; }
 abbr.term { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
 .background-lines { margin: 4px 0; padding-left: 18px; line-height: 1.6; }
+.finding-impact { margin: 0 0 6px; font-size: 13px; }
