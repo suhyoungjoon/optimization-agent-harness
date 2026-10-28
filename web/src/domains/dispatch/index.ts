@@ -81,6 +81,53 @@ export const dispatchAdapter: DomainAdapter = {
     OUT_OF_AREA: "갈 수 있는 거리 밖",
     CAPACITY: "일정이 꽉 참",
   },
+  // 문제 찾기 쉽게 읽기
+  plainText: (text, instance) => {
+    const name = branchNames(instance);
+    return text
+      .replace(/지점\s*([A-Z])(?![A-Za-z0-9])/g, (m, b: string) => (name[b] ? `${name[b]}지점` : m))
+      .replace(/(?<![A-Za-z0-9])([A-Z])\s*지점/g, (m, b: string) => (name[b] ? `${name[b]}지점` : m))
+      .replace(/(?<![A-Za-z0-9])branch\s*([A-Z])(?![A-Za-z0-9])/g, (m, b: string) => (name[b] ? `${name[b]}지점` : m))
+      .replace(/(?<![A-Za-z0-9])([A-Z])\+/g, (m, b: string) => (name[b] ? `${name[b]}지점+` : m));
+  },
+  sliceText: (slice, instance) => {
+    const name = branchNames(instance);
+    return Object.entries(slice).map(([dim, vals]) => {
+      const vs = vals.map(String);
+      if (dim === "hour") return `${vs.map((v) => Number(v)).join("·")}시`;
+      if (dim === "branch") return vs.map((v) => `${name[v] ?? v}지점`).join("·");
+      return vs.map((v) => LABELS[v] ?? v).join("·");
+    }).join(" · ");
+  },
+  glossary: {
+    지시서: "고객 집을 방문해 하는 작업 한 건",
+    개통: "새 회선을 설치해 서비스를 시작하는 작업",
+    장애: "고장 난 회선을 고치는 작업",
+    HFC: "광케이블과 동축 케이블을 섞은 회선 (케이블 인터넷). 이 기술이 있는 작업자만 맡을 수 있다",
+    FTTx: "광케이블을 건물·집까지 끌어온 회선 (광 인터넷). 이 기술이 있는 작업자만 맡을 수 있다",
+    CATV: "케이블TV 동축 회선. 이 기술이 있는 작업자만 맡을 수 있다",
+    승주: "전봇대에 올라가서 하는 작업. 승주 자격이 있는 작업자만 할 수 있다",
+    고위험: "추락·감전 위험이 큰 작업. 고위험 자격이 있는 작업자만 할 수 있다",
+    옥외: "건물 밖에서 하는 작업 (작업 시간이 더 걸린다)",
+    관할: "지점이 맡는 구역. 작업자는 원래 자기 지점 관할 안으로 출동한다",
+    "경계 지역": "다른 지점 관할과 맞닿은 곳(경계에서 1km 안). 관할 밖 출동을 허용해야 배정되는 경우가 많다",
+    "일정이 꽉 참": "기술·자격·거리가 맞는 작업자는 있지만, 그 시간에 이미 다른 작업이 잡혀 있어 넣을 자리가 없음",
+    "희망시간에 가능한 사람 없음": "자격이 맞는 작업자의 근무 가능시간이 고객 희망시각(허용 오차 포함)과 맞지 않음",
+    "갈 수 있는 거리 밖": "관할 밖으로 허용한 거리를 넘어서야 갈 수 있어 보낼 작업자가 없음",
+    "기술 보유자 없음": "이 회선 매체(HFC·FTTx·CATV) 기술을 가진 작업자가 없음",
+    "자격 보유자 없음": "승주·고위험 작업에 필요한 자격을 가진 작업자가 없음",
+    미배정: "작업자를 정하지 못한 지시서. 고객 방문이 미뤄지거나 다시 일정을 잡아야 한다",
+    가동률: "작업자가 일할 수 있는 시간 중 실제로 작업한 시간의 비율",
+    활용률: "작업자가 일할 수 있는 시간 중 실제로 작업한 시간의 비율",
+    CEI: "작업자 숙련 등급 점수 (높을수록 숙련)",
+  },
+  background: [
+    "가상의 통신 설치·수리 출동 업무다. 기사가 고객 집을 방문해 회선을 개통(새로 설치)하거나 장애를 고친다.",
+    "지점 3곳(서초·강남·송파)에 지점마다 작업자 10명. 지시서는 하루 150건 × 10일 = 1500건.",
+    "지시서마다 작업유형(개통·장애), 회선 매체(HFC·FTTx·CATV), 난이도(일반·승주·옥외·고위험), 건물유형(주택·아파트), 고객 희망시각이 있다.",
+    "배정 규칙: 매체 기술과 난이도 자격은 반드시 맞아야 한다. 시간(희망시각과의 차이)과 지역(관할 밖 거리)은 3단계로 조금씩 넓혀 가며 작업자를 찾는다.",
+    "배정은 그날 안에서만 한다(다음 날로 넘기지 않음). 미배정 사유는 5가지: 기술 보유자 없음 · 자격 보유자 없음 · 희망시간에 가능한 사람 없음 · 갈 수 있는 거리 밖 · 일정이 꽉 참.",
+  ],
   // 지시서 ID는 "D01-O015" 형식: 날짜별로 묶는다
   scopes: (_instance, itemIds) => {
     const days = new Map<string, string[]>();
@@ -100,6 +147,12 @@ export const dispatchAdapter: DomainAdapter = {
     return [...sample, ...perDay, { id: "all", label: `전체 ${itemIds.length}건`, items: null }];
   },
 };
+
+// 지점 코드 → 이름 (데이터의 branches.name, 예: B → 강남)
+function branchNames(instance: unknown): Record<string, string> {
+  const branches = (instance as { branches?: Record<string, { name?: string }> } | null)?.branches ?? {};
+  return Object.fromEntries(Object.entries(branches).map(([k, v]) => [k, v.name ?? k]));
+}
 
 // 구간 조건(when) → 쉬운 말 (예: {area_zone: [boundary]} → "경계 지역", {hour: ["10","16"]} → "10·16시")
 function whenText(when?: Record<string, string[]> | null): string {

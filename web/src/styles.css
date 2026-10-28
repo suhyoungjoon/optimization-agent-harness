@@ -643,3 +643,7 @@ input.approver { width: 9em; }
 /* 워크플로우 AI 방식 실행 진행 건수 */
 .wf-progress { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; font-variant-numeric: tabular-nums; }
 .wf-progress progress { width: 120px; height: 8px; }
+/* 문제 찾기 쉽게 읽기: 코드가 센 한 줄 요약, 업무 용어 설명 */
+.finding-summary { margin: 4px 0 6px; font-weight: 600; }
+abbr.term { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+.background-lines { margin: 4px 0; padding-left: 18px; line-height: 1.6; }
