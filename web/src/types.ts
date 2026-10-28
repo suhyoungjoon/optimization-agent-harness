@@ -171,6 +171,7 @@ export interface Finding {
   metric?: { name: string; direction: "low" | "high" };
   hypothesis?: string;
   impact?: string;      // 현장에서 생기는 일 한 문장 (쉬운 말, 이후 분석부터)
+  concepts_removed?: { hypothesis?: string; impact?: string };   // 데이터에 없는 개념이 남아 뺀 추정 원인·현장 영향
   cited_calls: string[];
   // 관점별 분석 (M12-b): 이 발견을 찾은 관점과, 같은 발견에 대한 다른 관점의 해석
   perspectives?: string[];
