@@ -32,6 +32,7 @@ export interface Dimensions {
   resources?: Record<string, { label: string; id_field: string; traits?: Record<string, { label: string }> }>;
   reason_codes: Record<string, string>;
   violation_rules: Record<string, string>;
+  names?: Record<string, string>;   // 차원 값·사유 코드 → 쉬운 이름 (분석 리포트 문장용, 조건 칩에도 씀)
 }
 
 export interface DomainFault {

@@ -199,7 +199,7 @@ export default function AnalysisPanel({
                   dimensionLabels={dimensionLabels}
                   plain={plain}
                   summary={decisions.length ? summaryOf(f) : null}
-                  valueNames={adapter.valueNames ?? {}}
+                  valueNames={{ ...(domain.dimensions.names ?? {}), ...(adapter.valueNames ?? {}) }}
                   resourceSpecs={resourceSpecs}
                   matched={Object.entries(current.score!.faults).filter(([, s]) => s.matched_findings.includes(f.id)).map(([fid]) => fid)}
                   causeCheck={Object.entries(current.score!.faults).filter(([, s]) => s.confirm_cause && s.matched_findings.includes(f.id)).map(([fid]) => fid)}
