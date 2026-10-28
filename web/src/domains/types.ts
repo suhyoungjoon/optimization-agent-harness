@@ -70,4 +70,9 @@ export interface DomainAdapter {
   // 의견 보내기 도움 (사람 검토): 고정 예시와, 추천 재료(설정값 한도)를 쉬운 문장으로. 없으면 일반 문장
   opinionExamples?: string[];
   opinionText?: (hint: import("../types").OpinionHint) => string | null;
+  // 문제 찾기 쉽게 읽기: 업무를 모르는 사람도 읽게. 없으면 AI 문장을 그대로 (소수 비율 → %는 공통)
+  plainText?: (text: string, instance: unknown) => string;                       // 도메인 코드 → 쉬운 말 (예: "지점 B" → "강남지점")
+  sliceText?: (slice: Record<string, string[]>, instance: unknown) => string;    // 구간 → 쉬운 말 (예: "CATV · 16시")
+  glossary?: Record<string, string>;   // 업무 용어 → 한 줄 설명 (점선 밑줄, 마우스를 올리면)
+  background?: string[];               // 업무 배경 한눈에 (문제 찾기 탭 위)
 }

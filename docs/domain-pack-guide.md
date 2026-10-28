@@ -115,6 +115,8 @@ reason_codes:      # 실패 사유 코드 → 설명. 코어 사유 코드(LLM_*
   <CODE>: 설명
 violation_rules:   # validate()가 반환하는 규칙 ID → 설명
   <rule_id>: 설명
+names:             # (선택) 차원 값·사유 코드 → 쉬운 이름. 분석 agent가 리포트 문장에 코드 대신 쓴다 (업무를 모르는 사람도 읽게)
+  <값 또는 CODE>: <쉬운 이름>
 resources:         # (선택, M12-d) 분석 발견의 resources 칸에 적을 수 있는 자원 종류
   <종류>:
     label: 한글 이름

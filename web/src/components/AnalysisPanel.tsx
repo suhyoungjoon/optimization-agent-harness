@@ -6,6 +6,7 @@ import { fmtCost, fmtSeconds } from "./MetricsPanel";
 import { usePoll } from "./usePoll";
 import { TERMS, tip } from "../terms";
 import Details from "./Details";
+import { findingItems, findingSummary, makePlain, type Plain } from "./plainFinding";
 
 export default function AnalysisPanel({
   domain,
@@ -54,17 +55,26 @@ export default function AnalysisPanel({
   const findings = current?.body?.findings ?? [];
   const focused = findings.find((f) => f.id === focus) ?? null;
   const resourceSpecs = domain.dimensions.resources ?? {};
-  const highlight = useMemo(() => {
-    if (!focused) return null;
-    const idField = focused.resources ? resourceSpecs[focused.resources.kind]?.id_field : undefined;
-    if (!focused.slice && !idField) return null;
-    // 자원 발견이면 그 자원이 맡은 항목, 구간도 있으면 둘 다 만족하는 항목
-    const inSlice = focused.slice ? itemsInSlice(decisions, focused.slice) : decisions.map((d) => d.item_id);
-    if (!idField) return inSlice;
-    const ids = new Set(focused.resources!.ids.map(String));
-    const mine = new Set(decisions.filter((d) => ids.has(String(d.decision?.[idField]))).map((d) => d.item_id));
-    return inSlice.filter((id) => mine.has(id));
-  }, [focused, decisions]); // eslint-disable-line react-hooks/exhaustive-deps
+  const idFieldOf = (f: Finding) => (f.resources ? resourceSpecs[f.resources.kind]?.id_field : undefined);
+  // 자원 발견이면 그 자원이 맡은 항목, 구간도 있으면 둘 다 만족하는 항목
+  const highlight = useMemo(
+    () => (focused ? findingItems(focused, decisions, idFieldOf(focused))?.map((d) => d.item_id) ?? null : null),
+    [focused, decisions], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const dimensionLabels = useMemo(
+    () => Object.fromEntries(Object.entries(domain.dimensions.dimensions).map(([k, v]) => [k, v.label])), [domain]);
+  // 쉽게 읽기: AI 문장 속 코드(사유·조건 값·차원 이름) → 화면 이름, 소수 비율 → %, 업무 용어에 설명
+  const plain = useMemo(
+    () => makePlain(adapter, dataset?.instance, { ...dimensionLabels, ...(adapter.valueNames ?? {}), ...reasonLabels }),
+    [adapter, dataset?.instance, dimensionLabels, reasonLabels]);
+  const summaryOf = (f: Finding) => {
+    const rows = findingItems(f, decisions, idFieldOf(f));
+    if (!rows) return null;
+    const where = f.slice ? (adapter.sliceText?.(f.slice, dataset?.instance)
+      ?? Object.values(f.slice).map((vs) => vs.map((v) => adapter.valueNames?.[String(v)] ?? v).join("·")).join(" · ")) : "";
+    const who = f.resources ? `${resourceSpecs[f.resources.kind]?.label ?? f.resources.kind} ${f.resources.ids.join(", ")}` : "";
+    return findingSummary(rows, decisions, [where, who].filter(Boolean).join(" · "), reasonLabels);
+  };
 
   const guard = async (label: string, fn: () => Promise<void>) => {
     setBusy(label);
@@ -119,7 +129,13 @@ export default function AnalysisPanel({
       {current?.status === "done" && current.body && current.score && (
         <>
           <AnalysisVerdict report={current} />
-          {current.body.summary && <p className="summary" style={{ whiteSpace: "pre-line" }}>{current.body.summary}</p>}
+          {adapter.background && (
+            <Details summary="업무 배경 한눈에 (이 분석을 읽기 전에)">
+              <ul className="background-lines">{adapter.background.map((line, i) => <li key={i}>{plain.render(line)}</li>)}</ul>
+              <p className="muted small">점선 밑줄이 있는 말은 마우스를 올리면 설명이 나옵니다.</p>
+            </Details>
+          )}
+          {current.body.summary && <p className="summary" style={{ whiteSpace: "pre-line" }}>{plain.render(current.body.summary)}</p>}
 
           <Details summary="상세보기 (정답 대조 · 분석 비용·시간)">
             <div className="tiles">
@@ -180,8 +196,10 @@ export default function AnalysisPanel({
                   reasonLabels={reasonLabels}
                   reasonDetails={reasonDetails}
                   metricLabels={Object.fromEntries(adapter.metrics.map((m) => [m.key, m.label]))}
-                  dimensionLabels={Object.fromEntries(Object.entries(domain.dimensions.dimensions).map(([k, v]) => [k, v.label]))}
-                  valueNames={adapter.valueNames ?? {}}
+                  dimensionLabels={dimensionLabels}
+                  plain={plain}
+                  summary={decisions.length ? summaryOf(f) : null}
+                  valueNames={{ ...(domain.dimensions.names ?? {}), ...(adapter.valueNames ?? {}) }}
                   resourceSpecs={resourceSpecs}
                   matched={Object.entries(current.score!.faults).filter(([, s]) => s.matched_findings.includes(f.id)).map(([fid]) => fid)}
                   causeCheck={Object.entries(current.score!.faults).filter(([, s]) => s.confirm_cause && s.matched_findings.includes(f.id)).map(([fid]) => fid)}
@@ -262,12 +280,6 @@ function AnalysisVerdict({ report }: { report: Report }) {
   );
 }
 
-function itemsInSlice(decisions: DecisionRecord[], slice: Record<string, string[]>) {
-  return decisions
-    .filter((d) => Object.entries(slice).every(([dim, values]) => values.map(String).includes(String(d.dims[dim]))))
-    .map((d) => d.item_id);
-}
-
 function FindingCard({
   finding,
   calls,
@@ -283,7 +295,11 @@ function FindingCard({
   onLabel,
   focused,
   onFocus,
+  plain,
+  summary,
 }: {
+  plain: Plain;
+  summary: string | null;    // 코드가 결과에서 센 한 줄 요약 (구간·자원이 없으면 null)
   finding: Finding;
   calls: Record<string, ToolCall>;
   reasonLabels: Record<string, string>;
@@ -303,7 +319,7 @@ function FindingCard({
     <article className={`finding${focused ? " focused" : ""}`}>
       <header>
         <button className="finding-title" onClick={onFocus} aria-pressed={focused}>
-          <span className="finding-id">{finding.id}</span> {finding.title}
+          <span className="finding-id">{finding.id}</span> {plain.text(finding.title)}
         </button>
         {causeCheck.length > 0 ? (
           <span className="label-buttons">
@@ -335,6 +351,8 @@ function FindingCard({
           </span>
         )}
       </header>
+      {summary && <p className="finding-summary" title="AI 문장이 아니라 분석한 결과에서 코드가 직접 센 숫자입니다">{plain.render(summary)}</p>}
+      {finding.impact && <p className="finding-impact" title="AI가 쓴 현장 영향 (새 수치 없이)">현장 영향: {plain.render(finding.impact)}</p>}
       <div className="chips">
         {(finding.perspective_names ?? []).map((name) => (
           <span key={name} className="chip chip-perspective" title="이 발견을 찾은 관점">관점: {name}</span>
@@ -370,7 +388,7 @@ function FindingCard({
         )}
       </div>
       <Details summary={`상세보기 (설명${finding.hypothesis ? " · 추정 원인" : ""}${finding.alternatives?.length ? ` · 다른 관점의 해석 ${finding.alternatives.length}건` : ""} · ${TERMS.evidence.label} ${finding.cited_calls.length}건)`}>
-        <p>{finding.description}</p>
+        <p>{plain.render(finding.description)}</p>
         {finding.resources_removed && (
           <p className="muted small" title="인용한 도구 결과에서 확인되지 않아 뺀 자원·속성입니다">
             자원에서 뺀 항목: {[finding.resources_removed.kind && `종류 ${finding.resources_removed.kind}`,
@@ -385,12 +403,12 @@ function FindingCard({
           </p>
         )}
         {finding.hypothesis && (
-          <p className="muted">추정 원인{finding.alternatives?.length ? ` (${finding.perspective_names?.[0]})` : ""}: {finding.hypothesis}</p>
+          <p className="muted">추정 원인{finding.alternatives?.length ? ` (${finding.perspective_names?.[0]})` : ""}: {plain.render(finding.hypothesis)}</p>
         )}
         {(finding.alternatives ?? []).map((a) => (
           <div key={a.perspective} className="alternative" title="같은 구간을 다른 관점에서 본 해석입니다. 어느 해석이 맞는지는 사람이 판단합니다">
-            <strong>{a.perspective_name}</strong>: {a.title}
-            {a.hypothesis && <p className="muted">추정 원인 ({a.perspective_name}): {a.hypothesis}</p>}
+            <strong>{a.perspective_name}</strong>: {plain.text(a.title)}
+            {a.hypothesis && <p className="muted">추정 원인 ({a.perspective_name}): {plain.render(a.hypothesis)}</p>}
           </div>
         ))}
         {finding.cited_calls.map((id) => calls[id] && <Evidence key={id} call={calls[id]} />)}
