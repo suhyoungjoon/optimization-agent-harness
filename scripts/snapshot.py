@@ -1,6 +1,7 @@
 """시연 번들 만들기: 실행 DB와 도메인 파일을 묶어 네트워크 없이 재생할 수 있게 한다.
 
 python -m scripts.snapshot export --out demo/bundle [--db runs/harness.db] [--git-ref HEAD] [--note "..."]
+                                 [--agents-flows runs/agents_flows]   # LangGraph agents 실행 기록도 넣기 (M20)
 
 - params.yaml, domain-spec.md는 기본적으로 git HEAD(커밋된 버전)에서 가져온다. 시연 중 승인하기 전 상태에서
   시작하기 위해서다 (앱에서 승인한 변경은 사람이 커밋하기 전까지 작업 트리에만 있다). --git-ref none이면 작업 파일.
@@ -43,7 +44,10 @@ def _git_commit(ref: str) -> str | None:
         return None
 
 
-def export_bundle(db_path: str | Path, out: str | Path, git_ref: str | None = "HEAD", note: str = "") -> dict:
+def export_bundle(db_path: str | Path, out: str | Path, git_ref: str | None = "HEAD", note: str = "",
+                  agents_flows: str | Path | None = None) -> dict:
+    """agents_flows: LangGraph agents 실행 기록 폴더(M20). 주면 그 기록(*.json)을 번들의 agents_flows/에 넣어
+    시연 모드에서 타임라인·그래프 진행을 재생할 수 있게 한다."""
     db_path, out = Path(db_path), Path(out)
     if not db_path.is_file():
         raise FileNotFoundError(f"실행 DB가 없음: {db_path}")
@@ -87,6 +91,13 @@ def export_bundle(db_path: str | Path, out: str | Path, git_ref: str | None = "H
                 text = path.read_text(encoding="utf-8")
             (target / name).write_text(text, encoding="utf-8")
 
+    flows = sorted(Path(agents_flows).glob("*.json")) if agents_flows else []
+    if flows:
+        (out / "agents_flows").mkdir()
+        for f in flows:
+            shutil.copy2(f, out / "agents_flows" / f.name)
+        counts["agents_flows"] = len(flows)
+
     manifest = {"created_at": time.strftime("%Y-%m-%d %H:%M:%S"), "git_ref": git_ref,
                 "git_commit": _git_commit(git_ref) if git_ref else None, "note": note,
                 "counts": counts, "domain_file_sources": sources}
@@ -102,9 +113,10 @@ def main(argv: list[str] | None = None) -> None:
     exp.add_argument("--out", required=True)
     exp.add_argument("--git-ref", default="HEAD", help="params.yaml·domain-spec.md를 가져올 git 참조 (none이면 작업 파일)")
     exp.add_argument("--note", default="")
+    exp.add_argument("--agents-flows", default=None, help="LangGraph agents 실행 기록 폴더 (예: runs/agents_flows). 주면 번들에 넣는다")
     args = parser.parse_args(argv)
     ref = None if args.git_ref.lower() == "none" else args.git_ref
-    manifest = export_bundle(args.db, args.out, ref, args.note)
+    manifest = export_bundle(args.db, args.out, ref, args.note, args.agents_flows)
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     print(f"\n시연 모드로 열기: python -m api.main --demo {args.out}")
 

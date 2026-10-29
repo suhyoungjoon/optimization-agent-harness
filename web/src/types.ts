@@ -484,6 +484,16 @@ export interface WorkflowStep {
   lines: string[];
   data: Record<string, unknown>;
   at: number;
+  // M20 타임라인 (LangGraph agents): 회차, 종류, 시작·소요(사람 노드는 비우고 waited), 그 단계의 AI 비용,
+  // 사람 검토의 결정, Supervisor 시도 기록 요약
+  round?: number;
+  kind?: "ai" | "rule" | "human";
+  started?: number;
+  seconds?: number | null;
+  waited?: boolean;
+  cost_usd?: number;
+  decision?: { action: "approve" | "reject" | "opinion"; title: string; note?: string };
+  sub?: { tool: string; summary: string }[];
 }
 
 export interface WorkflowRun {
@@ -538,6 +548,18 @@ export interface AgentsRun extends Omit<WorkflowRun, "ids" | "inputs" | "approva
   loop?: AgentsLoop;
   end_check?: "fixed" | "supervisor" | null;
   mode?: AgentsMode | null;
+}
+
+// 실행 기록 (M20): 끝난(또는 사람 대기에서 멈춘) 실행을 파일로 저장해 다시 열어 재생한다
+export interface AgentsRecordRow {
+  id: string; saved_at: number | null; status: string; llm: "fake" | "claude" | null; mode: AgentsMode | null;
+  steps: number; rounds: number; cost_usd: number | null;
+}
+export interface AgentsRecord {
+  id: string; saved_at: number; status: string; llm: "fake" | "claude";
+  graph: { level: string; perspectives: boolean; end_check: "fixed" | "supervisor" | null; mode: AgentsMode };
+  inputs: AgentsRun["inputs"]; steps: WorkflowStep[]; loop?: AgentsLoop; proposals: AgentsRun["proposals"];
+  events: AgentEvent[];
 }
 
 // 분석·개선 Supervisor (M18): 켜고 끄기

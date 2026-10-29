@@ -115,9 +115,35 @@ CONSTRAINTS_HEADER = "# 지켜야 할 제약 (현장·운영이 정한 한도, s
 
 
 def _charge(d: dict, cost) -> None:
-    """회차 AI 비용 합 (단가를 모르면 None으로 남긴다)."""
+    """회차 AI 비용 합 (단가를 모르면 None으로 남긴다). 지금 단계의 비용(step_cost, M20 타임라인)에도 더한다."""
     if cost is not None:
         d["round_cost"] = (d.get("round_cost") or 0.0) + cost
+        d["step_cost"] = (d.get("step_cost") or 0.0) + cost
+
+
+# 단계 기록에서 맨 위로 올리는 값 (M20 타임라인): 사람 검토의 결정, Supervisor의 시도 기록 요약
+TIMELINE_KEYS = ("decision", "sub")
+
+
+def _timed(d: dict, fn, kind: str):
+    """노드 함수를 감싸 단계 기록(log)에 타임라인 필드를 붙인다 (M20). 기존 키(node·lines·data·at)는 그대로.
+    round(노드를 시작할 때의 회차), started·seconds(사람 노드는 사람을 기다린 시간이 섞이므로 비우고 waited),
+    kind, cost_usd(그 단계의 AI 비용, 쓰지 않았으면 없음), decision·sub(data에서 올림)."""
+    def run(state):
+        started, rnd = time.time(), state.get("round") or 1
+        d["step_cost"] = None
+        out = fn(state)
+        for e in (out.get("log") if isinstance(out, dict) else None) or []:
+            data = e.get("data") or {}
+            e.update(round=rnd, started=started, kind=kind,
+                     seconds=None if kind == "human" else round(time.time() - started, 2))
+            if kind == "human":
+                e["waited"] = True
+            if d.get("step_cost") is not None:
+                e["cost_usd"] = d["step_cost"]
+            e.update({k: data.pop(k) for k in TIMELINE_KEYS if k in data})
+        return out
+    return run
 
 
 def _cache_note(usage) -> str:
@@ -677,7 +703,9 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None, e
         else:
             d["judgments"][-1] = judgment or None
         return {"queue": list(range(len(proposals))), **_step("supervisor_agent", lines, detected=s["detected"],
-                                                              total=s["total"])}
+                                                              total=s["total"],
+                                                              sub=[{"tool": a["tool"], "summary": a["result"]}
+                                                                   for a in out["attempts_log"]])}
 
     def rank_all() -> tuple[list[int], list[str]]:
         """설정값 제안을 모두 규칙 엔진으로 돌려보고 제시 기준(M15-A)으로 순위를 매긴다. (검토 순서, 화면 줄)"""
@@ -795,7 +823,8 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None, e
         p["status"] = "approved" if action == "approve" else "rejected"
         word = {"approve": "승인", "reject": "반려", "opinion": "의견"}[action]
         return {"decision": action, "opinion_error": "",
-                **_step("human_review", [word + (f": {note}" if note else ""), title])}
+                **_step("human_review", [word + (f": {note}" if note else ""), title],
+                        decision={"action": action, "title": title, "note": note})}
 
     def opinion_agent(state: AgentsState):
         p = d["proposals"][state["proposal"]]
@@ -996,7 +1025,7 @@ def build_flow(ctx: AgentContext, levels: dict[str, Level], checkpointer=None, e
         if name == "simulate" and sup_mode:
             meta = {**meta, "label": "추천안 차례대로",
                     "description": "Supervisor가 미리 돌려본 추천안을 추천 순서대로 하나씩 사람 검토에 올린다 (득실이 갈려도 사람이 본다)"}
-        g.add_node(name, fn, metadata=meta)
+        g.add_node(name, _timed(d, fn, meta["kind"]), metadata=meta)
     g.add_edge(START, "prepare")
     head = ([("rule_full", "supervisor_agent")] if sup_mode
             else [("rule_full", "analysis_agent"), ("analysis_agent", "proposal_agent")])

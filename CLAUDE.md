@@ -68,7 +68,7 @@ python -m scripts.generate --domain dispatch --seed 42 --faults P1,P2   # 데이
 (cd web && npm ci && npm run build)   # 프런트엔드 빌드 (web/dist)
 python -m api.main               # API + 빌드된 프런트엔드 서빙 (http://127.0.0.1:8000)
 (cd web && npm run dev)          # 프런트엔드 개발 서버 (API는 :8000으로 프록시)
-python -m scripts.snapshot export --out demo/bundle --note "..."   # 시연 번들 (runs/harness.db + 커밋된 도메인 파일)
+python -m scripts.snapshot export --out demo/bundle --note "..."   # 시연 번들 (runs/harness.db + 커밋된 도메인 파일, --agents-flows runs/agents_flows면 LangGraph agents 실행 기록도)
 python -m api.main --demo demo/bundle   # 시연 모드: 저장된 AI 결과만 재생, LLM·네트워크 없음
 python -m scripts.rehearsal_bundle      # API 키 없이 쓰는 리허설 번들 (가짜 LLM) → demo/rehearsal
 node scripts/record_demo.mjs --stills   # 시연 장면 녹화 (시연 모드 서버에 대해, runs/recordings)
