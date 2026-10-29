@@ -648,3 +648,25 @@ input.approver { width: 9em; }
 abbr.term { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
 .background-lines { margin: 4px 0; padding-left: 18px; line-height: 1.6; }
 .finding-impact { margin: 0 0 6px; font-size: 13px; }
+/* LangGraph agents 상위 타임라인 (M20) */
+.ag-timeline .agt-list { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow: auto; font-size: 13px; }
+.agt-round { margin: 8px 0 2px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.agt-round::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+.agt-row { display: grid; grid-template-columns: 64px 54px 150px 1fr auto; gap: 8px; align-items: baseline;
+  padding: 3px 6px; border-radius: 4px; cursor: pointer; border-left: 3px solid transparent; }
+.agt-row:hover { background: var(--surface-2, rgba(42, 120, 214, 0.06)); }
+.agt-row.agt-picked { background: var(--surface-2, rgba(42, 120, 214, 0.1)); }
+.agt-time, .agt-meta { font-variant-numeric: tabular-nums; color: var(--text-secondary); white-space: nowrap; }
+.agt-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agt-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agt-row.agt-approve { border-left-color: var(--good); background: color-mix(in srgb, var(--good) 8%, transparent); }
+.agt-row.agt-reject { border-left-color: var(--critical); background: color-mix(in srgb, var(--critical) 6%, transparent); }
+.agt-row.agt-opinion { border-left-color: var(--warning); background: color-mix(in srgb, var(--warning) 8%, transparent); }
+.agt-row.agt-running .agt-name { color: var(--series-1); }
+.agt-sub { padding: 1px 6px 1px 284px; color: var(--text-secondary); cursor: pointer; font-size: 12px; }
+@media (max-width: 760px) {
+  .agt-row { grid-template-columns: 56px 96px 1fr; }
+  .agt-kind { display: none; }
+  .agt-meta { grid-column: 3; }
+  .agt-sub { padding-left: 70px; }
+}

@@ -484,6 +484,16 @@ export interface WorkflowStep {
   lines: string[];
   data: Record<string, unknown>;
   at: number;
+  // M20 타임라인 (LangGraph agents): 회차, 종류, 시작·소요(사람 노드는 비우고 waited), 그 단계의 AI 비용,
+  // 사람 검토의 결정, Supervisor 시도 기록 요약
+  round?: number;
+  kind?: "ai" | "rule" | "human";
+  started?: number;
+  seconds?: number | null;
+  waited?: boolean;
+  cost_usd?: number;
+  decision?: { action: "approve" | "reject" | "opinion"; title: string; note?: string };
+  sub?: { tool: string; summary: string }[];
 }
 
 export interface WorkflowRun {

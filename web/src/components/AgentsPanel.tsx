@@ -7,6 +7,7 @@ import { fmtMetric, fmtUsd } from "./MetricsPanel";
 import { constraintText } from "./ImprovementPanel";
 import { TERMS, tip } from "../terms";
 import GraphCanvas, { type NodeView } from "./GraphCanvas";
+import AgentsTimeline from "./AgentsTimeline";
 import { usePoll } from "./usePoll";
 import { useSessionState, useStoredId } from "./useStoredId";
 import { opinionChips } from "./opinionHelp";
@@ -250,6 +251,12 @@ export default function AgentsPanel({
             height={320} nodeWidth={160} nodeHeight={74} minFitZoom={0.82} follow={towards ?? lastStep ?? "__start__"} />
           <Legend />
         </div>
+      )}
+
+      {graph && (
+        <AgentsTimeline steps={run?.steps ?? []} running={running} label={topLabel} picked={picked}
+          runningKind={graph.top.nodes.find((n) => n.id === running)?.kind as "ai" | "rule" | "human" | undefined}
+          onPick={(id) => setPicked(picked === id ? null : id)} live={run?.status === "running"} />
       )}
 
       {run?.waiting === "approval" && run.approval?.judgment && (
