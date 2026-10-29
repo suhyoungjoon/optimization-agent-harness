@@ -13,6 +13,7 @@ import { fmtMetric } from "./MetricsPanel";
 import { constraintText } from "./ImprovementPanel";
 import { OpinionHelp, opinionChips } from "./opinionHelp";
 import { usePoll } from "./usePoll";
+import SidePanel, { SideGroup } from "./SidePanel";
 
 // 에이전트 탭 (M16): 핵심 에이전트를 하나씩 실행하고, 그 처리 흐름(턴 → 도구 → 하네스 검사)을 한 화면에서 본다.
 // 실행은 기존 API를 그대로 부른다 (배정 /runs, 분석 /analysis, 개선 /proposals). 의견 정리만 /agent-tab/opinion.
@@ -242,20 +243,12 @@ export default function AgentRunsPanel({
 
   return (
     <section className="agent-tab">
-      <div className="agent-tab-grid">
-        <aside className="panel agent-tab-side">
-          <h2>에이전트</h2>
-          <div className="agent-list" role="radiogroup" aria-label="에이전트">
-            {AGENTS.map((a) => (
-              <button key={a.id} role="radio" aria-checked={agent === a.id} className={agent === a.id ? "agent-pick active" : "agent-pick"}
-                title={a.desc} onClick={() => { setAgent(a.id); setConfirming(false); setError(null); }}>
-                <strong>{a.label}</strong>
-                <span className="muted small">{info?.agents.find((x) => x.agent === a.id)?.model ?? ""}</span>
-              </button>
-            ))}
-          </div>
+      <SidePanel>
+      <SideGroup title="에이전트 설명">
           <p className="muted small">{AGENTS.find((a) => a.id === agent)?.desc}</p>
 
+      </SideGroup>
+      <SideGroup title="입력">
           <div className="agent-inputs">
             {agent === "dispatch" && (
               <>
@@ -312,6 +305,9 @@ export default function AgentRunsPanel({
             )}
           </div>
 
+      </SideGroup>
+      {cache && !cache.demo && (
+        <SideGroup title="선택">
           {cache && !cache.demo && (
             <label className="small agent-cache" title={`서버 전체 설정 (${cache.source}). 켜면 AI에게 보내는 입력이 이전과 똑같을 때 API를 부르지 않고 저장된 응답을 그대로 쓴다(비용 0, 결과도 같다). 끄면 매번 실제로 부른다(비용). 다음 실행부터 적용`}>
               <input type="checkbox" checked={cache.enabled} onChange={(e) => toggleCache(e.target.checked)} />{" "}
@@ -319,6 +315,21 @@ export default function AgentRunsPanel({
               <span className="muted"> {cache.enabled ? "· 같은 입력이면 비용 0, 결과 같음" : "· 매번 실제 호출 (비용)"}</span>
             </label>
           )}
+        </SideGroup>
+      )}
+      </SidePanel>
+
+      {/* 오른쪽 맨 위: 에이전트 고르기 → 실행, 지난 실행(누르면 펼침) */}
+      <div className="agent-run-bar">
+          <div className="agent-list agent-list-row" role="radiogroup" aria-label="에이전트">
+            {AGENTS.map((a) => (
+              <button key={a.id} role="radio" aria-checked={agent === a.id} className={agent === a.id ? "agent-pick active" : "agent-pick"}
+                title={a.desc} onClick={() => { setAgent(a.id); setConfirming(false); setError(null); }}>
+                <strong>{a.label}</strong>
+                <span className="muted small">{info?.agents.find((x) => x.agent === a.id)?.model ?? ""}</span>
+              </button>
+            ))}
+          </div>
           {!confirming ? (
             <button className="primary" disabled={busy || missing || !me} onClick={() => setConfirming(true)}>실행</button>
           ) : (
@@ -344,7 +355,8 @@ export default function AgentRunsPanel({
             </div>
           )}
 
-          <h3>끝난 실행 <span className="muted small">(다시 보기, API 호출 없음)</span></h3>
+        <details className="agent-history-box">
+          <summary>지난 실행 보기 ({history.length}건, 다시 보기는 API 호출 없음)</summary>
           <ol className="agent-history">
             {history.length === 0 && <li className="muted small">아직 없습니다.</li>}
             {history.map((h) => (
@@ -356,10 +368,12 @@ export default function AgentRunsPanel({
               </li>
             ))}
           </ol>
-        </aside>
+        </details>
+      </div>
 
+      <div className="agent-tab-body">
         <div className="agent-tab-main">
-          {!current && <div className="panel muted">왼쪽에서 에이전트와 입력을 고르고 실행하거나, 끝난 실행을 고르세요.</div>}
+          {!current && <div className="panel muted">위에서 에이전트를 고르고 왼쪽에서 입력을 정해 실행하거나, 지난 실행을 펼쳐 고르세요.</div>}
           {current && !shown && <div className="panel muted">불러오는 중…</div>}
           {shown && <Summary t={shown} onOpenReport={onOpenReport} onOpenBatch={onOpenBatch} />}
           {shown && shown.agent === "supervisor" && !shown.live && <SupervisorResult t={shown} adapter={adapter} />}

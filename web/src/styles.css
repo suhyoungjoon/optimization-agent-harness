@@ -709,3 +709,15 @@ abbr.term { text-decoration: underline dotted; text-underline-offset: 3px; curso
 .side-items .harness-levels .level-short { display: none; }
 .side-items .harness { display: flex; flex-direction: column; gap: 6px; }
 .side-items .harness-flags { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+/* 에이전트 탭 (레이아웃 B): 위에 에이전트 고르기·실행·지난 실행(접힘), 왼쪽에 설명·입력·캐시 */
+.agent-run-bar { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.agent-list.agent-list-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin: 0; }
+.agent-run-bar > button.primary { align-self: flex-start; padding: 6px 18px; }
+.agent-history-box > summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+.agent-history-box[open] .agent-history { max-height: 260px; }
+.side-items .agent-inputs { display: flex; flex-direction: column; gap: 6px; }
+.side-items .agent-inputs label { display: flex; flex-direction: column; align-items: stretch; gap: 2px; }
+.side-items .agent-inputs label:has(input[type="checkbox"]) { flex-direction: row; align-items: center; }
+.side-items .agent-inputs select, .side-items .agent-inputs input:not([type="checkbox"]) { max-width: none; width: 100%; }
+.side-items .agent-cache { display: block; }
+@media (max-width: 760px) { .agent-list.agent-list-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
