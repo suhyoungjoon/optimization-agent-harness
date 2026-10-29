@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, isGone } from "../api";
 import type { DomainAdapter } from "../domains/types";
-import type { AgentEvent, AgentsGraph, AgentsLoop, AgentsMode, AgentsRun, Constraint, DomainInfo, HarnessInfo, JudgmentView } from "../types";
+import type { AgentEvent, AgentsGraph, AgentsLoop, AgentsMode, AgentsRecord, AgentsRecordRow, AgentsRun, Constraint, DomainInfo, HarnessInfo, JudgmentView } from "../types";
 import type { MetricSpec } from "../domains/types";
 import { fmtMetric, fmtUsd } from "./MetricsPanel";
 import { constraintText } from "./ImprovementPanel";
@@ -55,15 +55,26 @@ export default function AgentsPanel({
   const realAi = `${PROVIDER_LABEL[harness?.llm.provider ?? "anthropic"] ?? harness?.llm.provider} ${harness?.llm.model ?? ""}`.trim();
   const [graph, setGraph] = useState<AgentsGraph | null>(null);
   const [flowId, setFlowId] = useStoredId("oah.agents.flowId", (id) => api.agentsGet(id));   // 탭을 옮겨도 이어서
-  const [run, setRun] = useState<AgentsRun | null>(null);
-  const [events, setEvents] = useState<AgentEvent[]>([]);
+  const [liveRun, setRun] = useState<AgentsRun | null>(null);
+  const [liveEvents, setEvents] = useState<AgentEvent[]>([]);
+  // 저장한 실행 기록 재생 (M20): AI를 부르지 않고 단계를 하나씩 드러낸다. 재생 중에는 이 기록이 화면의 실행이다
+  const [replay, setReplay] = useState<{ rec: AgentsRecord; n: number } | null>(null);
+  const [records, setRecords] = useState<AgentsRecordRow[] | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const run = replay ? replayRun(replay.rec, replay.n) : liveRun;
+  const events = replay ? run!.events : liveEvents;
+  useEffect(() => {
+    if (!replay || replay.n >= replay.rec.steps.length) return;
+    const t = setTimeout(() => setReplay((r) => r && { ...r, n: r.n + 1 }), 400 + form.pace * 4000);
+    return () => clearTimeout(t);
+  }, [replay, form.pace]);
   const lastI = useRef(-1);
   const [tick, setTick] = useState(0);
   const [picked, setPicked] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   // 실행 중에는 그 실행의 레벨, 아니면 고른 레벨의 그래프 (레벨을 바꾸면 배정 에이전트 그림이 바로 바뀐다)
-  const inFlight = !!run && run.status !== "done";
+  const inFlight = (!!run && run.status !== "done") || !!replay;
   const runLevel = inFlight && run ? run.inputs.level ?? form.level : form.level;
   // 관점별 분석이면 분석 에이전트 그림이 "관점 노드들(병렬) → 합치기"로 바뀐다 (M12-b)
   const runPerspectives = inFlight && run ? !!run.inputs.perspectives : form.perspectives;
@@ -102,6 +113,8 @@ export default function AgentsPanel({
     }
   };
   const start = () => guard(async () => {
+    setReplay(null);
+    setSaved(null);
     const r = await api.agentsStart({ domain: domain.name, ...form, metrics: adapter.metrics });
     lastI.current = -1;
     setEvents([]);
@@ -109,6 +122,22 @@ export default function AgentsPanel({
     setRun(r);
     setFlowId(r.id);
     setTick((t) => t + 1);
+  });
+  const saveRecord = () => guard(async () => {
+    if (!flowId) return;
+    const r = await api.agentsSave(flowId);
+    setSaved(`기록 저장: ${r.id} (${r.steps}단계)`);
+    setRecords(null);
+  });
+  const openRecord = (id: string) => guard(async () => {
+    const rec = await api.agentsRecord(id);
+    setFlowId(null);
+    setRun(null);
+    setEvents([]);
+    lastI.current = -1;
+    setPicked(null);
+    setSaved(null);
+    setReplay({ rec, n: 0 });
   });
   const step = (action: StepAction, constraints?: Constraint[]) => guard(async () => {
     if (!flowId) return;
@@ -225,9 +254,37 @@ export default function AgentsPanel({
           {run ? "처음부터 다시" : "에이전트 준비"}
         </button>
         <span className="badge" title="에이전트 내부까지 LangGraph StateGraph 하위 그래프">LangGraph</span>
+        <button disabled={!liveRun || liveRun.status === "running" || !!replay} onClick={saveRecord}
+          title="이 실행의 단계 기록을 파일로 저장합니다 (runs/agents_flows). 서버를 다시 켜도, 시연 모드에서도 다시 열어 재생할 수 있습니다">
+          기록 저장
+        </button>
+        {records === null ? (
+          <button onClick={() => guard(async () => setRecords(await api.agentsRecords()))} title="저장한 실행 기록을 열어 타임라인·그래프 진행을 재생합니다 (AI 호출 없음)">
+            기록 열기
+          </button>
+        ) : (
+          <select value="" aria-label="저장한 실행 기록" onChange={(e) => e.target.value && openRecord(e.target.value)}>
+            <option value="">{records.length ? "기록 고르기…" : "저장한 기록 없음"}</option>
+            {records.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.saved_at ? new Date(r.saved_at * 1000).toLocaleString("ko-KR") : r.id} · {r.mode === "supervisor" ? "Supervisor" : "고정 흐름"}
+                {" "}· {r.rounds}회차 {r.steps}단계 · {r.llm === "claude" ? "실제 AI" : "가짜 AI"}{r.cost_usd != null ? ` · $${r.cost_usd.toFixed(2)}` : ""}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       <div className="status-line" aria-live="polite">
         {error && <span className="critical-text">✕ {error}</span>}
+        {saved && <span className="good-text small">✓ {saved}</span>}
+        {replay && (
+          <span className="small">
+            저장된 기록 재생: {replay.rec.id} · {Math.min(replay.n, replay.rec.steps.length)}/{replay.rec.steps.length}단계 (AI 호출 없음){" "}
+            <button className="link-button" onClick={() => setReplay({ ...replay, n: 0 })}>처음부터 재생</button>{" "}
+            <button className="link-button" onClick={() => setReplay({ ...replay, n: replay.rec.steps.length })}>끝으로</button>{" "}
+            <button className="link-button" onClick={() => setReplay(null)}>닫기</button>
+          </span>
+        )}
         {run && <span className="muted small">AI: {run.llm === "fake" ? "가짜 AI (수치는 AI 성능과 무관)" : `실제 AI · ${realAi}`}</span>}
       </div>
 
@@ -277,6 +334,21 @@ export default function AgentsPanel({
       </div>
     </section>
   );
+}
+
+// 저장한 기록의 앞 n단계를 실행처럼 보이게 (재생). 내부 진행 기록은 마지막으로 드러난 단계가 끝난 시각까지
+function replayRun(rec: AgentsRecord, n: number): AgentsRun {
+  const done = n >= rec.steps.length;
+  const until = done ? Infinity : rec.steps[n - 1]?.at ?? 0;
+  const events = rec.events.filter((e) => e.at <= until);
+  const counts: Record<string, Record<string, number>> = {};
+  for (const e of events) (counts[e.agent] ??= {})[e.node] = (counts[e.agent][e.node] ?? 0) + 1;
+  return {
+    id: rec.id, status: done ? "done" : "running", current: done ? null : rec.steps[n].node, error: null, next: [],
+    waiting: null, approval: null, steps: rec.steps.slice(0, n), llm: rec.llm, events, counts,
+    last_event: events[events.length - 1] ?? null, proposals: done ? rec.proposals : [], inputs: rec.inputs,
+    loop: done ? rec.loop : undefined, end_check: rec.graph.end_check, mode: rec.graph.mode,
+  };
 }
 
 type NodeState = NonNullable<NodeView["state"]>;

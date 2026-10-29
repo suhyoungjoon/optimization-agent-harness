@@ -1,7 +1,7 @@
 import type {
   CompareResult, Dataset, DemoCatalogEntry, DemoManifest, DomainDefinition, DecisionRecord, DomainInfo, FindingLabel, HarnessInfo, Memory, HistoryRow, Proposal, ProposalBatch, Report, Run,
   SpecEstimate, TraceRecord, WorkflowGraph, WorkflowRun, AgentsGraph, AgentsRun, SweepAxis, SweepResult, Sensitivity, ChangeCard, SavedConstraint,
-  AgentTabInfo, AgentTabSources, AgentTabHistoryRow, AgentTabTimeline, TabAgent, ProposalOutcome, AgentsMode, LlmCacheState, OpinionHint,
+  AgentTabInfo, AgentTabSources, AgentsRecord, AgentsRecordRow, AgentTabHistoryRow, AgentTabTimeline, TabAgent, ProposalOutcome, AgentsMode, LlmCacheState, OpinionHint,
 } from "./types";
 
 // 서버에 그 실행이 없음 (서버를 다시 띄워 메모리의 실행이 사라짐)
@@ -57,6 +57,9 @@ export const api = {
     llm: "fake" | "claude"; pace: number; perspectives?: boolean; end_check?: "fixed" | "supervisor";
     use_saved_constraints?: boolean; mode?: AgentsMode }) => request<AgentsRun>("/agents/runs", { method: "POST", body: JSON.stringify(body) }),
   agentsGet: (id: string, after = -1) => request<AgentsRun>(`/agents/runs/${id}?after=${after}`),
+  agentsSave: (id: string) => request<{ id: string; steps: number }>(`/agents/runs/${id}/save`, { method: "POST" }),
+  agentsRecords: () => request<AgentsRecordRow[]>("/agents/records"),
+  agentsRecord: (id: string) => request<AgentsRecord>(`/agents/records/${id}`),
   agentsStep: (id: string, action: "next" | "approve" | "reject" | "opinion" | "confirm", note = "", constraints?: unknown[]) =>
     request<AgentsRun>(`/agents/runs/${id}/step`, { method: "POST", body: JSON.stringify({ action, note, constraints }) }),
   workflowGraph: () => request<WorkflowGraph>("/workflow/graph"),

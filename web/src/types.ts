@@ -550,6 +550,18 @@ export interface AgentsRun extends Omit<WorkflowRun, "ids" | "inputs" | "approva
   mode?: AgentsMode | null;
 }
 
+// 실행 기록 (M20): 끝난(또는 사람 대기에서 멈춘) 실행을 파일로 저장해 다시 열어 재생한다
+export interface AgentsRecordRow {
+  id: string; saved_at: number | null; status: string; llm: "fake" | "claude" | null; mode: AgentsMode | null;
+  steps: number; rounds: number; cost_usd: number | null;
+}
+export interface AgentsRecord {
+  id: string; saved_at: number; status: string; llm: "fake" | "claude";
+  graph: { level: string; perspectives: boolean; end_check: "fixed" | "supervisor" | null; mode: AgentsMode };
+  inputs: AgentsRun["inputs"]; steps: WorkflowStep[]; loop?: AgentsLoop; proposals: AgentsRun["proposals"];
+  events: AgentEvent[];
+}
+
 // 분석·개선 Supervisor (M18): 켜고 끄기
 export type AgentsMode = "fixed" | "supervisor";
 export type Confidence = "높음" | "중간" | "낮음";

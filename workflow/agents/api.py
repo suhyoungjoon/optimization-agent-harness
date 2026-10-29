@@ -6,11 +6,18 @@
 - POST /agents/runs                 첫 단계 앞에서 멈춘 새 실행
 - GET  /agents/runs/{id}?after=N    상태 + 에이전트 내부 진행 기록 (N번 이후)
 - POST /agents/runs/{id}/step       다음 단계(에이전트 하나) 실행 / 사람 승인
+- POST /agents/runs/{id}/save       실행 기록을 파일로 저장 (M20, <DB 폴더>/agents_flows/<id>.json, DB에는 넣지 않음)
+- GET  /agents/records              저장한 기록 목록 (시연 모드는 번들의 기록 포함)
+- GET  /agents/records/{id}         기록 하나 (화면이 타임라인·그래프 진행을 재생, AI 호출 없음)
 
 AI는 기존 LLM 클라이언트를 쓴다: claude = 실제 API (비용), fake = 리허설용 가짜 AI (네트워크·키 없음).
 시연 모드(--demo)에서는 항상 가짜 AI다. 결과는 이 탭에만 있다 (DB에 저장하지 않음, 승인 반영만 규칙 파일에).
 """
 
+import json
+import re
+import time
+from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
@@ -69,8 +76,11 @@ def _perspectives(domain: str) -> list[dict]:
         raise HTTPException(404, f"unknown domain: {domain}")
 
 
+RECORD_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
 class AgentRuns:
-    def __init__(self, demo: bool, retrieval_path=None, store=None):
+    def __init__(self, demo: bool, retrieval_path=None, store=None, records_dir=None):
         from langgraph.types import Command
 
         from ..runs import GraphRuns
@@ -79,6 +89,7 @@ class AgentRuns:
         self.retrieval_path = retrieval_path    # 검색 색인 (M15-C). 현장 의견이 쌓여 다음 실행에서도 찾을 수 있다
         self.store = store                      # 확정한 제약을 저장하고 다음 실행이 불러온다 (M15 후속)
         self.runs = GraphRuns(Command)
+        self.records_dir = Path(records_dir) if records_dir else None   # 실행 기록 파일 (M20)
 
     def start(self, req: AgentsStart) -> dict:
         from core.harness.levels import load_levels
@@ -144,8 +155,53 @@ class AgentRuns:
         return self.runs.step(flow_id, req.action, req.note, self.snapshot,
                               {"constraints": req.constraints} if req.constraints is not None else None)
 
+    # --- 실행 기록 저장·열기 (M20): 메모리에만 있는 실행을 파일로. 서버를 다시 켜도, 시연 모드에서도 다시 연다 ---
+    def save(self, flow_id: str) -> dict:
+        if self.records_dir is None:
+            raise HTTPException(501, "기록 폴더가 없음")
+        snap = self.snapshot(flow_id)
+        if snap["status"] == "running":
+            raise HTTPException(409, "단계가 실행 중이다. 끝나거나 멈춘 뒤 저장한다")
+        flow = self.runs.flows[flow_id]
+        inputs = snap["inputs"]
+        record = {"id": flow_id, "saved_at": time.time(), "status": snap["status"], "llm": snap.get("llm"),
+                  # 그래프 모양: /agents/graph를 다시 부를 값 (그림 자체는 저장하지 않는다)
+                  "graph": {"level": inputs.get("level"), "perspectives": bool(inputs.get("perspectives")),
+                            "end_check": flow.get("end_check"), "mode": flow.get("mode") or "fixed"},
+                  **{k: snap[k] for k in ("inputs", "steps", "loop", "proposals")},
+                  "events": self.runs.flows[flow_id]["_ctx"].recent(limit=None)}
+        self.records_dir.mkdir(parents=True, exist_ok=True)
+        (self.records_dir / f"{flow_id}.json").write_text(json.dumps(record, ensure_ascii=False, default=str),
+                                                          encoding="utf-8")
+        return {"id": flow_id, "steps": len(record["steps"])}
 
-def register(app: FastAPI, demo: bool = False, retrieval_path=None, store=None) -> None:
+    def records(self) -> list[dict]:
+        if self.records_dir is None or not self.records_dir.is_dir():
+            return []
+        out = []
+        for path in self.records_dir.glob("*.json"):
+            try:
+                r = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            steps = r.get("steps") or []
+            cost = [s["cost_usd"] for s in steps if s.get("cost_usd") is not None]
+            out.append({"id": r.get("id", path.stem), "saved_at": r.get("saved_at"), "status": r.get("status"),
+                        "llm": r.get("llm"), "mode": (r.get("graph") or {}).get("mode"), "steps": len(steps),
+                        "rounds": max((s.get("round") or 1 for s in steps), default=0),
+                        "cost_usd": round(sum(cost), 4) if cost else None})
+        return sorted(out, key=lambda r: r["saved_at"] or 0, reverse=True)
+
+    def record(self, record_id: str) -> dict:
+        if not RECORD_ID.match(record_id) or self.records_dir is None:
+            raise HTTPException(404, f"unknown record: {record_id}")
+        path = self.records_dir / f"{record_id}.json"
+        if not path.is_file():
+            raise HTTPException(404, f"unknown record: {record_id}")
+        return json.loads(path.read_text(encoding="utf-8"))
+
+
+def register(app: FastAPI, demo: bool = False, retrieval_path=None, store=None, records_dir=None) -> None:
     holder: list[AgentRuns] = []
 
     def get_runs() -> AgentRuns:
@@ -153,7 +209,7 @@ def register(app: FastAPI, demo: bool = False, retrieval_path=None, store=None) 
         if reason:
             raise HTTPException(501, reason)
         if not holder:
-            holder.append(AgentRuns(demo, retrieval_path, store))
+            holder.append(AgentRuns(demo, retrieval_path, store, records_dir))
         return holder[0]
 
     @app.get("/agents/graph")
@@ -185,3 +241,15 @@ def register(app: FastAPI, demo: bool = False, retrieval_path=None, store=None) 
     @app.post("/agents/runs/{flow_id}/step")
     def step_agents(flow_id: str, req: StepRequest):
         return get_runs().step(flow_id, req)
+
+    @app.post("/agents/runs/{flow_id}/save")
+    def save_agents(flow_id: str):
+        return get_runs().save(flow_id)
+
+    @app.get("/agents/records")
+    def list_records():
+        return get_runs().records()
+
+    @app.get("/agents/records/{record_id}")
+    def get_record(record_id: str):
+        return get_runs().record(record_id)

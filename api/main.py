@@ -331,7 +331,8 @@ def create_app(db_path: str | Path | None = None, serve_web: bool = True,
     register_workflow(app)   # LangGraph가 없으면 /workflow/graph가 이유만 돌려준다
     register_agents(app, demo=bool(demo),   # M10: 모든 에이전트를 LangGraph로 (시연 모드는 가짜 AI)
                     retrieval_path=store.path.parent / "retrieval.sqlite",   # M15-C: 규정·현장 의견 검색
-                    store=store)   # M15 후속: 확정한 제약 저장·불러오기
+                    store=store,   # M15 후속: 확정한 제약 저장·불러오기
+                    records_dir=store.path.parent / "agents_flows")   # M20: 실행 기록 (시연 모드는 번들 복사본 안)
 
     if serve_web and WEB_DIST.is_dir():   # 정적 파일은 모든 API 경로 뒤에 붙인다
         app.mount("/", StaticFiles(directory=WEB_DIST, html=True), name="web")

@@ -1,6 +1,9 @@
 """M20-a: LangGraph agents 단계 기록의 타임라인 필드 (회차·종류·시작·소요·비용·사람 결정·Supervisor 시도 기록).
 가짜 AI(리허설)만, 키·네트워크 없음."""
 
+import json
+import re
+
 import pytest
 
 pytest.importorskip("langgraph")
@@ -83,3 +86,45 @@ def test_step_cost_sums_to_round_cost():
     assert out[0]["cost_usd"] == pytest.approx(0.03) and "cost_usd" not in out[1] and "cost_usd" not in out[2]
     assert sum(s.get("cost_usd", 0) for s in out) == pytest.approx(d["round_cost"])
     assert all(s["round"] == 2 for s in out)
+
+
+def test_saved_record_reopens_with_the_same_steps_and_no_keys(client):  # noqa: F811
+    """기록 저장 → 목록 → 다시 열기. steps가 같고, 그래프를 다시 그릴 값이 있으며, 키가 파일에 없다."""
+    snap = run_to_end(client, start(client, "supervisor"))
+    res = client.post(f"/agents/runs/{snap['id']}/save")
+    assert res.status_code == 200 and res.json()["steps"] == len(snap["steps"])
+    rows = client.get("/agents/records").json()
+    assert rows[0]["id"] == snap["id"] and rows[0]["mode"] == "supervisor" and rows[0]["rounds"] >= 1
+    rec = client.get(f"/agents/records/{snap['id']}").json()
+    assert rec["steps"] == snap["steps"] and rec["graph"]["mode"] == "supervisor" and rec["graph"]["level"] == "L3"
+    assert rec["events"] and rec["loop"]["rounds"]
+    text = json.dumps(rec, ensure_ascii=False)
+    assert not re.search(r"api[_-]?key|MY_PROJECT_AZURE|ANTHROPIC_API|sk-[A-Za-z0-9]{10}", text, re.I)
+    assert client.get("/agents/records/../../etc").status_code == 404
+    assert client.get("/agents/records/nope").status_code == 404
+
+
+def test_snapshot_bundle_carries_agents_flows(tmp_path):
+    """시연 번들에 기록을 넣으면 시연 모드 서버가 그 기록을 목록에 보인다."""
+    from fastapi.testclient import TestClient
+
+    from api.main import create_app
+    from core.registry import set_domain_files_root
+    from scripts.rehearsal_bundle import build
+    from scripts.snapshot import export_bundle
+
+    build(tmp_path / "b")
+    flows = tmp_path / "flows"
+    flows.mkdir()
+    (flows / "abc123.json").write_text(json.dumps({"id": "abc123", "saved_at": 1, "status": "done", "graph": {"mode": "fixed"},
+                                                   "steps": [{"node": "prepare", "lines": ["x"], "round": 1}]}),
+                                       encoding="utf-8")
+    manifest = export_bundle(tmp_path / "b" / "harness.db", tmp_path / "out", None, "", flows)
+    assert manifest["counts"]["agents_flows"] == 1
+    try:
+        c = TestClient(create_app(serve_web=False, demo_bundle=tmp_path / "out", demo_work_root=tmp_path / "w",
+                                  replay_seconds=0))
+        assert [r["id"] for r in c.get("/agents/records").json()] == ["abc123"]
+        assert c.get("/agents/records/abc123").json()["steps"][0]["node"] == "prepare"
+    finally:
+        set_domain_files_root(None)
