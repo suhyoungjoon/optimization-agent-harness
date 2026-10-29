@@ -6,6 +6,7 @@ import { fmtCost, fmtSeconds } from "./MetricsPanel";
 import { usePoll } from "./usePoll";
 import { TERMS, tip } from "../terms";
 import Details from "./Details";
+import SidePanel, { SideGroup } from "./SidePanel";
 import { findingItems, findingSummary, makePlain, type Plain } from "./plainFinding";
 
 export default function AnalysisPanel({
@@ -94,8 +95,9 @@ export default function AnalysisPanel({
 
   return (
     <section className="analysis">
-      <div className="controls">
-        <label>
+      <SidePanel>
+      <SideGroup title="지금 보는 것">
+        <label className="stack">
           분석할 결과{" "}
           <select value={run?.run_id ?? ""} onChange={(e) => setRunId(e.target.value)} disabled={!!busy}>
             {done.length === 0 && <option value="">(실행 없음)</option>}
@@ -106,6 +108,17 @@ export default function AnalysisPanel({
             ))}
           </select>
         </label>
+      </SideGroup>
+      <SideGroup title="선택">
+        <label title="실패 패턴·자원 활용·시간 수급처럼 관점마다 AI를 따로(동시에) 돌린 뒤 합칩니다. 같은 발견에 대한 관점별 해석은 나란히 보여 줍니다. 비용은 관점 수만큼 늘어납니다">
+          <input type="checkbox" checked={byPerspective} onChange={(e) => setByPerspective(e.target.checked)} disabled={!!busy} />{" "}
+          관점별로 분석
+        </label>
+      </SideGroup>
+      </SidePanel>
+
+      {/* 오른쪽 맨 위: 실행과 상태 */}
+      <div className="run-bar">
         <button onClick={() => guard(`${TERMS.rule.label} 전체 실행 중`, onRunFullRule)} disabled={!!busy} title={tip("rule")}>
           {TERMS.rule.label} 전체 실행
         </button>
@@ -114,16 +127,12 @@ export default function AnalysisPanel({
             setReportId((await api.analyze(run!.run_id, { perspectives: byPerspective })).id))}>
           {TERMS.aiAnalysis.label} 실행
         </button>
-        <label title="실패 패턴·자원 활용·시간 수급처럼 관점마다 AI를 따로(동시에) 돌린 뒤 합칩니다. 같은 발견에 대한 관점별 해석은 나란히 보여 줍니다. 비용은 관점 수만큼 늘어납니다">
-          <input type="checkbox" checked={byPerspective} onChange={(e) => setByPerspective(e.target.checked)} disabled={!!busy} />{" "}
-          관점별로 분석
-        </label>
-      </div>
       <div className="status-line" aria-live="polite">
         {busy && <span className="muted">{busy}…</span>}
         {error && <span className="critical-text">✕ {error}</span>}
         {current?.status === "running" && <span className="muted">분석 중… (AI가 결과를 여러 조건으로 집계해 보고 있습니다)</span>}
         {current?.status === "error" && <span className="critical-text">✕ 분석 실패: {current.error}</span>}
+      </div>
       </div>
 
       {current?.status === "done" && current.body && current.score && (

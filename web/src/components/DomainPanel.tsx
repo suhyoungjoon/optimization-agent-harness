@@ -4,6 +4,7 @@ import type { DataFocus, DomainAdapter, DomainData, MetricSpec } from "../domain
 import { CORE_REASON_NAMES, TERMS, tip, type TermKey } from "../terms";
 import type { ChangeCard, Dataset, DomainDefinition, DomainFault, ParamKind, Sensitivity, SensitivityRow } from "../types";
 import { fmtMetric } from "./MetricsPanel";
+import SidePanel, { SideGroup } from "./SidePanel";
 
 type Section = "overview" | "params" | "rules" | "spec" | "data" | "faults";
 const SECTIONS: { id: Section; label: string; term?: TermKey }[] = [
@@ -43,15 +44,22 @@ export default function DomainPanel({
 
   return (
     <section className="domain">
-      <nav className="chips section-nav" role="tablist" aria-label="규칙·데이터 섹션">
-        {SECTIONS.map((s) => (
-          <button key={s.id} role="tab" aria-selected={section === s.id} className={section === s.id ? "selected" : undefined}
-            onClick={() => setSection(s.id)} title={s.term ? tip(s.term) : undefined}>
-            {s.label}
-          </button>
-        ))}
+      <SidePanel>
+      <SideGroup title="지금 데이터">
+        <span>{dataset ? `${dataset.id} · ${dataset.items}건` : "아직 없음 (데이터 보기에서 생성)"}</span>
+      </SideGroup>
+      <SideGroup title="보기">
+        <nav className="side-nav" role="tablist" aria-label="규칙·데이터 섹션" aria-orientation="vertical">
+          {SECTIONS.map((s) => (
+            <button key={s.id} role="tab" aria-selected={section === s.id} className={section === s.id ? "selected" : undefined}
+              onClick={() => setSection(s.id)} title={s.term ? tip(s.term) : undefined}>
+              {s.label}
+            </button>
+          ))}
+        </nav>
         <span className="muted small">읽기 전용 · 규칙은 개선 제안 탭에서 제안을 승인해야만 바뀝니다</span>
-      </nav>
+      </SideGroup>
+      </SidePanel>
       {section === "overview" && <Overview def={def} dataset={dataset} busy={busy} onGenerate={onGenerate} />}
       {section === "params" && <Params def={def} domainName={domainName} datasetId={dataset?.id ?? null} metrics={adapter.metrics} />}
       {section === "rules" && <Rules def={def} adapter={adapter} />}

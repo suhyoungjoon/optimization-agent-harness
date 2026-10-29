@@ -6,6 +6,7 @@ import { TERMS, tip } from "../terms";
 import { usePoll } from "./usePoll";
 import { OpinionHelp, type OpinionChip } from "./opinionHelp";
 import { useSessionState, useStoredId } from "./useStoredId";
+import SidePanel, { SideGroup } from "./SidePanel";
 
 // Agent workflow (LangGraph, M9): 다른 탭에서 하나씩 누르던 단계를 LangGraph 그래프 하나로 묶어,
 // 사람이 [다음 실행]을 누를 때마다 한 단계(에이전트)씩 넘어간다. 그림은 서버에서 컴파일된 그래프 그대로 그린다.
@@ -105,7 +106,8 @@ export default function WorkflowPanel({
 
   return (
     <section className="workflow">
-      <div className="controls">
+      <SidePanel>
+      <SideGroup title="데이터 (기본값)">
         <label title={tip("seed")}>
           {TERMS.seed.label} <input type="number" value={form.seed} onChange={(e) => setForm({ ...form, seed: Number(e.target.value) })} />
         </label>
@@ -122,20 +124,26 @@ export default function WorkflowPanel({
         <label title="처리 순서 앞에서부터 이 건수만 AI로 처리한다 (비용 때문)">
           처리할 건수 <input type="number" min={1} value={form.items} onChange={(e) => setForm({ ...form, items: Number(e.target.value) })} />
         </label>
+      </SideGroup>
+      <SideGroup title="선택">
         <label title="AI 방식 실행에 쓸 하네스 레벨">
           하네스 레벨{" "}
           <select value={form.level} onChange={(e) => setForm({ ...form, level: e.target.value })}>
             {levels.map((l) => <option key={l}>{l}</option>)}
           </select>
         </label>
+      </SideGroup>
+      </SidePanel>
+
+      {/* 오른쪽 맨 위: 실행과 상태 (단계 진행 막대는 바로 아래 흐름 칸 맨 위) */}
+      <div className="run-bar">
         <button className="primary" onClick={start} disabled={!graph || run?.status === "running"}>
           {run ? "처음부터 다시" : "워크플로우 준비"}
         </button>
         <span className="badge" title="서버에서 LangGraph StateGraph로 컴파일한 그래프를 실행한다">LangGraph</span>
-      </div>
-
-      <div className="status-line" aria-live="polite">
-        {error && <span className="critical-text">✕ {error}</span>}
+        <div className="status-line" aria-live="polite">
+          {error && <span className="critical-text">✕ {error}</span>}
+        </div>
       </div>
 
       <div className="wf-split">
