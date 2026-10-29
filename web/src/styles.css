@@ -694,3 +694,6 @@ abbr.term { text-decoration: underline dotted; text-underline-offset: 3px; curso
   .app-side { position: static; max-height: none; }
   .tabs.tabs-vertical { flex-direction: row; flex-wrap: wrap; border-right: none; padding-right: 0; border-bottom: 1px solid var(--border); }
 }
+/* 오른쪽 맨 위 실행 줄: 실행·기록 버튼과 상태, 바로 아래 단계 진행 막대 */
+.run-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-bottom: 8px; }
+.run-bar .status-line { flex: 1 1 280px; display: flex; flex-wrap: wrap; gap: 4px 12px; min-height: 0; margin: 0; }

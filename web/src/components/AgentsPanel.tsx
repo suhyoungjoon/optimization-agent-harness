@@ -255,7 +255,10 @@ export default function AgentsPanel({
           </select>
         </label>
       </SideGroup>
-      <SideGroup title="실행">
+      </SidePanel>
+
+      {/* 오른쪽 맨 위: 실행과 단계 진행 (왼쪽은 기본값·선택 항목) */}
+      <div className="run-bar">
         <button className="primary" onClick={start} disabled={!graph || run?.status === "running"}>
           {run ? "처음부터 다시" : "에이전트 준비"}
         </button>
@@ -292,8 +295,7 @@ export default function AgentsPanel({
         )}
         {run && <span className="muted small">AI: {run.llm === "fake" ? "가짜 AI (수치는 AI 성능과 무관)" : `실제 AI · ${realAi}`}</span>}
       </div>
-      </SideGroup>
-      </SidePanel>
+      </div>
 
       {run?.waiting === "approval" && run.approval?.kind === "confirm_constraints" ? (
         <ConfirmConstraints key={run.steps.length} ask={run.approval} onConfirm={(cs) => step("confirm", cs)}
