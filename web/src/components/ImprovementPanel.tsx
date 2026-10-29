@@ -8,6 +8,7 @@ import { usePoll } from "./usePoll";
 import { TERMS, tip } from "../terms";
 import Details from "./Details";
 import TradeoffMap from "./TradeoffMap";
+import SidePanel, { SideGroup } from "./SidePanel";
 
 const STATUS_LABEL: Record<Proposal["status"], string> = {
   proposed: "제안됨",
@@ -178,16 +179,39 @@ export default function ImprovementPanel({
 
   return (
     <section className="improvement">
-      <div className="controls">
+      <SidePanel>
+      <SideGroup title="지금 보는 것">
+        <span>{reportId ? `분석 결과 ${reportId}` : "문제 찾기 탭에서 분석을 먼저 하세요."}</span>
+        {current && <span>현재 {TERMS.params.label} v{String(current.params.version)}</span>}
+        <span className="muted small" title={tip("history")}>반영 {approved.length}회 · 반려 {history.length - approved.length}건
+          {lastCycle && <> · 마지막 개선 한 바퀴 {fmtUsd(lastCycle.llm_cost_usd)}{cycleSeconds != null && ` · ${fmtSeconds(cycleSeconds)}`}</>}</span>
+      </SideGroup>
+      {saved.length > 0 && (
+        <SideGroup title="선택: 저장된 제약">
+          <span className="muted small" title="LangGraph agents 탭·에이전트 탭에서 의견을 제약으로 정리하고 사람이 확정한 것입니다. 켜진 제약은 다음 개선 제안 요청과 agents 탭 실행에 자동으로 들어갑니다">
+            현장 의견에서 확정 · 켜짐 {saved.filter((c) => c.active).length}개 / {saved.length}개
+          </span>
+          <ul className="side-list">
+            {saved.map((c) => (
+              <li key={c.id} className={c.active ? undefined : "muted"}>
+                <label title={`${c.opinion || c.body.note || "의견 없음"} (${c.origin}, 규칙 v${c.params_version ?? "?"})`}>
+                  <input type="checkbox" checked={c.active} disabled={!!busy}
+                    onChange={() => guard(c.active ? "제약 끄는 중" : "제약 켜는 중", async () => void (await api.toggleConstraint(c.id, !c.active)))} />{" "}
+                  {constraintText(c.body)}
+                </label>
+              </li>
+            ))}
+          </ul>
+        </SideGroup>
+      )}
+      </SidePanel>
+
+      {/* 오른쪽 맨 위: 개선 제안 만들기와 상태 */}
+      <div className="run-bar">
         <button className="primary" disabled={!!busy || !reportId}
           onClick={() => guard("개선 제안 요청 중", async () => setBatchId((await api.propose(reportId!)).id))} title={tip("proposal")}>
           {TERMS.proposal.label} 만들기
         </button>
-        <span className="muted small">
-          {reportId ? `분석 결과 ${reportId} 기준` : "문제 찾기 탭에서 분석을 먼저 하세요."}
-          {current && ` · 현재 ${TERMS.params.label} v${String(current.params.version)}`}
-        </span>
-      </div>
       <div className="status-line" aria-live="polite">
         {busy && <span className="muted">{busy}…</span>}
         {error && <span className="critical-text">✕ {error}</span>}
@@ -220,30 +244,8 @@ export default function ImprovementPanel({
           </span>
         )}
       </div>
+      </div>
 
-      <p className="small muted">
-        <span title={tip("history")}>반영 {approved.length}회 · 반려 {history.length - approved.length}건</span>
-        {lastCycle && <> · 마지막 개선 한 바퀴 {fmtUsd(lastCycle.llm_cost_usd)}{cycleSeconds != null && ` · ${fmtSeconds(cycleSeconds)}`}</>}
-      </p>
-      {saved.length > 0 && (
-        <details className="small">
-          <summary title="LangGraph agents 탭에서 의견을 제약으로 정리하고 사람이 확정한 것입니다. 켜진 제약은 다음 개선 제안 요청과 agents 탭 실행에 자동으로 들어갑니다">
-            저장된 제약 (현장 의견에서 확정) · 켜짐 {saved.filter((c) => c.active).length}개 / {saved.length}개
-          </summary>
-          <ul>
-            {saved.map((c) => (
-              <li key={c.id} className={c.active ? undefined : "muted"}>
-                {constraintText(c.body)}
-                <span className="muted"> — {c.opinion || c.body.note || "의견 없음"} ({c.origin}, 규칙 v{c.params_version ?? "?"})</span>{" "}
-                <button className="small" disabled={!!busy}
-                  onClick={() => guard(c.active ? "제약 끄는 중" : "제약 켜는 중", async () => void (await api.toggleConstraint(c.id, !c.active)))}>
-                  {c.active ? "끄기" : "켜기"}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
       {memory && memory.item_ids.length > 0 && (
         <details className="small">
           <summary title="사람이 내린 판단은 다음 회차 AI 입력으로 돌아갑니다. 반려 사유는 개선 제안에, 발견 판정은 문제 찾기에">

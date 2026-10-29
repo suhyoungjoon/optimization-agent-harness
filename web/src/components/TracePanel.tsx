@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { TERMS } from "../terms";
+import SidePanel, { SideGroup } from "./SidePanel";
 import Details from "./Details";
 import type { DecisionRecord, Run, TraceRecord } from "../types";
 
@@ -88,8 +89,9 @@ export default function TracePanel({
 
   return (
     <section className="trace">
-      <div className="controls">
-        <label>
+      <SidePanel>
+      <SideGroup title="지금 보는 것">
+        <label className="stack">
           실행{" "}
           <select value={run.run_id} onChange={(e) => setRunId(e.target.value)}>
             {done.map((r) => (
@@ -99,6 +101,9 @@ export default function TracePanel({
             ))}
           </select>
         </label>
+      </SideGroup>
+      </SidePanel>
+      <div className="controls">
         <div className="chips" role="radiogroup" aria-label="항목 필터">
           {FILTERS.map((f) => (
             <button key={f.id} role="radio" aria-checked={filter === f.id}

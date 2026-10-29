@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { api } from "./api";
 import AnalysisPanel from "./components/AnalysisPanel";
 import ComparePanel from "./components/ComparePanel";
+import { SideSlotContext } from "./components/SidePanel";
 import Details, { ExpandAllContext, readExpandAll, saveExpandAll } from "./components/Details";
 import DomainPanel from "./components/DomainPanel";
 import ImprovementPanel from "./components/ImprovementPanel";
@@ -41,6 +42,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("compare");
   const [fatal, setFatal] = useState<string | null>(null);
   const [expandAll, setExpandAll] = useState(readExpandAll);
+  const [sideSlot, setSideSlot] = useState<HTMLElement | null>(null);   // 왼쪽 칸: 탭의 선택 항목이 여기에 그려진다
 
   // 실험 세션 상태
   const [seed, setSeed] = useState(42);
@@ -247,7 +249,9 @@ export default function App() {
         </label>
       </header>
       {harness?.demo && <DemoBanner manifest={harness.demo} catalog={demoCatalog} />}
-      <nav className="tabs" role="tablist">
+      <div className="app-layout">
+      <aside className="app-side">
+      <nav className="tabs tabs-vertical" role="tablist" aria-orientation="vertical">
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -262,6 +266,9 @@ export default function App() {
           </button>
         ))}
       </nav>
+      <div ref={setSideSlot} className="side-slot" />
+      </aside>
+      <SideSlotContext.Provider value={sideSlot}>
       <main>
         {fatal && <p className="critical-text">✕ 서버에 연결할 수 없습니다: {fatal}</p>}
         {domain && adapter && tab === "domain" && (
@@ -365,6 +372,8 @@ export default function App() {
           />
         )}
       </main>
+      </SideSlotContext.Provider>
+      </div>
     </div>
     </ExpandAllContext.Provider>
   );

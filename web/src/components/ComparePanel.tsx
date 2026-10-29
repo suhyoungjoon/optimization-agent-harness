@@ -6,7 +6,7 @@ import HarnessPipeline from "./HarnessPipeline";
 import HarnessToggle from "./HarnessToggle";
 import MetricsPanel, { fmtCost, fmtMetric } from "./MetricsPanel";
 import { TERMS, tip } from "../terms";
-import Details from "./Details";
+import SidePanel, { SideGroup } from "./SidePanel";
 
 export interface CompareProps {
   domain: DomainInfo;
@@ -64,26 +64,22 @@ export default function ComparePanel(p: CompareProps) {
 
   return (
     <section className="compare">
-      <div className="controls">
+      <SidePanel>
+      <SideGroup title="데이터 (기본값)">
         <label title={tip("seed")}>
           {TERMS.seed.label} <input type="number" value={p.seed} onChange={(e) => p.setSeed(Number(e.target.value))} />
         </label>
-        <Details className="chip-details" summary={
-          <span title={tip("faults")}>{TERMS.faults.label}: {p.faults.length ? p.faults.join("·") : "없음"}</span>
-        }>
-          <fieldset>
-            <legend className="muted" title={tip("faults")}>{TERMS.faults.label}</legend>
-            {p.domain.faults.map((f) => (
-              <label key={f.id} title={f.name}>
-                <input type="checkbox" checked={p.faults.includes(f.id)} onChange={() => p.toggleFault(f.id)} />
-                {f.id} {f.name}
-              </label>
-            ))}
-          </fieldset>
-        </Details>
-        <button onClick={p.onGenerate} disabled={!!p.busy}>데이터 생성</button>
+        <fieldset>
+          <legend className="muted" title={tip("faults")}>{TERMS.faults.label}</legend>
+          {p.domain.faults.map((f) => (
+            <label key={f.id} title={f.name}>
+              <input type="checkbox" checked={p.faults.includes(f.id)} onChange={() => p.toggleFault(f.id)} />
+              {f.id}
+            </label>
+          ))}
+        </fieldset>
         {p.dataset && (
-          <label title={tip("scope")}>
+          <label className="stack" title={tip("scope")}>
             {TERMS.scope.label}{" "}
             <select value={p.scopeId} onChange={(e) => p.setScopeId(e.target.value)} disabled={!!p.busy}>
               {p.scopes.map((s) => (
@@ -92,33 +88,45 @@ export default function ComparePanel(p: CompareProps) {
             </select>
           </label>
         )}
-        <button onClick={p.onRunRule} disabled={!!p.busy || !p.dataset} title={tip("rule")}>{TERMS.rule.label} 실행</button>
-      </div>
-
-      <div className="controls ai-controls">
+      </SideGroup>
+      <SideGroup title="선택">
         <HarnessToggle harness={p.harness} level={p.level} onChange={p.setLevel} disabled={!!p.busy} />
         {p.harness && (
           <button type="button" className="link-button" aria-expanded={explain} onClick={() => setExplain(!explain)}>
-            {explain ? "▾" : "▸"} 하네스 설명
+            {explain ? "▾" : "▸"} 하네스 설명 (오른쪽에 펼침)
           </button>
         )}
+        <label>
+          반복{" "}
+          <select value={p.repeats} onChange={(e) => p.setRepeats(Number(e.target.value))}>
+            {[1, 2, 3].map((n) => <option key={n} value={n}>{n}회</option>)}
+          </select>
+        </label>
+        {p.harness && (
+          <span className="muted small" title="원래 용어: 모델 · effort · 응답 캐시 (configs/llm.yaml)">
+            {p.harness.llm.model}{p.harness.llm.effort ? ` · 생각 깊이 ${p.harness.llm.effort}` : ""}
+            {p.harness.llm.cache ? " · 같은 요청은 저장된 응답 재사용" : ""}
+          </span>
+        )}
+      </SideGroup>
+      </SidePanel>
+
+      {/* 오른쪽 맨 위: 데이터 생성 → 규칙 방식 실행 → AI 방식 실행, 상태 */}
+      <div className="run-bar">
+        <button onClick={p.onGenerate} disabled={!!p.busy}>데이터 생성</button>
+        <button onClick={p.onRunRule} disabled={!!p.busy || !p.dataset} title={tip("rule")}>{TERMS.rule.label} 실행</button>
         <button className="primary" onClick={p.onRunAi} disabled={!!p.busy || !p.dataset} title={tip("ai")}>
           {TERMS.ai.label} 실행 ({p.level})
         </button>
-        <Details className="chip-details" summary={<span title="실행 설정: 반복 횟수, 모델·생각 깊이">반복 {p.repeats}회</span>}>
-          <label>
-            반복{" "}
-            <select value={p.repeats} onChange={(e) => p.setRepeats(Number(e.target.value))}>
-              {[1, 2, 3].map((n) => <option key={n} value={n}>{n}회</option>)}
-            </select>
-          </label>
-          {p.harness && (
-            <span className="muted small" title="원래 용어: 모델 · effort · 응답 캐시 (configs/llm.yaml)">
-              {p.harness.llm.model}{p.harness.llm.effort ? ` · 생각 깊이 ${p.harness.llm.effort}` : ""}
-              {p.harness.llm.cache ? " · 같은 요청은 저장된 응답 재사용" : ""}
+        <div className="status-line" aria-live="polite">
+          {p.busy && <span className="muted">{p.busy}…</span>}
+          {p.error && <span className="critical-text">✕ {p.error}</span>}
+          {p.dataset && !p.busy && (
+            <span className="muted">
+              {TERMS.dataset.label} {p.dataset.id} · {scope?.label ?? "–"}
             </span>
           )}
-        </Details>
+        </div>
       </div>
 
       {explain && p.harness && (
@@ -126,15 +134,6 @@ export default function ComparePanel(p: CompareProps) {
           disabled={!!p.busy} />
       )}
 
-      <div className="status-line" aria-live="polite">
-        {p.busy && <span className="muted">{p.busy}…</span>}
-        {p.error && <span className="critical-text">✕ {p.error}</span>}
-        {p.dataset && !p.busy && (
-          <span className="muted">
-            {TERMS.dataset.label} {p.dataset.id} · {scope?.label ?? "–"}
-          </span>
-        )}
-      </div>
 
       {p.ruleRun?.status === "done" && p.shownAiRun?.status === "done" && (
         <Verdict rule={p.ruleRun} ai={p.shownAiRun} specs={p.adapter.metrics} />
