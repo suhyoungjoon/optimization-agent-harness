@@ -670,3 +670,27 @@ abbr.term { text-decoration: underline dotted; text-underline-offset: 3px; curso
   .agt-meta { grid-column: 3; }
   .agt-sub { padding-left: 70px; }
 }
+/* 레이아웃 B: 왼쪽 칸(세로 탭 + 지금 탭의 기본값·선택 항목·실행), 오른쪽 내용 */
+.app-layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 16px; align-items: start; }
+.app-side { position: sticky; top: 8px; max-height: calc(100vh - 16px); overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.tabs.tabs-vertical { flex-direction: column; border-bottom: none; margin-bottom: 0; overflow: visible; gap: 2px;
+  border-right: 1px solid var(--border); padding-right: 8px; }
+.tabs.tabs-vertical button { border-radius: 6px; text-align: left; padding: 3px 10px; font-size: 13px; white-space: normal; border-left: 3px solid transparent; }
+.tabs.tabs-vertical button[aria-selected="true"] { border-bottom: none; border-left-color: var(--series-1); background: var(--hover-wash); }
+.side-slot:empty { display: none; }
+.side-slot { display: flex; flex-direction: column; gap: 10px; }
+.side-group { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--surface); }
+.side-group h3 { margin: 0 0 6px; font-size: 12px; color: var(--text-secondary); font-weight: 700; }
+.side-items { display: flex; flex-direction: column; align-items: stretch; gap: 6px; font-size: 13px; }
+.side-items > label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.side-items > label:has(input[type="checkbox"]) { justify-content: flex-start; }
+.side-items select, .side-items input[type="number"] { max-width: 130px; }
+.side-items fieldset { display: flex; flex-wrap: wrap; gap: 8px; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; margin: 0; }
+.side-items fieldset legend { font-size: 12px; padding: 0 4px; }
+.side-items button.primary { width: 100%; padding: 8px; }
+.side-items .status-line { display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+@media (max-width: 900px) {
+  .app-layout { grid-template-columns: 1fr; }
+  .app-side { position: static; max-height: none; }
+  .tabs.tabs-vertical { flex-direction: row; flex-wrap: wrap; border-right: none; padding-right: 0; border-bottom: 1px solid var(--border); }
+}

@@ -8,6 +8,7 @@ import { constraintText } from "./ImprovementPanel";
 import { TERMS, tip } from "../terms";
 import GraphCanvas, { type NodeView } from "./GraphCanvas";
 import AgentsTimeline from "./AgentsTimeline";
+import SidePanel, { SideGroup } from "./SidePanel";
 import { usePoll } from "./usePoll";
 import { useSessionState, useStoredId } from "./useStoredId";
 import { opinionChips } from "./opinionHelp";
@@ -185,7 +186,8 @@ export default function AgentsPanel({
 
   return (
     <section className="workflow agents">
-      <div className="controls">
+      <SidePanel>
+      <SideGroup title="데이터 (기본값)">
         <label title={tip("seed")}>
           {TERMS.seed.label} <input type="number" value={form.seed} onChange={(e) => setForm({ ...form, seed: Number(e.target.value) })} />
         </label>
@@ -202,6 +204,8 @@ export default function AgentsPanel({
         <label title="처리 순서 앞에서부터 이 건수만 배정 에이전트가 처리한다 (비용 때문)">
           처리할 건수 <input type="number" min={1} max={200} value={form.items} onChange={(e) => setForm({ ...form, items: Number(e.target.value) })} />
         </label>
+      </SideGroup>
+      <SideGroup title="에이전트 설정">
         <label title="배정 에이전트 그래프의 모양을 정한다 (바꾸면 아래 그래프가 바로 다시 그려진다)">
           하네스 레벨{" "}
           <select value={form.level} onChange={(e) => { setForm({ ...form, level: e.target.value }); setPicked("dispatch_agent"); }}
@@ -250,6 +254,8 @@ export default function AgentsPanel({
             <option value={0.5}>천천히</option>
           </select>
         </label>
+      </SideGroup>
+      <SideGroup title="실행">
         <button className="primary" onClick={start} disabled={!graph || run?.status === "running"}>
           {run ? "처음부터 다시" : "에이전트 준비"}
         </button>
@@ -273,7 +279,6 @@ export default function AgentsPanel({
             ))}
           </select>
         )}
-      </div>
       <div className="status-line" aria-live="polite">
         {error && <span className="critical-text">✕ {error}</span>}
         {saved && <span className="good-text small">✓ {saved}</span>}
@@ -287,6 +292,8 @@ export default function AgentsPanel({
         )}
         {run && <span className="muted small">AI: {run.llm === "fake" ? "가짜 AI (수치는 AI 성능과 무관)" : `실제 AI · ${realAi}`}</span>}
       </div>
+      </SideGroup>
+      </SidePanel>
 
       {run?.waiting === "approval" && run.approval?.kind === "confirm_constraints" ? (
         <ConfirmConstraints key={run.steps.length} ask={run.approval} onConfirm={(cs) => step("confirm", cs)}
