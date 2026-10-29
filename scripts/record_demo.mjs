@@ -398,7 +398,11 @@ const scenes = {
     await page.locator(".agent-pick", { hasText: "개선" }).first().click();
     const box = page.locator(".agent-history-box");
     await box.locator("summary").click();
-    await box.locator(".agent-history button").first().click();
+    // 에이전트를 바꾼 직후에는 목록이 이전 에이전트 기록이다: 개선안 묶음(bat-…)으로 바뀐 뒤, 끝난 것 중 맨 위를 연다
+    const done = box.locator(".agent-history li").filter({ has: page.locator("button", { hasText: /^bat-/ }) })
+      .filter({ hasNotText: /(running|error|failed) · / });
+    await done.first().waitFor({ timeout: TIMEOUT });
+    await done.first().locator("button").click();
     await page.getByRole("button", { name: /개선 제안 탭에서 보기/ }).click({ timeout: TIMEOUT });
     await page.locator(".improvement .run-bar .status-line .muted").first().waitFor({ timeout: TIMEOUT });
     // 제시 기준에서 본안이 없으면(예: 승인으로 규칙이 바뀐 뒤) 접힌 참고 안을 펼친다
