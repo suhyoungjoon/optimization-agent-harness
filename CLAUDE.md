@@ -62,7 +62,7 @@ Python 3.11+, FastAPI, Pydantic, SQLite, PyYAML, pytest / React + Vite + TypeScr
 ## 명령어
 
 ```bash
-pip install -e ".[dev]"          # 설치
+pip install -e ".[dev,workflow]" # 설치 (workflow: LangGraph 화면·테스트, anthropic은 선택 `.[anthropic]`)
 pytest                           # 테스트
 python -m scripts.generate --domain dispatch --seed 42 --faults P1,P2   # 데이터 생성
 (cd web && npm ci && npm run build)   # 프런트엔드 빌드 (web/dist)
