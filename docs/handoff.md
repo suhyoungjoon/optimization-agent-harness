@@ -1,7 +1,7 @@
 # 인수인계: 코어 재사용 가이드
 
 새 레포(수리 최적화 솔버 기반 "최적화 엔진 모델" + 워크플로우 agent)에서 이 레포의 코어를 재사용하기 위한 문서다.
-**기획서(docs/plan.md)가 아니라 2026-09-30 main의 실제 코드 기준**이다. 코드와 이 문서가 다르면 코드가 맞다.
+**기획서(docs/plan.md)가 아니라 2026-09-30 main의 실제 코드 기준**으로 처음 썼고, 이후 마일스톤마다 해당 장을 보탰다(1장 현재 상태와 10장 실행 환경은 2026-11-02 main `f4428c0` 기준으로 갱신). 코드와 이 문서가 다르면 코드가 맞다.
 
 빠른 시작:
 
@@ -24,19 +24,29 @@ from domains.dispatch import get_pack                                           
 |---|---|---|
 | M1 설계 | 계약(`core/interfaces.py`), 하네스 레벨 설정, dispatch 설정 초안, 계약 테스트, CI | 완료 |
 | M2 기준선 | 가상 데이터 생성기, 규칙 엔진 solve/validate, 지표, SQLite 저장소, API, 비교 탭 | 완료. 결정적, 테스트로 고정 |
-| M3 AI agent | LLM 클라이언트(캐시), 하네스 L0~L5 러너, 검증 루프·가드레일·트레이스, 실행·비교 | 완료. **가짜 LLM으로만 검증** |
-| M4 분석·개선 | 분석 agent(근거 검사), 정답표 채점, 개선안 생성, 시뮬레이션, 승인·반영 | 완료. 분석·제안 품질은 **가짜 LLM으로만 검증** |
+| M3 AI agent | LLM 클라이언트(캐시), 하네스 L0~L5 러너, 검증 루프·가드레일·트레이스, 실행·비교 | 완료. 실제 API 실험 완료 ([실험 보고서](experiment-real-api-2026-10.md)) |
+| M4 분석·개선 | 분석 agent(근거 검사), 정답표 채점, 개선안 생성, 시뮬레이션, 승인·반영 | 완료. 실제 API 실험 완료 (같은 보고서) |
 | M5 발표 | 시연 번들·재생 모드, 리허설 번들(API 키 없이), 녹화 스크립트, 서울 강남3구 지도, Windows CI | 완료 |
-| M6-a | 도메인 탭(규칙·데이터 읽기 전용), params.yaml 섹션별 `docs`, 개선안이 bounds·docs를 못 바꾸게 막음 | 완료 |
+| M6-a | 규칙·데이터 탭(당시 이름 도메인 탭, 읽기 전용), params.yaml 섹션별 `docs`, 개선안이 bounds·docs를 못 바꾸게 막음 | 완료 |
 | M6-b | 사람이 만든 개선안 | **미구현** (plan.md에 계획만, 결정 4개 보류) |
 | M7-a | 비교 탭 하네스 파이프라인 그림 | 완료 |
 | M7-b | 레벨 추이 차트, 하네스 효과 집계, AI 입력 미리보기 | **미구현** (계획만) |
+| M8 | 화면 용어를 쉬운 말로, 요약 먼저·상세는 펼쳐서 | 완료 |
+| M9~M11 | Agent workflow 탭, LangGraph agents(에이전트를 LangGraph 하위 그래프로), 가로 그래프 | 완료 (선택 설치 `.[workflow]`) |
+| M12 | 채점 2단계(자동 근거 일치 + 사람 원인 확인), 제약, 관점별 분석, 회차 간 장기 기억, 자원 단위 발견 | 완료 |
+| M13 | 파라미터 분류(policy·estimate·fixed·governance), 파라미터 탐색·민감도, 득실 지도 | 완료 |
+| M14 | Azure OpenAI 연결. **기본 제공사 `azure_openai`**, `anthropic`은 선택 설치 | 완료 |
+| M15 | 개선안 제시 기준(순위·참고·최소 변경), 회차 순환(의견 → 제약 → 재제안), 문서 검색(RAG) | 완료 |
+| M16 | 에이전트 탭 (에이전트별 단독 실행, 턴별 타임라인) | 완료 |
+| M17 | 계획 vs 실적 (가상 고객 반응, 참고용·AI에게 숨김) | 완료 |
+| M18 | 분석·개선 Supervisor, 공통 실행 제어(예산·실패 상태) | 완료 |
+| M20 | LangGraph agents 상위 타임라인, 실행 기록 저장·재생 | 완료 (M19는 이 레포 범위 밖) |
 
 동작 수준 요약:
 
-- **확실히 동작 (결정적, 테스트 고정)**: 데이터 생성, 규칙 엔진 solve/validate, 지표, 차원 집계, 허용 범위 검사, params 시뮬레이션, 정답표 채점, params 파일 반영·버전 올림, 저장소.
-- **흐름은 동작, 품질 미검증**: AI agent(L0~L5), 분석 agent, 개선 agent. 테스트는 모두 `tests/fake_llm.py`의 가짜 LLM이다. **실제 Claude API로 돌린 실험 결과는 아직 없다.**
-- 테스트: pytest 167개(인수인계 작업에서 공개 API 테스트 2개, 재사용 레포 요청으로 공개 API 보강 테스트 3개 추가), GitHub Actions에서 ubuntu·windows 매트릭스 + 웹 빌드.
+- **확실히 동작 (결정적, 테스트 고정)**: 데이터 생성, 규칙 엔진 solve/validate, 지표, 차원 집계, 허용 범위 검사, params 시뮬레이션, 정답표 채점, params 파일 반영·버전 올림, 저장소, 실적(가상 고객 반응) 계산.
+- **흐름은 테스트로 고정, 품질은 실제 API 실험으로 확인**: AI agent(L0~L5), 분석 agent, 개선 agent, Supervisor. 테스트는 모두 `tests/fake_llm.py`의 가짜 LLM이고, 실제 API(Claude, 회사 Azure OpenAI) 결과는 [실험 보고서](experiment-real-api-2026-10.md)에 있다.
+- 테스트: pytest 469개(2026-11-02 기준), GitHub Actions에서 ubuntu·windows 매트릭스 + 웹 빌드.
 
 ## 2. 재사용 대상 모듈
 
@@ -548,7 +558,7 @@ overrides:                        # 구간 조건
 | 승인 시 git 커밋 | 앱은 파일만 쓰고 커밋은 사람이 | 사람이 변경을 확인하는 단계를 남김 |
 | 저장소: 결과 JSON | 데이터셋은 (도메인, seed, 결함)만 저장하고 인스턴스는 재생성 | 결정적 생성기라 저장 불필요 |
 | `?cached=true` | + 시연 번들(`--demo`), 리허설 번들(가짜 LLM) | 네트워크·API 키 없는 발표 |
-| 탭 4개 | 5개 (도메인 탭 M6-a) + 하네스 설명(M7-a) | 추가 요청 |
+| 탭 4개 | 5개 (규칙·데이터 탭, 당시 이름 도메인 탭, M6-a) + 하네스 설명(M7-a). 이후 에이전트 소개·에이전트·Agent workflow·LangGraph agents 탭이 더해져 지금은 9개 | 추가 요청 |
 | requirements.txt | pyproject.toml | 설치 가능한 패키지 |
 
 ## 8. 알려진 한계와 기술 부채
@@ -606,10 +616,11 @@ overrides:                        # 구간 조건
 |---|---|
 | Python | 3.11+ (CI 3.11) |
 | 배포 이름 / import 이름 | `optimization-agent-harness` / `core`, `domains.dispatch` |
-| 런타임 의존성 | `pyyaml`, `ruamel.yaml`, `anthropic`, `fastapi`, `pydantic`, `uvicorn` (fastapi 계열은 코어만 쓸 때도 설치된다) |
+| 런타임 의존성 | `pyyaml`, `ruamel.yaml`, `openai`(기본 제공사 Azure OpenAI), `fastapi`, `pydantic`, `uvicorn` (fastapi 계열은 코어만 쓸 때도 설치된다) |
+| 선택 의존성 | `[anthropic]`: `anthropic` (제공사 anthropic) / `[workflow]`: `langgraph` (LangGraph 화면) / `[azure]`: 이전 설치 명령 호환용 |
 | 개발 의존성 (`[dev]`) | `pytest`, `httpx` |
 | 패키지 데이터 | `configs/*.yaml`, `domains/dispatch/*.yaml`·`*.md`·`geo/*.geojson` |
-| 환경변수 | `OAH_ANTHROPIC_API_KEY`(우선) 또는 `ANTHROPIC_API_KEY`(LLM 사용 시, `.env` 가능), `LLM_CACHE=0`(캐시 끄기), `HARNESS_DB`(API·스크립트의 DB 경로), `HOST`·`PORT`(API 서버) |
+| 환경변수 | 기본 제공사 azure_openai: `MY_PROJECT_AZURE_API_KEY`(endpoint·api-version은 `configs/llm.yaml`, `MY_PROJECT_AZURE_ENDPOINT`·`MY_PROJECT_AZURE_API_VERSION`으로 덮을 수 있음). anthropic: `LLM_PROVIDER=anthropic`과 `OAH_ANTHROPIC_API_KEY`(우선) 또는 `ANTHROPIC_API_KEY`. 모두 `.env` 가능. `LLM_CACHE=0`(캐시 끄기), `HARNESS_DB`(API·스크립트의 DB 경로), `HOST`·`PORT`(API 서버) |
 
 설치:
 
@@ -625,7 +636,7 @@ pip install -e "/path/to/optimization-agent-harness[dev]"  # 편집 모드 + 테
 
 ```bash
 pip install -e ".[dev,workflow]"         # workflow: LangGraph 화면 (재사용 대상 아님, 선택)
-pytest                                   # 171개, LLM·네트워크 없음 (약 50초). LangGraph가 없으면 4개는 건너뜀
+pytest                                   # 469개 (2026-11-02), LLM·네트워크 없음 (수 분). LangGraph가 없으면 일부는 건너뜀
 python examples/reuse_quickstart.py      # 재사용 확인
 (cd web && npm ci && npm run build)      # 프런트엔드 (재사용 대상 아님)
 ```
